@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS inventory_runs (
   request_id TEXT NOT NULL REFERENCES requests(id),
   fo_task_id TEXT NOT NULL UNIQUE REFERENCES fo_tasks(id),
   client_request_id TEXT NOT NULL UNIQUE,
+  reference TEXT NOT NULL UNIQUE,
+  search_items_json TEXT NOT NULL, -- the C1..Cn -> item mapping sent to Fo, needed to parse its reply
   open INTEGER NOT NULL DEFAULT 1,
   parse_status TEXT CHECK (parse_status IN ('parsed', 'partial', 'malformed')),
   parse_notes TEXT,
@@ -125,7 +127,7 @@ CREATE TABLE IF NOT EXISTS dispatches (
   reference TEXT NOT NULL UNIQUE,
   fo_task_id TEXT NOT NULL UNIQUE REFERENCES fo_tasks(id),
   open INTEGER NOT NULL DEFAULT 1,
-  outcome TEXT CHECK (outcome IN ('reported_sent', 'verified_sent', 'not_sent', 'unclear')),
+  outcome TEXT CHECK (outcome IN ('reported_sent', 'verified_sent', 'not_sent')),
   stop_requested_at TEXT,
   reconciled_at TEXT,
   reconcile_note TEXT,
@@ -277,6 +279,8 @@ export interface InventoryRunRow {
   request_id: string;
   fo_task_id: string;
   client_request_id: string;
+  reference: string;
+  search_items_json: string;
   open: number;
   parse_status: "parsed" | "partial" | "malformed" | null;
   parse_notes: string | null;
@@ -316,7 +320,7 @@ export interface DispatchRow {
   reference: string;
   fo_task_id: string;
   open: number;
-  outcome: "reported_sent" | "verified_sent" | "not_sent" | "unclear" | null;
+  outcome: "reported_sent" | "verified_sent" | "not_sent" | null;
   stop_requested_at: string | null;
   reconciled_at: string | null;
   reconcile_note: string | null;

@@ -2,16 +2,8 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { all, now, one, run, tx, type Db, type FoTaskRow, type TaskState } from "../db.ts";
 import { isWaitingForUser } from "../domain/outreach.ts";
+import { conflict } from "../errors.ts";
 import { FoCallError, type FoClient, type FoReply } from "./types.ts";
-
-export class ConflictError extends Error {
-  readonly status: number;
-  constructor(message: string, status = 409) {
-    super(message);
-    this.name = "ConflictError";
-    this.status = status;
-  }
-}
 
 /** Domain logic plugged into the engine. Both hooks run inside the engine's transaction. */
 export interface TaskHandler {
@@ -82,7 +74,7 @@ export class FoEngine {
 
   /**
    * Sends the user's answer when Fo is waiting for it: the documented continuation flow. Throws a
-   * ConflictError if Fo isn't waiting, so a double-submitted answer is never sent twice.
+   * 409 conflict if Fo isn't waiting, so a double-submitted answer is never sent twice.
    */
   continue(taskId: string, message: string): Promise<void> {
     const conversationId = tx(this.db, () => {
@@ -94,7 +86,7 @@ export class FoEngine {
       this.notify(taskId);
       return task.conversation_id;
     });
-    if (!conversationId) throw new ConflictError("Fo isn't waiting for an answer on this right now.");
+    if (!conversationId) throw conflict("Fo isn't waiting for an answer on this right now.");
     return this.track(this.ask(taskId, { message, conversationId }));
   }
 
@@ -191,7 +183,7 @@ export class FoEngine {
   /** The user chose to keep waiting after the long-running pause, or after reconnecting Fo. */
   resumePolling(taskId: string): void {
     const n = run(this.db, "UPDATE fo_tasks SET poll_paused = 0, poll_error = NULL, ask_started_at = ?, updated_at = ? WHERE id = ? AND state = 'working'", now(), now(), taskId);
-    if (n !== 1) throw new ConflictError("Fo isn't working on this right now.");
+    if (n !== 1) throw conflict("Fo isn't working on this right now.");
     this.ensurePolling(taskId);
   }
 
@@ -220,7 +212,7 @@ export class FoEngine {
    */
   async reconcile(taskId: string, reference: string): Promise<{ found: boolean; note: string }> {
     const task = getTask(this.db, taskId);
-    if (!task || task.state !== "uncertain") throw new ConflictError("Only an uncertain request can be checked.");
+    if (!task || task.state !== "uncertain") throw conflict("Only an uncertain request can be checked.");
     let conversationId = task.conversation_id;
     let searched = 0;
     if (!conversationId) {
