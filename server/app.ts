@@ -166,6 +166,8 @@ export function createApp(deps: AppDeps) {
      * file back before deciding), executing plans resume, Fo tasks recover, watches restart.
      */
     recover() {
+      // A workspace from the other mode (e.g. a mock rehearsal) can't be reached now; set it aside.
+      run(db, "UPDATE workspaces SET active = 0 WHERE active = 1 AND mode <> ?", drive.mode);
       jobs.recover();
       ctx.engine.recover();
       run(db, "UPDATE plan_ops SET state = 'uncertain', error = 'Kiki restarted during this step; she will check Drive before doing anything.' WHERE state = 'running'");
