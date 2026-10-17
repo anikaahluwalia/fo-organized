@@ -72,3 +72,13 @@ export interface DriveAdapter {
   createFile(input: { id?: string; name: string; parentId: string; mimeType: string; content: Buffer | string }): Promise<DriveFile>;
   updateContent(id: string, mimeType: string, content: Buffer | string): Promise<DriveFile>;
 }
+
+/**
+ * What Kiki compares to tell whether someone changed a file since she looked: the content
+ * fingerprint (md5 for uploaded files, modified time for Google Docs). Drive's own "version"
+ * counter also moves for background processing (e.g. right after an upload), which would make
+ * safe operations look stale. Renames and moves are checked separately by name and parent.
+ */
+export function changeToken(f: DriveFile): string | null {
+  return f.contentKey ?? f.version;
+}

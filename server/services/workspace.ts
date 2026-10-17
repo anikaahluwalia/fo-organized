@@ -6,7 +6,7 @@ import { CATEGORY } from "../domain/naming.ts";
 import { join } from "../domain/plan.ts";
 import { badRequest, conflict } from "../errors.ts";
 import { localText, ReadError } from "../extractor.ts";
-import { DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } from "../google/types.ts";
+import { changeToken, DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } from "../google/types.ts";
 import type { Ctx } from "./context.ts";
 
 export function activeWorkspace(db: Db): WorkspaceRow | undefined {
@@ -44,7 +44,7 @@ function upsertFile(db: Db, wsId: string, f: DriveFile, path: string, origin: Fi
     f.mimeType,
     f.parents[0] ?? null,
     path,
-    f.version,
+    changeToken(f),
     f.modifiedTime,
     f.createdTime,
     f.size,
@@ -201,7 +201,7 @@ export async function runInventory(ctx: Ctx, wsId: string): Promise<{ seen: numb
       for (const { file, path } of found.values()) {
         const prev = before.get(file.id);
         if (!prev) added++;
-        else if (prev.name !== file.name || prev.path !== path || prev.version !== file.version) changed++;
+        else if (prev.name !== file.name || prev.path !== path || prev.version !== changeToken(file)) changed++;
         recordFile(ctx.db, wsId, file, path, prev?.origin ?? null);
       }
       run(ctx.db, "UPDATE inventory_runs SET status = 'done', finished_at = ?, files_seen = ?, new_files = ?, changed_files = ? WHERE id = ?", now(), found.size, added, changed, runId);

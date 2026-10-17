@@ -1,6 +1,6 @@
 import { logEvent, now, one, run, tx, type DocumentRow, type PlanOpRow, type PlanRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
 import { CATEGORY } from "../domain/naming.ts";
-import { DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } from "../google/types.ts";
+import { changeToken, DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } from "../google/types.ts";
 import type { Ctx } from "./context.ts";
 import { buildIndexCsv } from "./indexfile.ts";
 import { planOps } from "./plans.ts";
@@ -180,7 +180,7 @@ class Execution {
         check.id,
         check.name,
         parentId,
-        check.version,
+        changeToken(check),
         now(),
       );
     });
@@ -196,7 +196,7 @@ class Execution {
     }
     // Already in the target state: a previous attempt went through.
     if (live.name === op.new_name && live.parents[0] === destId) return this.verify(op, live, destId);
-    if (live.name !== op.pre_name || (live.parents[0] ?? null) !== op.pre_parent_id || live.version !== op.pre_version) {
+    if (live.name !== op.pre_name || (live.parents[0] ?? null) !== op.pre_parent_id || changeToken(live) !== op.pre_version) {
       this.set(op, "stale", { error: describeDrift(op, live) });
       throw new StopPlan();
     }
@@ -241,7 +241,7 @@ class Execution {
       return;
     }
     tx(this.ctx.db, () => {
-      this.set(op, "verified", { result: { name: after.name, parentId: destId, version: after.version } });
+      this.set(op, "verified", { result: { name: after.name, parentId: destId, version: changeToken(after) } });
       run(
         this.ctx.db,
         `INSERT OR IGNORE INTO change_log (workspace_id, plan_op_id, file_id, kind, before_name, before_parent_id, after_name, after_parent_id, after_version, applied_at)
@@ -253,7 +253,7 @@ class Execution {
         op.pre_parent_id,
         after.name,
         destId,
-        after.version,
+        changeToken(after),
         now(),
       );
       recordFile(this.ctx.db, this.ws.id, after, op.new_path ?? "", null);
@@ -303,7 +303,7 @@ class Execution {
     const csv = buildIndexCsv(this.ctx.db, project, now());
     let file: DriveFile | null = op.file_id ? await this.tryGet(op.file_id) : null;
     if (file) {
-      if (file.version !== op.pre_version) {
+      if (changeToken(file) !== op.pre_version) {
         this.set(op, "failed", { error: "Someone edited the index file since Kiki last wrote it, so she didn't overwrite it." });
         return;
       }
@@ -332,9 +332,9 @@ class Execution {
       return;
     }
     tx(this.ctx.db, () => {
-      run(this.ctx.db, "UPDATE projects SET index_file_id = ?, index_file_version = ? WHERE id = ?", check.id, check.version, project.id);
+      run(this.ctx.db, "UPDATE projects SET index_file_id = ?, index_file_version = ? WHERE id = ?", check.id, changeToken(check), project.id);
       recordFile(this.ctx.db, this.ws.id, check, op.folder_path ?? "", "created_by_kiki");
-      this.set(op, "verified", { result: { fileId: check.id, version: check.version, rows: csv.split("\r\n").length - 3 } });
+      this.set(op, "verified", { result: { fileId: check.id, version: changeToken(check), rows: csv.split("\r\n").length - 3 } });
     });
   }
 }

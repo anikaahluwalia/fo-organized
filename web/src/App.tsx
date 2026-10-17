@@ -543,6 +543,15 @@ export function App() {
         </div>
         <Integrations view={view} act={act} />
       </header>
+      {view.integrations.drive.missingScopes.length > 0 && (
+        <div className="notice notice--warn toast" role="alert">
+          <strong>Google didn't grant every permission Kiki needs.</strong>
+          <p>On Google's consent screen, tick every box. Disconnect isn't needed: just click Connect Google Drive again.</p>
+          <button className="btn btn--small" onClick={() => act.run("connect-google", async () => { const r = await post<{ authorizationUrl: string }>("/api/google/connect"); window.location.href = r.authorizationUrl; })}>
+            Connect Google Drive again
+          </button>
+        </div>
+      )}
       {flash && (
         <div className="notice notice--info toast" role="status">
           {flash}
