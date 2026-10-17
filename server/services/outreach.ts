@@ -221,7 +221,11 @@ export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<v
   const d = one<DispatchRow>(ctx.db, "SELECT * FROM dispatches WHERE fo_task_id = ?", taskId);
   let message = text;
   let wsId: string | null = null;
-  if (d) {
+  if (task.kind === "notify") {
+    message = `Answer from the user: ${text}
+
+Reminder: this is still only about sending me (the account holder) the exact text from my earlier message. Don't contact anyone else or take any other action. End your reply with exactly one of: KIKI-STATUS: SENT, KIKI-STATUS: NOT-SENT, KIKI-STATUS: NEED-INPUT.`;
+  } else if (d) {
     const v = getVersion(ctx.db, d.version_id);
     message = buildReplyMessage(text, contentOf(v), d.reference);
     wsId = v.workspace_id;

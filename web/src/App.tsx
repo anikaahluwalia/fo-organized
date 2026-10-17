@@ -363,8 +363,9 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
   );
 }
 
-function FoTextStatus({ n, mock }: { n: NotificationView; mock: boolean }) {
+function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; act: ReturnType<typeof useAction> }) {
   const fo = mock ? "Mock Fo" : "Fo";
+  const [answer, setAnswer] = useState("");
   const label =
     n.outcome === "reported_sent"
       ? `${fo} reports it texted you.`
@@ -382,7 +383,27 @@ function FoTextStatus({ n, mock }: { n: NotificationView; mock: boolean }) {
       <strong>{label}</strong>
       {n.text && <p className="hint">“{n.text}”</p>}
       {(n.question || n.failureDetail) && <p>{n.question ?? n.failureDetail}</p>}
+      {n.state === "working" && n.progress && <p>{n.progress}</p>}
       {mock && n.outcome === "reported_sent" && <p>Mock mode: no text was actually sent.</p>}
+      {n.state === "needs_user_input" && (
+        <form
+          className="stack"
+          style={{ marginTop: 8 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act.run("fo-answer", async () => {
+              await post(`/api/tasks/${n.taskId}/reply`, { answer });
+              setAnswer("");
+            });
+          }}
+        >
+          <label htmlFor={`ans-${n.taskId}`}>Answer {fo}</label>
+          <textarea id={`ans-${n.taskId}`} style={{ minHeight: 70 }} value={answer} onChange={(e) => setAnswer(e.target.value)} />
+          <button className="btn btn--primary" disabled={!answer.trim() || act.busy !== null}>
+            Send answer to {fo}
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -413,7 +434,7 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
           </span>
         </label>
       )}
-      {view.notifications[0] && (proposed || running) && <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} />}
+      {view.notifications[0] && (proposed || running || view.notifications[0].state !== "complete") && <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} act={act} />}
       {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
       {view.workspace && !proposed && !running && (
         <div className="stack">

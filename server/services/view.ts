@@ -370,7 +370,8 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       }))
     : [];
 
-  const notifications = all<FoTaskRow>(db, "SELECT * FROM fo_tasks WHERE kind = 'notify' ORDER BY created_at DESC LIMIT 10").map((t) => ({
+  // Only this workspace's notes, in the current Fo mode (a mock rehearsal's notes don't show here).
+  const notifications = all<FoTaskRow>(db, "SELECT * FROM fo_tasks WHERE kind = 'notify' AND mode = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10", integrations.fo.mode, ws.created_at).map((t) => ({
     taskId: t.id,
     mode: t.mode,
     state: t.state,
