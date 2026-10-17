@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="148 218 920 740" role="img" aria-label="Kiki, a pink blob with a paperclip">
+  <title>Kiki</title>
+  <!-- Editable SVG interpretation of assets/kiki-approved.png. Coordinates are in the PNG's pixel space. -->
+  <g id="silhouette">
+    <path fill="#F59FAC" d="M1045 600C1047 646 1045 697 1029 740C1014 782 985 826 952 855C918 885 870 902 829 916C789 929 747 930 709 934C670 938 636 938 600 939C564 940 529 941 490 938C451 935 408 933 368 919C328 905 281 885 250 854C219 824 194 779 181 736C167 694 166 644 169 600C172 556 182 509 199 470C216 430 241 390 271 361C300 331 340 309 377 293C413 276 454 270 491 264C528 257 563 255 600 254C637 252 671 255 711 258C752 260 804 251 842 267C881 282 914 318 943 351C972 384 999 423 1016 465C1033 506 1043 554 1045 600Z"/>
+  </g>
+  <g id="left-eye">
+    <ellipse cx="412" cy="622" rx="39" ry="52" fill="#3A2620"/>
+  </g>
+  <g id="right-eye">
+    <ellipse cx="787" cy="604" rx="39" ry="52" fill="#3A2620"/>
+  </g>
+  <g id="mouth">
+    <path d="M585 710C612 711 640 700 668 666" fill="none" stroke="#3A2620" stroke-width="22" stroke-linecap="round"/>
+  </g>
+  <g id="paperclip" transform="translate(895.7 344.4) rotate(-43.3) translate(0 -129)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 184V44A34 34 0 0 0 -34 44V214A34 34 0 0 0 34 214V198" stroke="#3A2620" stroke-width="28"/>
+    <path d="M34 184V44A34 34 0 0 0 -34 44V214A34 34 0 0 0 34 214V198" stroke="#FCF3E2" stroke-width="16"/>
+    <path d="M45 184A11 11 0 0 1 23 184" stroke="#3A2620" stroke-width="6" stroke-linecap="butt"/>
+    <path d="M-6 80V168" stroke="#3A2620" stroke-width="28"/>
+    <path d="M-6 80V168" stroke="#FCF3E2" stroke-width="16"/>
+  </g>
+</svg>
