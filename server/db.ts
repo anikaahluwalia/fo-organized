@@ -9,51 +9,208 @@ CREATE TABLE IF NOT EXISTS kv (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS requests (
-  id TEXT PRIMARY KEY,
-  created_at TEXT NOT NULL,
-  input_kind TEXT NOT NULL CHECK (input_kind IN ('pasted', 'demo')),
-  demo_key TEXT,
-  raw_text TEXT NOT NULL,
-  trusted_domain TEXT,
-  trusted_source TEXT,
-  extraction_status TEXT NOT NULL CHECK (extraction_status IN ('running', 'ready', 'failed')),
-  extraction_mode TEXT CHECK (extraction_mode IN ('live', 'mock')),
-  extraction_json TEXT,
-  extraction_error TEXT,
-  checklist_confirmed_at TEXT,
-  risk_json TEXT,
-  risk_reviewed_at TEXT,
-  risk_review_note TEXT
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id TEXT,
+  at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS checklist_items (
+-- The one Drive folder Kiki is allowed to organize (MVP: a single active workspace).
+CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY,
-  request_id TEXT NOT NULL REFERENCES requests(id),
-  position INTEGER NOT NULL,
-  label TEXT NOT NULL,
-  category TEXT NOT NULL DEFAULT 'other',
-  source_quote TEXT,
-  quote_found INTEGER NOT NULL DEFAULT 0,
-  involves_other_person INTEGER NOT NULL DEFAULT 0,
-  origin TEXT NOT NULL CHECK (origin IN ('extracted', 'user')),
-  removed INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'not_searched'
-    CHECK (status IN ('not_searched', 'candidate', 'confirmed', 'missing', 'needs_review')),
-  status_reason TEXT,
-  candidates_json TEXT,
+  root_file_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  drive_id TEXT,
+  mode TEXT NOT NULL CHECK (mode IN ('live', 'mock')),
+  origin TEXT NOT NULL CHECK (origin IN ('selected', 'staged_demo')),
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  last_inventory_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_workspace ON workspaces(active) WHERE active = 1;
+
+-- Latest read-only inventory of everything under the workspace root.
+CREATE TABLE IF NOT EXISTS files (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  file_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  parent_id TEXT,
+  path TEXT NOT NULL,
+  version TEXT,
+  modified_time TEXT,
+  created_time TEXT,
+  size INTEGER,
+  is_folder INTEGER NOT NULL,
+  is_shortcut INTEGER NOT NULL,
+  can_rename INTEGER NOT NULL,
+  can_move INTEGER NOT NULL,
+  can_add_children INTEGER NOT NULL,
+  web_link TEXT,
+  origin TEXT NOT NULL DEFAULT 'found' CHECK (origin IN ('found', 'staged_demo', 'supplied_by_user', 'created_by_kiki')),
+  present INTEGER NOT NULL DEFAULT 1,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, file_id)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_runs (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL CHECK (status IN ('running', 'done', 'failed')),
+  files_seen INTEGER,
+  new_files INTEGER,
+  changed_files INTEGER,
+  error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  category TEXT NOT NULL,
+  name TEXT NOT NULL,
+  index_file_id TEXT,
+  index_file_version TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (workspace_id, category, name)
+);
+
+-- The project/document index. Facts come only from content Kiki could read.
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  file_id TEXT NOT NULL,
+  project_id TEXT REFERENCES projects(id),
+  doc_type TEXT NOT NULL DEFAULT 'unknown',
+  facts_json TEXT,
+  read_status TEXT NOT NULL DEFAULT 'pending' CHECK (read_status IN ('pending', 'reading', 'read', 'unreadable', 'failed')),
+  read_mode TEXT CHECK (read_mode IN ('live', 'mock')),
+  read_error TEXT,
+  read_file_version TEXT,
+  -- Version status for quotes: identified as current, superseded, still open, or just proposed.
+  version_status TEXT CHECK (version_status IN ('proposed', 'current', 'superseded', 'unresolved')),
+  supersedes_id TEXT REFERENCES documents(id),
+  -- The user accepted this quote's price. Separate from "current" on purpose.
+  accepted_at TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE (workspace_id, file_id)
+);
+
+CREATE TABLE IF NOT EXISTS version_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id TEXT NOT NULL REFERENCES documents(id),
+  kind TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  evidence_json TEXT,
+  plan_id TEXT,
+  at TEXT NOT NULL
+);
+
+-- Proposed changes. Every edit is a new version in the same series; approvals bind to one version.
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  series_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('organize', 'version_update', 'undo')),
+  status TEXT NOT NULL
+    CHECK (status IN ('proposed', 'approved', 'executing', 'applied', 'partial', 'stale', 'failed', 'superseded', 'discarded')),
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  details_json TEXT,
+  source_json TEXT,
+  created_at TEXT NOT NULL,
+  approved_at TEXT,
+  finished_at TEXT,
+  UNIQUE (series_id, version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_plan_per_series ON plans(series_id) WHERE status IN ('proposed', 'approved', 'executing');
+CREATE UNIQUE INDEX IF NOT EXISTS one_executing_plan_per_workspace ON plans(workspace_id) WHERE status = 'executing';
+
+CREATE TABLE IF NOT EXISTS plan_ops (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id),
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('create_folder', 'move_rename', 'set_status', 'write_index')),
+  file_id TEXT,
+  doc_id TEXT,
+  folder_path TEXT,
+  parent_ref TEXT,
+  new_name TEXT,
+  pre_name TEXT,
+  pre_parent_id TEXT,
+  pre_version TEXT,
+  pre_path TEXT,
+  new_path TEXT,
+  pre_status TEXT,
+  target_status TEXT,
+  target_supersedes_id TEXT,
+  reason TEXT NOT NULL,
+  evidence_json TEXT,
+  depends_on TEXT,
+  generated_id TEXT,
+  state TEXT NOT NULL DEFAULT 'pending'
+    CHECK (state IN ('pending', 'running', 'verified', 'failed', 'stale', 'skipped', 'uncertain', 'excluded')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  result_json TEXT,
+  error TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  UNIQUE (plan_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS plan_approvals (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL UNIQUE REFERENCES plans(id),
+  content_hash TEXT NOT NULL,
+  client_request_id TEXT NOT NULL UNIQUE,
+  approved_at TEXT NOT NULL
+);
+
+-- Original and resulting name/parent for every verified Drive change, for undo.
+CREATE TABLE IF NOT EXISTS change_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id TEXT NOT NULL,
+  plan_op_id TEXT NOT NULL UNIQUE REFERENCES plan_ops(id),
+  file_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  before_name TEXT,
+  before_parent_id TEXT,
+  after_name TEXT NOT NULL,
+  after_parent_id TEXT,
+  after_version TEXT,
+  applied_at TEXT NOT NULL,
+  undone_by_op_id TEXT
+);
+
+-- Durable background work. dedupe_key keeps one row per logical job.
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  payload_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'done', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  run_after TEXT NOT NULL,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
--- One Fo conversation driven by the app: a read-only inventory search or one email dispatch.
+-- One Fo conversation driven by the app.
 CREATE TABLE IF NOT EXISTS fo_tasks (
   id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL CHECK (kind IN ('inventory', 'dispatch')),
+  kind TEXT NOT NULL,
   mode TEXT NOT NULL CHECK (mode IN ('live', 'mock')),
   state TEXT NOT NULL
     CHECK (state IN ('pending', 'asking', 'working', 'needs_user_input', 'complete', 'failed', 'uncertain')),
-  conversation_id TEXT,          -- server-issued by Fo; never sent to the browser
-  ask_started_at TEXT,           -- written before every ask_fo call, so a crash mid-call is detectable
+  conversation_id TEXT,
+  ask_started_at TEXT,
   progress TEXT,
   elapsed_seconds INTEGER,
   question TEXT,
@@ -66,7 +223,6 @@ CREATE TABLE IF NOT EXISTS fo_tasks (
   updated_at TEXT NOT NULL
 );
 
--- Evidence: every message sent to Fo and every reply or error, verbatim.
 CREATE TABLE IF NOT EXISTS fo_turns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL REFERENCES fo_tasks(id),
@@ -77,73 +233,92 @@ CREATE TABLE IF NOT EXISTS fo_turns (
   text TEXT
 );
 
-CREATE TABLE IF NOT EXISTS inventory_runs (
+-- Outreach drafts: every edit is a new immutable version.
+CREATE TABLE IF NOT EXISTS outreach_versions (
   id TEXT PRIMARY KEY,
-  request_id TEXT NOT NULL REFERENCES requests(id),
-  fo_task_id TEXT NOT NULL UNIQUE REFERENCES fo_tasks(id),
-  client_request_id TEXT NOT NULL UNIQUE,
-  reference TEXT NOT NULL UNIQUE,
-  search_items_json TEXT NOT NULL, -- the C1..Cn -> item mapping sent to Fo, needed to parse its reply
-  open INTEGER NOT NULL DEFAULT 1,
-  parse_status TEXT CHECK (parse_status IN ('parsed', 'partial', 'malformed')),
-  parse_notes TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS one_open_inventory_per_request ON inventory_runs(request_id) WHERE open = 1;
-
--- Every edit of an outreach draft is a new immutable version.
-CREATE TABLE IF NOT EXISTS action_versions (
-  id TEXT PRIMARY KEY,
-  request_id TEXT NOT NULL REFERENCES requests(id),
-  item_id TEXT NOT NULL REFERENCES checklist_items(id),
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  document_id TEXT NOT NULL REFERENCES documents(id),
   version INTEGER NOT NULL,
-  channel TEXT NOT NULL CHECK (channel = 'email'),
   recipient_name TEXT NOT NULL,
   recipient_email TEXT NOT NULL,
+  consent_confirmed INTEGER NOT NULL DEFAULT 0,
+  purpose TEXT NOT NULL,
   subject TEXT NOT NULL,
   body TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
   superseded_at TEXT,
-  UNIQUE (item_id, version)
+  UNIQUE (document_id, version)
 );
 
--- An approval is bound to one version and the hash of exactly what the user saw.
-CREATE TABLE IF NOT EXISTS approvals (
+CREATE TABLE IF NOT EXISTS outreach_approvals (
   id TEXT PRIMARY KEY,
-  action_version_id TEXT NOT NULL REFERENCES action_versions(id),
+  version_id TEXT NOT NULL REFERENCES outreach_versions(id),
   content_hash TEXT NOT NULL,
-  approved_at TEXT NOT NULL,
-  risk_review_acknowledged INTEGER NOT NULL DEFAULT 0
+  approved_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS dispatches (
   id TEXT PRIMARY KEY,
-  item_id TEXT NOT NULL REFERENCES checklist_items(id),
-  action_version_id TEXT NOT NULL REFERENCES action_versions(id),
-  approval_id TEXT NOT NULL UNIQUE REFERENCES approvals(id),
+  document_id TEXT NOT NULL REFERENCES documents(id),
+  version_id TEXT NOT NULL REFERENCES outreach_versions(id),
+  approval_id TEXT NOT NULL UNIQUE REFERENCES outreach_approvals(id),
   attempt INTEGER NOT NULL,
   client_request_id TEXT NOT NULL UNIQUE,
   reference TEXT NOT NULL UNIQUE,
   fo_task_id TEXT NOT NULL UNIQUE REFERENCES fo_tasks(id),
   open INTEGER NOT NULL DEFAULT 1,
-  outcome TEXT CHECK (outcome IN ('reported_sent', 'verified_sent', 'not_sent')),
+  outcome TEXT CHECK (outcome IN ('reported_sent', 'not_sent')),
   stop_requested_at TEXT,
   reconciled_at TEXT,
   reconcile_note TEXT,
   retired_at TEXT,
   created_at TEXT NOT NULL,
-  UNIQUE (action_version_id, attempt)
+  UNIQUE (version_id, attempt)
 );
--- At most one dispatch per checklist item can be in flight or unresolved at a time.
-CREATE UNIQUE INDEX IF NOT EXISTS one_open_dispatch_per_item ON dispatches(item_id) WHERE open = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_dispatch_per_document ON dispatches(document_id) WHERE open = 1;
 
-CREATE TABLE IF NOT EXISTS events (
+-- A Fo conversation Kiki follows after an approved dispatch, to pick up its outcome.
+CREATE TABLE IF NOT EXISTS watches (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  dispatch_id TEXT NOT NULL UNIQUE REFERENCES dispatches(id),
+  conversation_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('watching', 'paused', 'closed')),
+  checks INTEGER NOT NULL DEFAULT 0,
+  last_checked_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS observed_turns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  request_id TEXT,
-  at TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  message TEXT NOT NULL
+  watch_id TEXT NOT NULL REFERENCES watches(id),
+  turn_key TEXT NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  at TEXT,
+  source TEXT NOT NULL CHECK (source IN ('fo_conversation', 'pasted_by_user')),
+  baseline INTEGER NOT NULL DEFAULT 0,
+  observed_at TEXT NOT NULL,
+  UNIQUE (watch_id, turn_key)
+);
+
+CREATE TABLE IF NOT EXISTS outcomes (
+  id TEXT PRIMARY KEY,
+  watch_id TEXT NOT NULL REFERENCES watches(id),
+  turn_id INTEGER NOT NULL UNIQUE REFERENCES observed_turns(id),
+  interpretation_json TEXT,
+  interpreter_mode TEXT CHECK (interpreter_mode IN ('live', 'mock')),
+  status TEXT NOT NULL
+    CHECK (status IN ('interpreting', 'no_outcome', 'needs_clarification', 'proposed', 'resolved', 'dismissed', 'failed')),
+  question TEXT,
+  candidates_json TEXT,
+  chosen_document_id TEXT,
+  plan_series_id TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 `;
 
@@ -159,6 +334,7 @@ export function openDb(file: string): Db {
 
 /** Run fn inside BEGIN IMMEDIATE ... COMMIT. fn must be synchronous: no awaits inside a transaction. */
 export function tx<T>(db: Db, fn: () => T): T {
+  if (db.isTransaction) return fn();
   db.exec("BEGIN IMMEDIATE");
   try {
     const result = fn();
@@ -200,46 +376,178 @@ export function kvSet(db: Db, key: string, value: string | undefined): void {
     run(db, "INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", key, value, now());
 }
 
-export function logEvent(db: Db, requestId: string | null, kind: string, message: string): void {
-  run(db, "INSERT INTO events (request_id, at, kind, message) VALUES (?, ?, ?, ?)", requestId, now(), kind, message);
+export function logEvent(db: Db, workspaceId: string | null, kind: string, message: string): void {
+  run(db, "INSERT INTO events (workspace_id, at, kind, message) VALUES (?, ?, ?, ?)", workspaceId, now(), kind, message);
 }
 
 // Row shapes ------------------------------------------------------------------------------
 
-export interface RequestRow {
+export interface WorkspaceRow {
   id: string;
+  root_file_id: string;
+  name: string;
+  drive_id: string | null;
+  mode: "live" | "mock";
+  origin: "selected" | "staged_demo";
+  active: number;
   created_at: string;
-  input_kind: "pasted" | "demo";
-  demo_key: string | null;
-  raw_text: string;
-  trusted_domain: string | null;
-  trusted_source: string | null;
-  extraction_status: "running" | "ready" | "failed";
-  extraction_mode: "live" | "mock" | null;
-  extraction_json: string | null;
-  extraction_error: string | null;
-  checklist_confirmed_at: string | null;
-  risk_json: string | null;
-  risk_reviewed_at: string | null;
-  risk_review_note: string | null;
+  last_inventory_at: string | null;
 }
 
-export type ItemStatus = "not_searched" | "candidate" | "confirmed" | "missing" | "needs_review";
+export type FileOrigin = "found" | "staged_demo" | "supplied_by_user" | "created_by_kiki";
 
-export interface ItemRow {
+export interface FileRow {
+  workspace_id: string;
+  file_id: string;
+  name: string;
+  mime_type: string;
+  parent_id: string | null;
+  path: string;
+  version: string | null;
+  modified_time: string | null;
+  created_time: string | null;
+  size: number | null;
+  is_folder: number;
+  is_shortcut: number;
+  can_rename: number;
+  can_move: number;
+  can_add_children: number;
+  web_link: string | null;
+  origin: FileOrigin;
+  present: number;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+export interface InventoryRunRow {
   id: string;
-  request_id: string;
-  position: number;
-  label: string;
+  workspace_id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: "running" | "done" | "failed";
+  files_seen: number | null;
+  new_files: number | null;
+  changed_files: number | null;
+  error: string | null;
+}
+
+export interface ProjectRow {
+  id: string;
+  workspace_id: string;
   category: string;
-  source_quote: string | null;
-  quote_found: number;
-  involves_other_person: number;
-  origin: "extracted" | "user";
-  removed: number;
-  status: ItemStatus;
-  status_reason: string | null;
-  candidates_json: string | null;
+  name: string;
+  index_file_id: string | null;
+  index_file_version: string | null;
+  created_at: string;
+}
+
+export type VersionStatus = "proposed" | "current" | "superseded" | "unresolved";
+
+export interface DocumentRow {
+  id: string;
+  workspace_id: string;
+  file_id: string;
+  project_id: string | null;
+  doc_type: string;
+  facts_json: string | null;
+  read_status: "pending" | "reading" | "read" | "unreadable" | "failed";
+  read_mode: "live" | "mock" | null;
+  read_error: string | null;
+  read_file_version: string | null;
+  version_status: VersionStatus | null;
+  supersedes_id: string | null;
+  accepted_at: string | null;
+  updated_at: string;
+}
+
+export interface VersionEventRow {
+  id: number;
+  document_id: string;
+  kind: string;
+  detail: string;
+  evidence_json: string | null;
+  plan_id: string | null;
+  at: string;
+}
+
+export type PlanKind = "organize" | "version_update" | "undo";
+export type PlanStatus = "proposed" | "approved" | "executing" | "applied" | "partial" | "stale" | "failed" | "superseded" | "discarded";
+
+export interface PlanRow {
+  id: string;
+  workspace_id: string;
+  series_id: string;
+  version: number;
+  kind: PlanKind;
+  status: PlanStatus;
+  title: string;
+  summary: string;
+  content_hash: string;
+  details_json: string | null;
+  source_json: string | null;
+  created_at: string;
+  approved_at: string | null;
+  finished_at: string | null;
+}
+
+export type OpKind = "create_folder" | "move_rename" | "set_status" | "write_index";
+export type OpState = "pending" | "running" | "verified" | "failed" | "stale" | "skipped" | "uncertain" | "excluded";
+
+export interface PlanOpRow {
+  id: string;
+  plan_id: string;
+  seq: number;
+  kind: OpKind;
+  file_id: string | null;
+  doc_id: string | null;
+  folder_path: string | null;
+  parent_ref: string | null;
+  new_name: string | null;
+  pre_name: string | null;
+  pre_parent_id: string | null;
+  pre_version: string | null;
+  pre_path: string | null;
+  new_path: string | null;
+  pre_status: string | null;
+  target_status: string | null;
+  target_supersedes_id: string | null;
+  reason: string;
+  evidence_json: string | null;
+  depends_on: string | null;
+  generated_id: string | null;
+  state: OpState;
+  attempts: number;
+  result_json: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface ChangeLogRow {
+  id: number;
+  workspace_id: string;
+  plan_op_id: string;
+  file_id: string;
+  kind: string;
+  before_name: string | null;
+  before_parent_id: string | null;
+  after_name: string;
+  after_parent_id: string | null;
+  after_version: string | null;
+  applied_at: string;
+  undone_by_op_id: string | null;
+}
+
+export interface JobRow {
+  id: string;
+  kind: string;
+  dedupe_key: string;
+  payload_json: string;
+  state: "queued" | "running" | "done" | "failed";
+  attempts: number;
+  run_after: string;
+  last_error: string | null;
+  created_at: string;
   updated_at: string;
 }
 
@@ -247,7 +555,7 @@ export type TaskState = "pending" | "asking" | "working" | "needs_user_input" | 
 
 export interface FoTaskRow {
   id: string;
-  kind: "inventory" | "dispatch";
+  kind: string;
   mode: "live" | "mock";
   state: TaskState;
   conversation_id: string | null;
@@ -274,27 +582,15 @@ export interface FoTurnRow {
   text: string | null;
 }
 
-export interface InventoryRunRow {
+export interface OutreachVersionRow {
   id: string;
-  request_id: string;
-  fo_task_id: string;
-  client_request_id: string;
-  reference: string;
-  search_items_json: string;
-  open: number;
-  parse_status: "parsed" | "partial" | "malformed" | null;
-  parse_notes: string | null;
-  created_at: string;
-}
-
-export interface ActionVersionRow {
-  id: string;
-  request_id: string;
-  item_id: string;
+  workspace_id: string;
+  document_id: string;
   version: number;
-  channel: "email";
   recipient_name: string;
   recipient_email: string;
+  consent_confirmed: number;
+  purpose: string;
   subject: string;
   body: string;
   content_hash: string;
@@ -302,25 +598,24 @@ export interface ActionVersionRow {
   superseded_at: string | null;
 }
 
-export interface ApprovalRow {
+export interface OutreachApprovalRow {
   id: string;
-  action_version_id: string;
+  version_id: string;
   content_hash: string;
   approved_at: string;
-  risk_review_acknowledged: number;
 }
 
 export interface DispatchRow {
   id: string;
-  item_id: string;
-  action_version_id: string;
+  document_id: string;
+  version_id: string;
   approval_id: string;
   attempt: number;
   client_request_id: string;
   reference: string;
   fo_task_id: string;
   open: number;
-  outcome: "reported_sent" | "verified_sent" | "not_sent" | null;
+  outcome: "reported_sent" | "not_sent" | null;
   stop_requested_at: string | null;
   reconciled_at: string | null;
   reconcile_note: string | null;
@@ -328,9 +623,51 @@ export interface DispatchRow {
   created_at: string;
 }
 
+export interface WatchRow {
+  id: string;
+  workspace_id: string;
+  dispatch_id: string;
+  conversation_id: string;
+  state: "watching" | "paused" | "closed";
+  checks: number;
+  last_checked_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface ObservedTurnRow {
+  id: number;
+  watch_id: string;
+  turn_key: string;
+  role: string;
+  text: string;
+  at: string | null;
+  source: "fo_conversation" | "pasted_by_user";
+  baseline: number;
+  observed_at: string;
+}
+
+export type OutcomeStatus = "interpreting" | "no_outcome" | "needs_clarification" | "proposed" | "resolved" | "dismissed" | "failed";
+
+export interface OutcomeRow {
+  id: string;
+  watch_id: string;
+  turn_id: number;
+  interpretation_json: string | null;
+  interpreter_mode: "live" | "mock" | null;
+  status: OutcomeStatus;
+  question: string | null;
+  candidates_json: string | null;
+  chosen_document_id: string | null;
+  plan_series_id: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EventRow {
   id: number;
-  request_id: string | null;
+  workspace_id: string | null;
   at: string;
   kind: string;
   message: string;

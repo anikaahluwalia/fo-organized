@@ -20,7 +20,7 @@ export interface EngineOptions {
   backoffBaseMs?: number;
 }
 
-export function insertTask(db: Db, kind: FoTaskRow["kind"], mode: FoTaskRow["mode"]): string {
+export function insertTask(db: Db, kind: string, mode: FoTaskRow["mode"]): string {
   const id = randomUUID();
   const at = now();
   run(db, "INSERT INTO fo_tasks (id, kind, mode, state, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)", id, kind, mode, at, at);
@@ -39,7 +39,7 @@ export function getTask(db: Db, id: string): FoTaskRow | undefined {
 export class FoEngine {
   private readonly db: Db;
   private readonly fo: FoClient;
-  private readonly handlers: Record<FoTaskRow["kind"], TaskHandler>;
+  private readonly handlers: Record<string, TaskHandler>;
   private readonly pollWaitSeconds: number;
   private readonly maxWorkingMs: number;
   private readonly backoffBaseMs: number;
@@ -47,7 +47,7 @@ export class FoEngine {
   private readonly background = new Set<Promise<unknown>>();
   private stopped = false;
 
-  constructor(db: Db, fo: FoClient, handlers: Record<FoTaskRow["kind"], TaskHandler>, options: EngineOptions = {}) {
+  constructor(db: Db, fo: FoClient, handlers: Record<string, TaskHandler>, options: EngineOptions = {}) {
     this.db = db;
     this.fo = fo;
     this.handlers = handlers;
@@ -70,6 +70,36 @@ export class FoEngine {
     });
     if (!claimed) return Promise.resolve();
     return this.track(this.ask(taskId, { message, newConversation: true }));
+  }
+
+  /**
+   * Starts a pending task as a follow-up inside an existing, app-mapped conversation. Checks first
+   * (read-only) that Fo isn't mid-turn there: a new message never goes into a working turn.
+   */
+  async startInConversation(taskId: string, conversationId: string, message: string): Promise<void> {
+    let status: FoReply;
+    try {
+      status = await this.fo.getFoReply({ conversationId, waitSeconds: 0 });
+    } catch (err) {
+      const detail = `Couldn't check the conversation first, so nothing was sent (${err instanceof Error ? err.message : String(err)}).`;
+      tx(this.db, () => this.setState(taskId, "failed", { failure_kind: "not_started", failure_detail: detail }));
+      throw err;
+    }
+    if (status.status === "working") {
+      tx(this.db, () => this.setState(taskId, "failed", { failure_kind: "not_started", failure_detail: "Fo was still working in this conversation, so nothing was sent. Try again when it's done." }));
+      throw conflict("Fo is still working in this conversation. Try again when it's done.");
+    }
+    const claimed = tx(this.db, () => {
+      const at = now();
+      const n = run(this.db, "UPDATE fo_tasks SET state = 'asking', conversation_id = ?, ask_started_at = ?, updated_at = ? WHERE id = ? AND state = 'pending'", conversationId, at, at, taskId);
+      if (n === 1) {
+        this.recordTurn(taskId, "to_fo", "ask_fo", null, message);
+        this.notify(taskId);
+      }
+      return n === 1;
+    });
+    if (!claimed) return;
+    await this.track(this.ask(taskId, { message, conversationId }));
   }
 
   /**
@@ -128,7 +158,7 @@ export class FoEngine {
       } else if (reply.status === "complete") {
         const response = reply.response ?? "";
         const fresh = getTask(this.db, taskId)!;
-        const { question } = this.handlers[fresh.kind].onComplete(fresh, response);
+        const { question } = this.handlers[fresh.kind]?.onComplete(fresh, response) ?? { question: null };
         if (question) this.setState(taskId, "needs_user_input", { question, final_response: response, progress: null });
         else this.setState(taskId, "complete", { final_response: response, progress: null });
       } else {
@@ -270,7 +300,7 @@ export class FoEngine {
 
   private notify(taskId: string): void {
     const task = getTask(this.db, taskId);
-    if (task) this.handlers[task.kind].onStateChange(task);
+    if (task) this.handlers[task.kind]?.onStateChange(task);
   }
 
   private recordTurn(taskId: string, direction: "to_fo" | "from_fo" | "error", tool: string, status: string | null, text: string | null): void {

@@ -28,11 +28,11 @@ const MOUTHS: Record<MouthStyle, string> = {
 const FACES: Record<KikiState, { eyes: EyeStyle; mouth: MouthStyle }> = {
   idle: { eyes: "oval", mouth: "smile" },
   reading: { eyes: "oval", mouth: "soft" },
-  searching: { eyes: "oval", mouth: "soft" },
-  needs_you: { eyes: "attentive", mouth: "soft" },
+  organizing: { eyes: "oval", mouth: "soft" },
+  needs_approval: { eyes: "attentive", mouth: "soft" },
   waiting: { eyes: "relaxed", mouth: "flat" },
-  alert: { eyes: "attentive", mouth: "short" },
-  done: { eyes: "happy", mouth: "smile" },
+  needs_clarification: { eyes: "attentive", mouth: "short" },
+  verified: { eyes: "happy", mouth: "smile" },
   error: { eyes: "oval", mouth: "flat" },
 };
 
@@ -65,8 +65,8 @@ export function Kiki({ state, size = 160 }: { state: KikiState; size?: number })
 
   const face = FACES[state];
   const small = size < 96;
-  const entry = changedThisSession.current ? (state === "done" ? "kiki--bob" : state === "needs_you" ? "kiki--tilt" : "") : "";
-  const eyesClass = state === "idle" || state === "waiting" ? "kiki__eyes kiki__eyes--blink" : state === "searching" ? "kiki__eyes kiki__eyes--scan" : state === "reading" ? "kiki__eyes kiki__eyes--down" : "kiki__eyes";
+  const entry = changedThisSession.current ? (state === "verified" ? "kiki--bob" : state === "needs_approval" || state === "needs_clarification" ? "kiki--tilt" : "") : "";
+  const eyesClass = state === "idle" || state === "waiting" ? "kiki__eyes kiki__eyes--blink" : state === "organizing" ? "kiki__eyes kiki__eyes--scan" : state === "reading" ? "kiki__eyes kiki__eyes--down" : "kiki__eyes";
 
   return (
     <svg

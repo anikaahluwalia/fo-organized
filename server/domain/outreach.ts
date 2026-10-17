@@ -17,67 +17,65 @@ export function isValidEmail(email: string): boolean {
   return /^[^\s@<>(),;:"\[\]]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(email.trim());
 }
 
-export function newReference(prefix = "PC"): string {
+export function newReference(prefix = "KIKI"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
 }
 
+const RESERVED = /-----(BEGIN|END) APPROVED BODY-----|KIKI-STATUS/i;
+
 export function validateDraft(c: DraftContent): string[] {
   const problems: string[] = [];
-  if (!c.recipientName.trim()) problems.push("Add who this is for (for example, Mom).");
-  if (!isValidEmail(c.recipientEmail)) problems.push("Add a valid email address for the recipient.");
+  if (!c.recipientName.trim()) problems.push("Add the contractor's name.");
+  if (!isValidEmail(c.recipientEmail)) problems.push("Add a valid email address for the contractor.");
   if (!c.subject.trim()) problems.push("Add a subject.");
   if (!c.body.trim()) problems.push("The message is empty.");
   if (c.subject.length > 200) problems.push("The subject is too long.");
-  if (c.body.length > 5000) problems.push("The message is too long.");
-  if (/-----(BEGIN|END) APPROVED BODY-----|PAPER-CHASE-STATUS/i.test(c.subject + c.body)) problems.push("The message contains text Paper Chase reserves for talking to Fo.");
+  if (c.body.length > 4000) problems.push("The message is too long.");
+  if (RESERVED.test(c.subject + c.body)) problems.push("The message contains text Kiki reserves for talking to Fo.");
   return problems;
 }
 
-export function draftTemplate(input: {
-  studentName: string;
-  itemLabel: string;
-  isGuarantor: boolean;
-  organization: string | null;
-  deadlineText: string | null;
-}): Omit<DraftContent, "recipientName" | "recipientEmail"> & { greeting: string } {
-  const who = input.studentName.trim();
-  const org = input.organization?.trim() || "the landlord";
-  const by = input.deadlineText ? ` by ${input.deadlineText.replace(/^by\s+/i, "")}` : "";
-  const thing = input.isGuarantor ? "a signed guarantor letter" : input.itemLabel.charAt(0).toLowerCase() + input.itemLabel.slice(1);
-  const subject = input.isGuarantor
-    ? `Could you write a guarantor letter for ${who}'s apartment application?`
-    : `${who} needs: ${input.itemLabel}`;
-  const ask = input.isGuarantor
-    ? `Could you write and sign one? It usually says you agree to cover the rent if ${who} can't. Please send it to ${who} directly rather than replying to this email with documents.`
-    : `Could you send it to ${who} directly? Please don't reply to this email with documents.`;
+export interface QuoteSummary {
+  issuer: string | null;
+  reference: string | null;
+  date: string | null;
+  total: string | null;
+}
+
+export function describeQuote(q: QuoteSummary): string {
+  const ref = q.reference ? `quote ${q.reference}` : "quote";
+  const date = q.date ? ` dated ${q.date}` : "";
+  const total = q.total ? ` (total ${q.total})` : "";
+  return `${ref}${date}${total}`;
+}
+
+/** The question to the contractor: honest about who is asking, no commitments, nothing attached. */
+export function contractorDraft(input: { userName: string; contractorName: string; project: string; quote: QuoteSummary }): { subject: string; body: string; purpose: string } {
+  const who = input.userName.trim();
+  const project = input.project.toLowerCase();
   return {
-    greeting: "Hi",
-    subject,
-    body: `This is Kiki, ${who}'s AI assistant in Paper Chase. ${who} asked me to send you this note and approved the wording before it went out.
+    purpose: `Confirm which ${project} quote is current, so the project index points to the right document.`,
+    subject: `Question about your ${project} ${input.quote.reference ? `quote ${input.quote.reference}` : "quote"}`,
+    body: `Hi ${input.contractorName.trim()},
 
-${who} is applying for an apartment with ${org}, and they've asked for ${thing}${by}.
+I'm Kiki, an AI assistant helping ${who} keep the renovation paperwork organized. ${who} reviewed this message before it was sent.
 
-${ask}
+Is your ${describeQuote(input.quote)} the final quote for the ${project} work, or is there a newer version we should use?
 
-If you have any questions, ${who} is the best person to ask.
+A short reply to this email is all we need. Thank you!
 
-Thank you!
-Kiki (on ${who}'s behalf)`,
+Kiki, on behalf of ${who}`,
   };
 }
 
-export function withGreeting(recipientName: string, body: string): string {
-  return `Hi ${recipientName.trim() || "there"},\n\n${body}`;
-}
-
 export const STATUS_LINES = {
-  sent: "PAPER-CHASE-STATUS: SENT",
-  notSent: "PAPER-CHASE-STATUS: NOT-SENT",
-  needInput: "PAPER-CHASE-STATUS: NEED-INPUT",
+  sent: "KIKI-STATUS: SENT",
+  notSent: "KIKI-STATUS: NOT-SENT",
+  needInput: "KIKI-STATUS: NEED-INPUT",
 } as const;
 
 export function buildDispatchMessage(c: DraftContent, reference: string): string {
-  return `Paper Chase request (ref ${reference}). The user reviewed and approved the exact email below in the Paper Chase app, and asked it to have you send it.
+  return `Fo-rganized request (ref ${reference}). The user reviewed and approved the exact email below in the Fo-rganized app, and asked it to have you send it.
 
 Please send ONE email with exactly these details:
 To: ${c.recipientName.trim()} <${c.recipientEmail.trim()}>
@@ -90,38 +88,49 @@ ${c.body}
 Limits of this approval:
 - Send only to the address above. No CC, BCC or other recipients.
 - No attachments and no file or document sharing.
-- Don't change or add to the wording, and don't make commitments on the user's behalf.
-- Don't contact anyone else or follow up later.
+- Don't negotiate, agree to prices, or make any other commitment on the user's behalf.
+- Don't contact anyone else.
 - Don't include the reference code in the email.
-If you can't send it exactly as written (for example, the recipient, subject or body would need to change), don't send it. Ask me instead.
+If you can't send it exactly as written, don't send it. Ask me instead.
 
-End your reply with exactly one of these lines:
+If ${c.recipientName.trim()} replies, please tell me in this conversation and quote their reply exactly.
+
+End this reply with exactly one of these lines:
 ${STATUS_LINES.sent}
 ${STATUS_LINES.notSent}
 ${STATUS_LINES.needInput}`;
 }
 
 export function buildReplyMessage(answer: string, c: DraftContent, reference: string): string {
-  return `Answer from the user about Paper Chase request ${reference}:
+  return `Answer from the user about Fo-rganized request ${reference}:
 
 ${answer.trim()}
 
-Reminder: the approval covers only sending the exact email already given (to ${c.recipientEmail.trim()}, subject "${c.subject}", body unchanged), with no attachments, sharing or other recipients. If this answer would change any of that, don't send; say so instead. End your reply with one of the PAPER-CHASE-STATUS lines.`;
+Reminder: the approval covers only sending the exact email already given (to ${c.recipientEmail.trim()}, subject "${c.subject}", body unchanged), with no attachments, sharing, commitments or other recipients. If this answer would change any of that, don't send; say so instead. End your reply with one of the KIKI-STATUS lines.`;
 }
 
 export function buildStopMessage(reference: string): string {
-  return `Please don't send the email for Paper Chase request ${reference}. The user decided not to send it. If it has already gone out, tell me. End your reply with ${STATUS_LINES.notSent} if nothing was sent, or ${STATUS_LINES.sent} if it was already sent.`;
+  return `Please don't send the email for Fo-rganized request ${reference}. The user decided not to send it. If it has already gone out, tell me. End your reply with ${STATUS_LINES.notSent} if nothing was sent, or ${STATUS_LINES.sent} if it was already sent.`;
+}
+
+/** A follow-up in the mapped conversation. It carries the same limits; it can't widen them. */
+export function buildFollowUpMessage(text: string, reference: string): string {
+  return `About Fo-rganized request ${reference}:
+
+${text.trim()}
+
+Please don't send anything new, share files, or contact anyone because of this message. If the contractor has replied, quote their reply exactly.`;
 }
 
 export type DispatchClassification = "sent" | "not_sent" | "need_input" | "unclear";
 
 /**
- * Reads Fo's final reply for a dispatch. Only an explicit status line counts. If Fo's reply has
- * none, or contradictory ones, the outcome is unclear, never assumed sent.
+ * Reads Fo's final reply for a dispatch. Only an explicit status line counts. With none, or
+ * contradictory ones, the outcome is unclear, never assumed sent.
  */
 export function classifyDispatchReply(reply: string): DispatchClassification {
   const found = new Set<string>();
-  for (const m of reply.matchAll(/PAPER-CHASE-STATUS:\s*(SENT|NOT-SENT|NEED-INPUT)\b/gi)) found.add(m[1]!.toUpperCase());
+  for (const m of reply.matchAll(/KIKI-STATUS:\s*(SENT|NOT-SENT|NEED-INPUT)\b/gi)) found.add(m[1]!.toUpperCase());
   if (found.size === 1) {
     const value = [...found][0];
     return value === "SENT" ? "sent" : value === "NOT-SENT" ? "not_sent" : "need_input";
@@ -147,5 +156,5 @@ export function isWaitingForUser(progress: string | null | undefined, response: 
 }
 
 export function stripStatusLines(text: string): string {
-  return text.replace(/^.*PAPER-CHASE-STATUS:.*$/gim, "").trim();
+  return text.replace(/^.*KIKI-STATUS:.*$/gim, "").trim();
 }

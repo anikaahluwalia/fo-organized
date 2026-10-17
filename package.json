@@ -12,7 +12,7 @@
     "server": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch server/index.ts",
     "build": "vite build",
     "start": "vite build && node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.ts",
-    "start:mock": "vite build && PAPERCHASE_MODE=mock node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.ts",
+    "start:mock": "vite build && KIKI_MODE=mock node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts"
   },

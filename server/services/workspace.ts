@@ -1,0 +1,293 @@
+import { randomUUID } from "node:crypto";
+import { all, logEvent, now, one, run, tx, type Db, type DocumentRow, type FileOrigin, type FileRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
+import { DEMO_WORKSPACE_NAME, demoFileContent, MESSY_FOLDER, REVISED_QUOTE, SECOND_REVISION, type DemoDoc } from "../demo/renovation.ts";
+import { toFacts, type DocFacts } from "../domain/documents.ts";
+import { CATEGORY } from "../domain/naming.ts";
+import { join } from "../domain/plan.ts";
+import { badRequest, conflict } from "../errors.ts";
+import { localText, ReadError } from "../extractor.ts";
+import { DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } from "../google/types.ts";
+import type { Ctx } from "./context.ts";
+
+export function activeWorkspace(db: Db): WorkspaceRow | undefined {
+  return one<WorkspaceRow>(db, "SELECT * FROM workspaces WHERE active = 1");
+}
+
+export function requireWorkspace(db: Db): WorkspaceRow {
+  const ws = activeWorkspace(db);
+  if (!ws) throw conflict("Choose a workspace folder first.");
+  return ws;
+}
+
+export function parseFolderId(input: string): string | null {
+  const s = input.trim();
+  const m = /\/folders\/([A-Za-z0-9_-]{10,})/.exec(s) ?? /[?&]id=([A-Za-z0-9_-]{10,})/.exec(s);
+  if (m) return m[1]!;
+  return /^[A-Za-z0-9_-]{10,}$/.test(s) ? s : null;
+}
+
+function upsertFile(db: Db, wsId: string, f: DriveFile, path: string, origin: FileOrigin | null): void {
+  const at = now();
+  run(
+    db,
+    `INSERT INTO files (workspace_id, file_id, name, mime_type, parent_id, path, version, modified_time, created_time, size, is_folder, is_shortcut,
+                        can_rename, can_move, can_add_children, web_link, origin, present, first_seen_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+     ON CONFLICT (workspace_id, file_id) DO UPDATE SET
+       name = excluded.name, mime_type = excluded.mime_type, parent_id = excluded.parent_id, path = excluded.path,
+       version = excluded.version, modified_time = excluded.modified_time, size = excluded.size,
+       can_rename = excluded.can_rename, can_move = excluded.can_move, can_add_children = excluded.can_add_children,
+       web_link = excluded.web_link, present = 1, last_seen_at = excluded.last_seen_at`,
+    wsId,
+    f.id,
+    f.name,
+    f.mimeType,
+    f.parents[0] ?? null,
+    path,
+    f.version,
+    f.modifiedTime,
+    f.createdTime,
+    f.size,
+    f.mimeType === FOLDER_MIME ? 1 : 0,
+    f.mimeType === SHORTCUT_MIME ? 1 : 0,
+    f.capabilities.canRename ? 1 : 0,
+    f.capabilities.canMove ? 1 : 0,
+    f.capabilities.canAddChildren ? 1 : 0,
+    f.webViewLink,
+    origin ?? "found",
+    at,
+    at,
+  );
+}
+
+/** Records a file Kiki (or the staged demo) just created or changed, with its verified metadata. */
+export function recordFile(db: Db, wsId: string, f: DriveFile, path: string, origin: FileOrigin | null): void {
+  upsertFile(db, wsId, f, path, origin);
+  // Kiki's own files and folders aren't documents to read; everything else is.
+  if (f.mimeType !== FOLDER_MIME && f.mimeType !== SHORTCUT_MIME && origin !== "created_by_kiki") ensureDocument(db, wsId, f);
+}
+
+function ensureDocument(db: Db, wsId: string, f: DriveFile): void {
+  const existing = one<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ? AND file_id = ?", wsId, f.id);
+  if (!existing) {
+    run(db, "INSERT INTO documents (id, workspace_id, file_id, read_status, updated_at) VALUES (?, ?, ?, 'pending', ?)", randomUUID(), wsId, f.id, now());
+  } else if (existing.read_status === "read" && existing.read_file_version && f.contentKey && existing.read_file_version !== f.contentKey) {
+    // The content changed since Kiki read it: read it again.
+    run(db, "UPDATE documents SET read_status = 'pending', updated_at = ? WHERE id = ?", now(), existing.id);
+  }
+}
+
+export async function selectWorkspace(ctx: Ctx, input: string): Promise<WorkspaceRow> {
+  const id = parseFolderId(input);
+  if (!id) throw badRequest("Paste a Google Drive folder link (it contains /folders/).");
+  let folder: DriveFile;
+  try {
+    folder = await ctx.drive.getFile(id);
+  } catch (err) {
+    if (err instanceof DriveError && err.kind === "not_found") throw badRequest("Kiki can't see that folder. Check the link, and that it's in the Drive you connected.");
+    throw err;
+  }
+  if (folder.mimeType !== FOLDER_MIME) throw badRequest("That link is a file, not a folder.");
+  if (folder.trashed) throw badRequest("That folder is in the trash.");
+  if (folder.parents.length === 0 && !folder.driveId) throw badRequest("Choose a specific folder, not your whole Drive.");
+  const ws = tx(ctx.db, () => {
+    run(ctx.db, "UPDATE workspaces SET active = 0 WHERE active = 1");
+    const wsId = randomUUID();
+    run(
+      ctx.db,
+      "INSERT INTO workspaces (id, root_file_id, name, drive_id, mode, origin, active, created_at) VALUES (?, ?, ?, ?, ?, 'selected', 1, ?)",
+      wsId,
+      folder.id,
+      folder.name,
+      folder.driveId,
+      ctx.drive.mode,
+      now(),
+    );
+    logEvent(ctx.db, wsId, "workspace", `You chose "${folder.name}" as the workspace. Kiki will only organize files inside it.`);
+    return one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", wsId)!;
+  });
+  ctx.jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
+  return ws;
+}
+
+async function uploadDemoDocs(ctx: Ctx, ws: WorkspaceRow, docs: DemoDoc[]): Promise<string[]> {
+  const present = new Set(all<{ name: string }>(ctx.db, "SELECT name FROM files WHERE workspace_id = ? AND present = 1", ws.id).map((r) => r.name));
+  const live = await ctx.drive.listChildren(ws.root_file_id, ws.drive_id);
+  for (const f of live) present.add(f.name);
+  const added: string[] = [];
+  for (const doc of docs) {
+    if (present.has(doc.fileName)) continue;
+    const f = await ctx.drive.createFile({ name: doc.fileName, parentId: ws.root_file_id, mimeType: doc.mimeType, content: demoFileContent(doc) });
+    tx(ctx.db, () => recordFile(ctx.db, ws.id, f, "", "staged_demo"));
+    added.push(doc.fileName);
+  }
+  return added;
+}
+
+/**
+ * Creates a dedicated demo folder in My Drive with synthetic renovation paperwork. Everything in
+ * it is labelled "Staged demo file". Running it again only adds files that are missing.
+ */
+export async function createDemoWorkspace(ctx: Ctx): Promise<WorkspaceRow> {
+  let ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE origin = 'staged_demo' AND mode = ? ORDER BY created_at DESC LIMIT 1", ctx.drive.mode);
+  if (ws) {
+    try {
+      await ctx.drive.getFile(ws.root_file_id);
+    } catch (err) {
+      if (!(err instanceof DriveError && err.kind === "not_found")) throw err;
+      ws = undefined; // the demo folder was removed in Drive; make a new one
+    }
+  }
+  if (!ws) {
+    const folder = await ctx.drive.createFolder({ name: DEMO_WORKSPACE_NAME, parentId: "root" });
+    ws = tx(ctx.db, () => {
+      run(ctx.db, "UPDATE workspaces SET active = 0 WHERE active = 1");
+      const wsId = randomUUID();
+      run(ctx.db, "INSERT INTO workspaces (id, root_file_id, name, drive_id, mode, origin, active, created_at) VALUES (?, ?, ?, ?, ?, 'staged_demo', 1, ?)", wsId, folder.id, folder.name, folder.driveId, ctx.drive.mode, now());
+      logEvent(ctx.db, wsId, "workspace", `Created the staged demo folder "${folder.name}" with synthetic renovation paperwork.`);
+      return one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", wsId)!;
+    });
+  } else {
+    const current = ws;
+    tx(ctx.db, () => {
+      run(ctx.db, "UPDATE workspaces SET active = 0 WHERE active = 1");
+      run(ctx.db, "UPDATE workspaces SET active = 1 WHERE id = ?", current.id);
+    });
+  }
+  const added = await uploadDemoDocs(ctx, ws, MESSY_FOLDER);
+  if (added.length) logEvent(ctx.db, ws.id, "staged", `Added ${added.length} staged demo file${added.length === 1 ? "" : "s"} to the demo folder.`);
+  ctx.jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
+  return ws;
+}
+
+/**
+ * Demo step: drop the contractor's revised quote into the workspace, as if the email attachment
+ * had been saved to Drive. "ambiguous" adds a second same-day revision.
+ */
+export async function stageRevisedQuote(ctx: Ctx, variant: "single" | "ambiguous"): Promise<string[]> {
+  const ws = requireWorkspace(ctx.db);
+  const added = await uploadDemoDocs(ctx, ws, variant === "ambiguous" ? [REVISED_QUOTE, SECOND_REVISION] : [REVISED_QUOTE]);
+  if (added.length) logEvent(ctx.db, ws.id, "staged", `Staged demo input: added ${added.map((n) => `"${n}"`).join(" and ")} to the workspace folder.`);
+  ctx.jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
+  return added;
+}
+
+/** Read-only walk of the workspace. Shortcuts are recorded but never followed. */
+export async function runInventory(ctx: Ctx, wsId: string): Promise<{ seen: number; added: number; changed: number }> {
+  const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", wsId);
+  if (!ws) return { seen: 0, added: 0, changed: 0 };
+  const runId = randomUUID();
+  run(ctx.db, "INSERT INTO inventory_runs (id, workspace_id, started_at, status) VALUES (?, ?, ?, 'running')", runId, wsId, now());
+  try {
+    const root = await ctx.drive.getFile(ws.root_file_id);
+    if (root.trashed || root.mimeType !== FOLDER_MIME) throw new Error("The workspace folder is gone or in the trash.");
+    const found = new Map<string, { file: DriveFile; path: string }>();
+    const queue: { id: string; path: string }[] = [{ id: root.id, path: "" }];
+    while (queue.length) {
+      const { id, path } = queue.shift()!;
+      for (const child of await ctx.drive.listChildren(id, ws.drive_id)) {
+        if (found.has(child.id)) continue;
+        found.set(child.id, { file: child, path });
+        if (child.mimeType === FOLDER_MIME) queue.push({ id: child.id, path: join(path, child.name) });
+      }
+      if (found.size > 5000) throw new Error("The workspace has more than 5,000 items. Choose a smaller folder for now.");
+    }
+    const before = new Map(all<FileRow>(ctx.db, "SELECT * FROM files WHERE workspace_id = ?", wsId).map((f) => [f.file_id, f]));
+    let added = 0;
+    let changed = 0;
+    tx(ctx.db, () => {
+      run(ctx.db, "UPDATE files SET present = 0 WHERE workspace_id = ?", wsId);
+      for (const { file, path } of found.values()) {
+        const prev = before.get(file.id);
+        if (!prev) added++;
+        else if (prev.name !== file.name || prev.path !== path || prev.version !== file.version) changed++;
+        recordFile(ctx.db, wsId, file, path, prev?.origin ?? null);
+      }
+      run(ctx.db, "UPDATE inventory_runs SET status = 'done', finished_at = ?, files_seen = ?, new_files = ?, changed_files = ? WHERE id = ?", now(), found.size, added, changed, runId);
+      run(ctx.db, "UPDATE workspaces SET last_inventory_at = ? WHERE id = ?", now(), wsId);
+      logEvent(ctx.db, wsId, "inventory", `Kiki looked through the workspace (read-only): ${found.size} items${added ? `, ${added} new` : ""}${changed ? `, ${changed} changed` : ""}.`);
+    });
+    ctx.jobs.enqueue("read", `read:${wsId}`, { workspaceId: wsId });
+    return { seen: found.size, added, changed };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    run(ctx.db, "UPDATE inventory_runs SET status = 'failed', finished_at = ?, error = ? WHERE id = ?", now(), message, runId);
+    throw err;
+  }
+}
+
+export function ensureProject(db: Db, wsId: string, name: string): ProjectRow {
+  run(db, "INSERT OR IGNORE INTO projects (id, workspace_id, category, name, created_at) VALUES (?, ?, ?, ?, ?)", randomUUID(), wsId, CATEGORY, name, now());
+  return one<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? AND category = ? AND name = ?", wsId, CATEGORY, name)!;
+}
+
+export function docFacts(doc: Pick<DocumentRow, "facts_json">): DocFacts | null {
+  return doc.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
+}
+
+const MAX_READ_BYTES = 8 * 1024 * 1024;
+
+/** Reads every document whose content Kiki hasn't seen yet. Facts come only from the content. */
+export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
+  const pending = all<DocumentRow>(
+    ctx.db,
+    `SELECT d.* FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
+     WHERE d.workspace_id = ? AND d.read_status IN ('pending', 'reading') AND f.present = 1`,
+    wsId,
+  );
+  let readCount = 0;
+  const queue = [...pending];
+  const worker = async () => {
+    for (let doc = queue.shift(); doc; doc = queue.shift()) {
+      run(ctx.db, "UPDATE documents SET read_status = 'reading', updated_at = ? WHERE id = ?", now(), doc.id);
+      let file: DriveFile;
+      try {
+        file = await ctx.drive.getFile(doc.file_id);
+        const content = await ctx.drive.readContent(file, MAX_READ_BYTES);
+        if (content.kind === "unsupported") {
+          run(ctx.db, "UPDATE documents SET read_status = 'unreadable', read_error = ?, read_file_version = ?, updated_at = ? WHERE id = ?", content.reason, file.contentKey, now(), doc.id);
+          continue;
+        }
+        const raw = await ctx.reader.read(content, file.name);
+        const facts = toFacts(raw, localText(content));
+        tx(ctx.db, () => {
+          const project = facts.project.value ? ensureProject(ctx.db, wsId, facts.project.value) : null;
+          run(
+            ctx.db,
+            `UPDATE documents SET doc_type = ?, facts_json = ?, project_id = ?, read_status = 'read', read_mode = ?, read_error = NULL,
+               read_file_version = ?, version_status = CASE WHEN ? = 'quote' THEN COALESCE(version_status, 'unresolved') ELSE NULL END, updated_at = ?
+             WHERE id = ?`,
+            facts.docType,
+            JSON.stringify(facts),
+            project?.id ?? null,
+            ctx.reader.mode,
+            file.contentKey,
+            facts.docType,
+            now(),
+            doc!.id,
+          );
+        });
+        readCount++;
+      } catch (err) {
+        if (err instanceof ReadError) {
+          run(ctx.db, "UPDATE documents SET read_status = 'failed', read_error = ?, updated_at = ? WHERE id = ?", err.message, now(), doc.id);
+          continue;
+        }
+        if (err instanceof DriveError && err.kind === "not_found") {
+          run(ctx.db, "UPDATE files SET present = 0 WHERE workspace_id = ? AND file_id = ?", wsId, doc.file_id);
+          run(ctx.db, "UPDATE documents SET read_status = 'pending', updated_at = ? WHERE id = ?", now(), doc.id);
+          continue;
+        }
+        // Sign-in or network problems: put it back and let the job retry later.
+        run(ctx.db, "UPDATE documents SET read_status = 'pending', updated_at = ? WHERE id = ?", now(), doc.id);
+        throw err;
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  if (readCount) {
+    const types = all<{ doc_type: string; n: number }>(ctx.db, "SELECT doc_type, COUNT(*) AS n FROM documents WHERE workspace_id = ? AND read_status = 'read' GROUP BY doc_type", wsId);
+    logEvent(ctx.db, wsId, "read", `${ctx.reader.mode === "mock" ? "Mock reading" : "Claude"} read ${readCount} document${readCount === 1 ? "" : "s"} (${types.map((t) => `${t.n} ${t.doc_type}`).join(", ")}).`);
+  }
+  return readCount;
+}

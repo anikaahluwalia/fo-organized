@@ -1,55 +1,57 @@
-import type { DispatchView, KikiView, RequestView } from "../../shared/api.ts";
-
-const ACTIVE = new Set(["pending", "asking", "working"]);
+import type { AppView, KikiView } from "../../shared/api.ts";
 
 /**
- * Kiki's expression follows persisted state only, in priority order: anything that needs the
- * user's judgement first, then work in progress, then outcomes. Never a timer.
+ * Kiki's expression follows persisted state only, never a timer. Priority: things that went
+ * wrong, then things that need the user's answer, then work in progress, then decisions,
+ * waiting on someone, and finally a verified result.
  */
-export function deriveKiki(view: RequestView | null): KikiView {
-  if (!view) return { state: "idle", label: "Ready when you are." };
+export function deriveKiki(v: Omit<AppView, "kiki">): KikiView {
+  if (!v.workspace) {
+    if (v.integrations.drive.connection !== "connected") return { state: "idle", label: "Connect Google Drive, then choose a folder for me to organize." };
+    return { state: "idle", label: "Choose the folder I should organize." };
+  }
 
-  const ex = view.extraction;
-  if (ex.status === "running") return { state: "reading", label: "Reading the request…" };
-  if (ex.status === "failed") return { state: "error", label: "I couldn't read that request yet.", detail: ex.error ?? undefined };
+  const live = v.plans.filter((p) => p.status !== "superseded" && p.status !== "discarded");
+  const dispatches = v.outreach.flatMap((o) => o.dispatches);
 
-  const dispatches: DispatchView[] = view.outreach.flatMap((o) => o.dispatches).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const inv = view.inventory?.task ?? null;
+  const failedPlan = live.find((p) => p.status === "partial" || p.status === "failed");
+  if (failedPlan) return { state: "error", label: "Some changes didn't finish. Nothing is marked done unless Drive confirms it.", detail: failedPlan.title };
+  if (v.inventory.status === "failed") return { state: "error", label: "I couldn't look through the folder.", detail: v.inventory.lastError ?? undefined };
+  const failedUpdate = v.updates.find((u) => u.status === "failed");
+  if (failedUpdate) return { state: "error", label: "I couldn't read Fo's update yet.", detail: failedUpdate.error ?? undefined };
+  const lastDispatch = [...dispatches].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  if (lastDispatch && (lastDispatch.state === "failed" || lastDispatch.state === "not_sent")) {
+    return { state: "error", label: lastDispatch.state === "not_sent" ? "Fo didn't send the email." : "The email wasn't sent.", detail: lastDispatch.task.failureDetail ?? undefined };
+  }
 
-  if (view.risk?.hasWarnings && !view.risk.reviewedAt) return { state: "alert", label: "Something doesn't match. Review before sharing." };
-  if (dispatches.some((d) => d.state === "uncertain")) return { state: "alert", label: "I'm not sure the email went out. Check before trying again." };
+  const ambiguous = v.updates.find((u) => u.status === "needs_clarification");
+  if (ambiguous) {
+    return {
+      state: "needs_clarification",
+      label: ambiguous.candidates.length > 1 ? `${ambiguous.candidates.length} files could be the revised quote. Which one?` : "I need a little help with Fo's update.",
+    };
+  }
+  if (dispatches.some((d) => d.state === "needs_user_input")) return { state: "needs_clarification", label: "Fo has a question for you." };
+  if (dispatches.some((d) => d.state === "uncertain")) return { state: "needs_clarification", label: "I'm not sure the email went out. Let's check before trying again." };
+  if (live.some((p) => p.status === "stale")) return { state: "needs_clarification", label: "Something changed since you previewed. Let's refresh the plan." };
 
-  const asking = dispatches.find((d) => d.state === "needs_user_input");
-  if (asking || inv?.state === "needs_user_input") return { state: "needs_you", label: "Fo has a question for you." };
+  if (v.busy.executing || live.some((p) => p.status === "executing" || p.status === "approved")) return { state: "organizing", label: "Organizing… checking each change in Drive." };
+  if (v.busy.interpreting || v.updates.some((u) => u.status === "interpreting")) return { state: "reading", label: "Reading Fo's update…" };
+  if (v.busy.inventory || v.inventory.status === "running") return { state: "reading", label: "Looking through the folder (read-only)…" };
+  if (v.busy.reading || v.inventory.reading > 0) return { state: "reading", label: "Reading your documents…" };
+
+  const proposed = live.find((p) => p.status === "proposed");
+  if (proposed) return { state: "needs_approval", label: "Here's my plan. Nothing changes until you approve it.", detail: proposed.title };
+  const draft = v.outreach.find((o) => o.draft && !o.dispatches.some((d) => d.open));
+  if (draft?.draft) return { state: "needs_approval", label: `Review the message before Fo sends it to ${draft.draft.recipientName}.` };
 
   const sending = dispatches.find((d) => d.state === "approved" || d.state === "dispatching" || d.state === "working");
-  if (sending) {
-    return sending.task.pollPaused
-      ? { state: "waiting", label: "Fo is still on it, and keeps working even if you leave." }
-      : { state: "waiting", label: `Waiting on ${sending.task.mode === "mock" ? "Mock Fo" : "Fo"} to send your approved email…` };
-  }
-  if (inv && ACTIVE.has(inv.state)) {
-    return inv.pollPaused
-      ? { state: "searching", label: "Fo is still checking, and keeps working even if you leave." }
-      : { state: "searching", label: "Checking your Drive for documents…" };
-  }
+  if (sending) return { state: "waiting", label: sending.task.pollPaused ? "Fo is still on it, and keeps working even if you leave." : "Waiting on Fo to send your approved email…" };
+  const watching = dispatches.find((d) => d.watch?.state === "watching" && !v.updates.some((u) => u.watchId === d.watch!.id && (u.status === "proposed" || u.status === "resolved")));
+  if (watching) return { state: "waiting", label: `Waiting for ${watching.recipientName} to reply.`, detail: "I'm following the Fo conversation and will pick up the answer." };
 
-  const latest = dispatches[0];
-  if (latest && (latest.state === "failed" || latest.state === "not_sent")) {
-    return { state: "error", label: latest.state === "not_sent" ? "Fo didn't send the email." : "The email wasn't sent.", detail: latest.task.failureDetail ?? undefined };
-  }
-  if (latest && (latest.state === "reported_sent" || latest.state === "verified_sent")) {
-    if (latest.task.mode === "mock") return { state: "done", label: "Mock Fo reports it sent. Nothing left this computer." };
-    return { state: "done", label: latest.state === "verified_sent" ? "Message sent and verified. View the evidence." : "Fo reports the email was sent. View the evidence." };
-  }
-
-  if (inv && (inv.state === "failed" || inv.state === "uncertain")) return { state: "error", label: "I couldn't verify that yet." };
-  if (!view.checklistConfirmedAt) return { state: "needs_you", label: "Check what I found before we search." };
-  if (!view.inventory) return { state: "idle", label: "Ready to check your Drive, read-only." };
-
-  const draft = view.outreach.find((o) => o.draft && !o.dispatches.some((d) => d.open))?.draft;
-  if (draft) return { state: "needs_you", label: `Review this before I ask ${draft.recipientName || "anyone"}.` };
-  if (view.items.some((i) => i.status === "candidate" || i.status === "needs_review")) return { state: "needs_you", label: "A few documents need your review." };
-  if (view.items.some((i) => i.status === "missing")) return { state: "needs_you", label: "Something's missing. I can draft a request for you." };
-  return { state: "idle", label: "Every item is marked handled." };
+  const latest = [...live].sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""))[0];
+  if (latest?.status === "applied") return { state: "verified", label: "Done. Every change is checked in Drive.", detail: latest.title };
+  if (!v.inventory.files.length) return { state: "idle", label: "Ready to look through the folder." };
+  return { state: "idle", label: "Ready when you are." };
 }

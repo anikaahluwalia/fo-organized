@@ -26,7 +26,7 @@ export type FoConversationSummary = NonNullable<z.infer<typeof FoConversationLis
 
 export const FoConversationSchema = z.object({
   conversation: z.object({ conversationId: z.string(), title: z.string(), channel: z.string(), startedAt: z.string().optional() }),
-  turns: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string(), at: z.string().optional() })).optional(),
+  turns: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string(), at: z.string().optional(), runId: z.string().optional() })).optional(),
 });
 export type FoTurn = NonNullable<z.infer<typeof FoConversationSchema>["turns"]>[number];
 

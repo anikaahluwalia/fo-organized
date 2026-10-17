@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"Kiki — a little order","version":"0.1.0","description":"An interactive organizing companion prototype. Uses demo files only; no Drive or Fo access.","minimum_chrome_version":"116","permissions":["sidePanel"],"action":{"default_title":"Open Kiki"},"side_panel":{"default_path":"panel.html"},"background":{"service_worker":"background.js"}}

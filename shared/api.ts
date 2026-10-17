@@ -1,7 +1,7 @@
 // Types shared by the server's view builder and the browser. Type-only: no runtime code.
 
 export type Mode = "live" | "mock";
-export type KikiState = "idle" | "reading" | "searching" | "needs_you" | "waiting" | "alert" | "done" | "error";
+export type KikiState = "idle" | "reading" | "organizing" | "needs_approval" | "waiting" | "needs_clarification" | "verified" | "error";
 
 export interface KikiView {
   state: KikiState;
@@ -9,88 +9,148 @@ export interface KikiView {
   detail?: string;
 }
 
-export interface ModesView {
+export interface IntegrationsView {
+  drive: { mode: Mode; connection: "connected" | "needs_auth" | "not_configured" | "error"; account: string | null; message?: string; scopes: "narrow" | "full"; missingScopes: string[] };
   claude: { mode: Mode; credentialsDetected: boolean; model: string };
   fo: { mode: Mode; connection: "connected" | "needs_auth" | "error"; message?: string };
 }
 
-export interface AppView {
-  modes: ModesView;
-  settings: { studentName: string | null };
-  requests: RequestSummary[];
-  current: RequestView | null;
-  kiki: KikiView;
-  demos: { key: string; title: string; description: string }[];
-}
-
-export interface RequestSummary {
-  id: string;
-  label: string;
-  createdAt: string;
-  inputKind: "pasted" | "demo";
-}
-
-export interface RiskSignalView {
-  id: string;
-  level: "warning" | "info";
-  title: string;
-  detail: string;
-  evidence: string[];
-}
-
-export interface RiskView {
-  signals: RiskSignalView[];
-  hasWarnings: boolean;
-  summary: string;
-  baseline: { domain: string | null; source: string | null };
-  requesterDomain: string | null;
-  reviewedAt: string | null;
-  reviewNote: string | null;
-}
-
-export interface QuotedView {
-  sourceQuote: string | null;
-  quoteFound: boolean;
-}
-
-export interface ExtractionView {
-  status: "running" | "ready" | "failed";
-  mode: Mode | null;
-  error: string | null;
-  requester: { name: string | null; email: string | null; domain: string | null; organization: string | null } | null;
-  deadline: ({ text: string; isoDate: string | null } & QuotedView) | null;
-  payments: ({ amountText: string | null; method: string | null; purpose: string | null } & QuotedView)[];
-  links: { url: string; host: string | null }[];
-  sensitive: { kind: string; sourceQuote: string }[];
-  notes: string[];
-}
-
-export type ItemStatus = "not_searched" | "candidate" | "confirmed" | "missing" | "needs_review";
-
-export interface CandidateView {
+export interface WorkspaceView {
   name: string;
+  origin: "selected" | "staged_demo";
+  mode: Mode;
   link: string | null;
-  linkNote: string | null;
+  lastInventoryAt: string | null;
 }
 
-export interface ItemView extends QuotedView {
+export interface FactView {
+  value: string | null;
+  quote: string | null;
+  quoteFound: boolean | null;
+}
+
+export interface DocView {
+  docId: string;
+  docType: string;
+  readStatus: "pending" | "reading" | "read" | "unreadable" | "failed";
+  readMode: Mode | null;
+  readError: string | null;
+  issuer: FactView;
+  reference: FactView;
+  date: FactView;
+  total: FactView;
+  project: string | null;
+  scope: string | null;
+  revision: string | null;
+  aiDirectedText: string[];
+  textChecked: boolean;
+  versionStatus: "proposed" | "current" | "superseded" | "unresolved" | null;
+  acceptedAt: string | null;
+}
+
+export interface FileView {
+  fileId: string;
+  name: string;
+  path: string;
+  kind: "folder" | "file" | "shortcut";
+  origin: "found" | "staged_demo" | "supplied_by_user" | "created_by_kiki";
+  link: string | null;
+  doc: DocView | null;
+}
+
+export interface InventoryView {
+  status: "never" | "running" | "done" | "failed";
+  lastError: string | null;
+  files: FileView[];
+  reading: number;
+}
+
+export type OpState = "pending" | "running" | "verified" | "failed" | "stale" | "skipped" | "uncertain" | "excluded";
+
+export interface OpView {
+  seq: number;
+  kind: "create_folder" | "move_rename" | "set_status" | "write_index";
+  state: OpState;
+  title: string;
+  before: { name: string; path: string } | null;
+  after: { name: string; path: string } | null;
+  reason: string;
+  error: string | null;
+  editable: boolean;
+}
+
+export interface NoteView {
+  name: string;
+  path: string;
+  status: "already_organized" | "needs_review" | "left_in_place" | "waiting";
+  reason: string;
+}
+
+export interface QuoteDiffView {
+  lines: string[];
+  total: { from: number | null; to: number | null; delta: number | null } | null;
+}
+
+export interface EvidenceView {
+  source: string;
+  statement: string;
+  sourceKind: string | null;
+  interpreter: Mode | null;
+  candidateReasons: string[];
+}
+
+export type PlanStatus = "proposed" | "approved" | "executing" | "applied" | "partial" | "stale" | "failed" | "superseded" | "discarded";
+
+export interface PlanView {
   id: string;
-  label: string;
-  category: string;
-  involvesOtherPerson: boolean;
-  origin: "extracted" | "user";
-  status: ItemStatus;
-  statusReason: string | null;
-  candidates: CandidateView[];
-  searchable: boolean;
+  version: number;
+  kind: "organize" | "version_update" | "undo";
+  status: PlanStatus;
+  title: string;
+  summary: string;
+  contentHash: string;
+  createdAt: string;
+  approvedAt: string | null;
+  finishedAt: string | null;
+  ops: OpView[];
+  notes: NoteView[];
+  diff: QuoteDiffView | null;
+  evidence: EvidenceView | null;
+  conflict: string | null;
+  counts: Record<OpState, number> & { total: number };
+  canUndo: boolean;
+  canResume: boolean;
 }
 
-export type TaskState = "pending" | "asking" | "working" | "needs_user_input" | "complete" | "failed" | "uncertain";
+export interface IndexRowView {
+  docId: string;
+  fileName: string;
+  link: string | null;
+  folder: string;
+  docType: string;
+  issuer: string | null;
+  reference: string | null;
+  date: string | null;
+  total: string | null;
+  status: "proposed" | "current" | "superseded" | "unresolved" | null;
+  latestReceived: boolean;
+  acceptedAt: string | null;
+  supersedes: string | null;
+  evidence: string | null;
+  canAsk: boolean;
+}
+
+export interface ProjectIndexView {
+  name: string;
+  category: string;
+  indexFileLink: string | null;
+  rows: IndexRowView[];
+}
 
 export interface FoTaskView {
   taskId: string;
   mode: Mode;
-  state: TaskState;
+  state: "pending" | "asking" | "working" | "needs_user_input" | "complete" | "failed" | "uncertain";
   progress: string | null;
   elapsedSeconds: number | null;
   question: string | null;
@@ -99,28 +159,17 @@ export interface FoTaskView {
   failureKind: string | null;
   failureDetail: string | null;
   finalResponse: string | null;
-  startedAt: string | null;
 }
 
-export interface InventoryView {
-  runId: string;
-  createdAt: string;
-  parseStatus: "parsed" | "partial" | "malformed" | null;
-  parseNotes: string[];
-  task: FoTaskView;
-}
+export type DispatchState = "approved" | "dispatching" | "working" | "needs_user_input" | "reported_sent" | "not_sent" | "failed" | "uncertain" | "retired";
 
-export type DispatchState =
-  | "approved"
-  | "dispatching"
-  | "working"
-  | "needs_user_input"
-  | "reported_sent"
-  | "verified_sent"
-  | "not_sent"
-  | "failed"
-  | "uncertain"
-  | "retired";
+export interface WatchView {
+  id: string;
+  state: "watching" | "paused" | "closed";
+  checks: number;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+}
 
 export interface DispatchView {
   id: string;
@@ -131,7 +180,6 @@ export interface DispatchView {
   task: FoTaskView;
   reference: string;
   createdAt: string;
-  approvedAt: string;
   recipientName: string;
   recipientEmail: string;
   subject: string;
@@ -140,6 +188,7 @@ export interface DispatchView {
   reconcileNote: string | null;
   retiredAt: string | null;
   stopRequested: boolean;
+  watch: WatchView | null;
 }
 
 export interface DraftView {
@@ -147,6 +196,8 @@ export interface DraftView {
   version: number;
   recipientName: string;
   recipientEmail: string;
+  consentConfirmed: boolean;
+  purpose: string;
   subject: string;
   body: string;
   contentHash: string;
@@ -155,16 +206,43 @@ export interface DraftView {
 }
 
 export interface OutreachView {
-  itemId: string;
-  itemLabel: string;
+  documentId: string;
+  quoteLabel: string;
   draft: DraftView | null;
-  versionCount: number;
   dispatches: DispatchView[];
+}
+
+export interface CandidateView {
+  docId: string;
+  name: string;
+  link: string | null;
+  reasons: string[];
+  reference: string | null;
+  date: string | null;
+  total: string | null;
+}
+
+export interface UpdateView {
+  id: string;
+  watchId: string;
+  status: "interpreting" | "no_outcome" | "needs_clarification" | "proposed" | "resolved" | "dismissed" | "failed";
+  createdAt: string;
+  source: "fo_conversation" | "pasted_by_user";
+  sourceLabel: string;
+  message: string;
+  statement: string | null;
+  quote: string | null;
+  interpreter: Mode | null;
+  question: string | null;
+  candidates: CandidateView[];
+  planId: string | null;
+  error: string | null;
+  ignoredRequests: string[];
 }
 
 export interface TurnView {
   at: string;
-  kind: "inventory" | "dispatch";
+  kind: string;
   mode: Mode;
   direction: "to_fo" | "from_fo" | "error";
   tool: string;
@@ -178,18 +256,30 @@ export interface EventView {
   message: string;
 }
 
-export interface RequestView {
-  id: string;
+export interface NotificationView {
+  taskId: string;
+  mode: Mode;
+  state: FoTaskView["state"];
+  outcome: "reported_sent" | "not_sent" | "unclear" | null;
+  text: string | null;
+  progress: string | null;
+  question: string | null;
+  failureDetail: string | null;
+  finalResponse: string | null;
   createdAt: string;
-  inputKind: "pasted" | "demo";
-  demoTitle: string | null;
-  rawText: string;
-  trusted: { domain: string | null; source: string | null };
-  extraction: ExtractionView;
-  checklistConfirmedAt: string | null;
-  items: ItemView[];
-  risk: RiskView | null;
-  inventory: InventoryView | null;
+}
+
+export interface AppView {
+  notifications: NotificationView[];
+  integrations: IntegrationsView;
+  settings: { userName: string | null };
+  workspace: WorkspaceView | null;
+  inventory: InventoryView;
+  plans: PlanView[];
+  index: ProjectIndexView[];
   outreach: OutreachView[];
-  evidence: { turns: TurnView[]; events: EventView[] };
+  updates: UpdateView[];
+  activity: { events: EventView[]; turns: TurnView[] };
+  busy: { inventory: boolean; reading: boolean; executing: boolean; interpreting: boolean };
+  kiki: KikiView;
 }

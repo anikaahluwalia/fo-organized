@@ -1,27 +1,60 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { EXTRACTION_SYSTEM_PROMPT, ExtractionSchema, extractionUserMessage, mockExtract, type Extraction } from "./domain/extraction.ts";
+import { mockRead, READ_SYSTEM_PROMPT, ReadSchema, type ReadResult } from "./domain/documents.ts";
+import { mockInterpret, OUTCOME_SYSTEM_PROMPT, OutcomeSchema, outcomeUserMessage, verifyOutcome, type Outcome, type OutcomeContext } from "./domain/outcome.ts";
+import { pdfText } from "./domain/pdftext.ts";
+import type { DriveContent } from "./google/types.ts";
 
-export interface Extractor {
+/** Reads documents and interprets Fo conversation turns. Live = Claude; mock = labelled patterns. */
+export interface Reader {
   readonly mode: "live" | "mock";
-  extract(rawText: string): Promise<Extraction>;
+  read(content: DriveContent, fileName: string): Promise<ReadResult>;
+  interpret(ctx: OutcomeContext): Promise<Outcome>;
 }
 
-export class ExtractionError extends Error {
+export class ReadError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "ExtractionError";
+    this.name = "ReadError";
   }
 }
 
-export class MockExtractor implements Extractor {
+/** Local text for checking quotes; null when the content has no text Kiki can see itself. */
+export function localText(content: DriveContent): string | null {
+  if (content.kind === "text") return content.text;
+  if (content.kind === "pdf") return pdfText(content.data);
+  return null;
+}
+
+export class MockReader implements Reader {
   readonly mode = "mock" as const;
-  async extract(rawText: string): Promise<Extraction> {
-    return mockExtract(rawText);
+
+  async read(content: DriveContent): Promise<ReadResult> {
+    if (content.kind === "unsupported") throw new ReadError(content.reason);
+    const text = localText(content);
+    if (!text) throw new ReadError("Mock reading only works on files with plain text inside.");
+    return mockRead(text);
+  }
+
+  async interpret(ctx: OutcomeContext): Promise<Outcome> {
+    return verifyOutcome(ctx.message, mockInterpret(ctx));
   }
 }
 
-export class ClaudeExtractor implements Extractor {
+function claudeError(err: unknown, model: string): ReadError {
+  if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
+    return new ReadError("Claude isn't configured on the server. Set ANTHROPIC_API_KEY in .env and restart, or run in mock mode.");
+  }
+  if (err instanceof Anthropic.NotFoundError) return new ReadError(`The Claude model "${model}" isn't available to this API key.`);
+  if (err instanceof Anthropic.RateLimitError) return new ReadError("Claude is rate-limiting requests. Kiki will try again.");
+  if (err instanceof Anthropic.BadRequestError) return new ReadError(`Claude rejected the request: ${err.message}`);
+  if (err instanceof Anthropic.InternalServerError) return new ReadError("Claude had a temporary problem. Kiki will try again.");
+  if (err instanceof Anthropic.APIConnectionError) return new ReadError("Couldn't reach Claude. Check the network.");
+  if (err instanceof Anthropic.APIError) return new ReadError(`Claude request failed: ${err.message}`);
+  return new ReadError(err instanceof Error ? err.message : String(err));
+}
+
+export class ClaudeReader implements Reader {
   readonly mode = "live" as const;
   private readonly client: Anthropic;
   private readonly model: string;
@@ -31,34 +64,53 @@ export class ClaudeExtractor implements Extractor {
     this.client = client ?? new Anthropic();
   }
 
-  async extract(rawText: string): Promise<Extraction> {
+  async read(content: DriveContent, fileName: string): Promise<ReadResult> {
+    if (content.kind === "unsupported") throw new ReadError(content.reason);
+    const intro = { type: "text" as const, text: `File name (also untrusted): ${JSON.stringify(fileName)}. Read the document and report its facts.` };
+    const doc =
+      content.kind === "pdf"
+        ? { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: content.data.toString("base64") } }
+        : content.kind === "image"
+          ? { type: "image" as const, source: { type: "base64" as const, media_type: content.mimeType as "image/png" | "image/jpeg" | "image/gif" | "image/webp", data: content.data.toString("base64") } }
+          : { type: "text" as const, text: `<document>\n${content.text.slice(0, 60_000)}\n</document>` };
     let response;
     try {
       response = await this.client.beta.messages.parse({
         model: this.model,
         max_tokens: 16000,
-        system: EXTRACTION_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: extractionUserMessage(rawText) }],
-        output_config: { effort: "low", format: betaZodOutputFormat(ExtractionSchema) },
-        // Server-side refusal fallback: if a classifier declines, the API retries on a fallback model.
+        system: READ_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: [doc, intro] }],
+        output_config: { effort: "low", format: betaZodOutputFormat(ReadSchema) },
+        // Server-side refusal fallback: if a safety classifier declines, the API retries on a fallback model.
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
       });
     } catch (err) {
-      if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
-        throw new ExtractionError("Claude isn't configured on the server. Set ANTHROPIC_API_KEY and restart, or run in mock mode.");
-      }
-      if (err instanceof Anthropic.NotFoundError) throw new ExtractionError(`The Claude model "${this.model}" isn't available to this API key.`);
-      if (err instanceof Anthropic.RateLimitError) throw new ExtractionError("Claude is rate-limiting requests right now. Try again in a minute.");
-      if (err instanceof Anthropic.BadRequestError) throw new ExtractionError(`Claude rejected the request: ${err.message}`);
-      if (err instanceof Anthropic.InternalServerError) throw new ExtractionError("Claude had a temporary problem. Try again.");
-      if (err instanceof Anthropic.APIConnectionError) throw new ExtractionError("Couldn't reach Claude. Check the network and try again.");
-      if (err instanceof Anthropic.APIError) throw new ExtractionError(`Claude request failed: ${err.message}`);
-      throw new ExtractionError(`Couldn't read the request: ${err instanceof Error ? err.message : String(err)}`);
+      throw claudeError(err, this.model);
     }
-    if (response.stop_reason === "refusal") throw new ExtractionError("Claude declined to process this text. Review it yourself.");
-    if (response.stop_reason === "max_tokens") throw new ExtractionError("The request was too long to read in one pass.");
-    if (!response.parsed_output) throw new ExtractionError("Claude's answer didn't match the expected format.");
+    if (response.stop_reason === "refusal") throw new ReadError("Claude declined to read this file. Review it yourself.");
+    if (response.stop_reason === "max_tokens") throw new ReadError("The document was too long to read in one pass.");
+    if (!response.parsed_output) throw new ReadError("Claude's answer didn't match the expected format.");
     return response.parsed_output;
+  }
+
+  async interpret(ctx: OutcomeContext): Promise<Outcome> {
+    let response;
+    try {
+      response = await this.client.beta.messages.parse({
+        model: this.model,
+        max_tokens: 4000,
+        system: OUTCOME_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: outcomeUserMessage(ctx) }],
+        output_config: { effort: "low", format: betaZodOutputFormat(OutcomeSchema) },
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+      });
+    } catch (err) {
+      throw claudeError(err, this.model);
+    }
+    if (response.stop_reason === "refusal") throw new ReadError("Claude declined to interpret this message. Read it yourself.");
+    if (!response.parsed_output) throw new ReadError("Claude's answer didn't match the expected format.");
+    return verifyOutcome(ctx.message, response.parsed_output);
   }
 }

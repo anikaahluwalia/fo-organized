@@ -8,74 +8,78 @@ import {
   one,
   run,
   tx,
-  type ActionVersionRow,
   type Db,
   type DispatchRow,
+  type DocumentRow,
   type FoTaskRow,
-  type ItemRow,
+  type OutreachVersionRow,
+  type WatchRow,
 } from "../db.ts";
 import {
   buildDispatchMessage,
+  buildFollowUpMessage,
   buildReplyMessage,
   buildStopMessage,
   classifyDispatchReply,
   contentHash,
-  draftTemplate,
+  contractorDraft,
   newReference,
   stripStatusLines,
   validateDraft,
-  withGreeting,
   type DraftContent,
 } from "../domain/outreach.ts";
-import { AppError, badRequest, conflict, notFound } from "../errors.ts";
-import { getTask, insertTask, type FoEngine, type TaskHandler } from "../fo/engine.ts";
-import { inventoryReplyMessage, runForTask } from "./inventory.ts";
-import { getRequest, storedExtraction, storedRisk } from "./requests.ts";
+import { money } from "../domain/reconcile.ts";
+import { badRequest, conflict, notFound } from "../errors.ts";
+import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
+import type { Ctx } from "./context.ts";
+import { docFacts } from "./workspace.ts";
 
-const STUDENT_NAME = "settings.student_name";
+const USER_NAME = "settings.user_name";
 
-export function getStudentName(db: Db): string | null {
-  return kvGet(db, STUDENT_NAME) ?? null;
+export function getUserName(db: Db): string | null {
+  return kvGet(db, USER_NAME) ?? null;
 }
 
-export function setStudentName(db: Db, name: string): void {
+export function setUserName(db: Db, name: string): void {
   const clean = name.trim().slice(0, 60);
   if (!clean) throw badRequest("Add your first name.");
-  kvSet(db, STUDENT_NAME, clean);
+  kvSet(db, USER_NAME, clean);
 }
 
-function getItem(db: Db, itemId: string): ItemRow {
-  const item = one<ItemRow>(db, "SELECT * FROM checklist_items WHERE id = ? AND removed = 0", itemId);
-  if (!item) throw notFound("That checklist item doesn't exist.");
-  return item;
+function getDoc(db: Db, id: string): DocumentRow {
+  const doc = one<DocumentRow>(db, "SELECT * FROM documents WHERE id = ?", id);
+  if (!doc) throw notFound("That document isn't in the index.");
+  return doc;
 }
 
-function getVersion(db: Db, versionId: string): ActionVersionRow {
-  const v = one<ActionVersionRow>(db, "SELECT * FROM action_versions WHERE id = ?", versionId);
+function getVersion(db: Db, id: string): OutreachVersionRow {
+  const v = one<OutreachVersionRow>(db, "SELECT * FROM outreach_versions WHERE id = ?", id);
   if (!v) throw notFound("That draft doesn't exist.");
   return v;
 }
 
-export function currentVersion(db: Db, itemId: string): ActionVersionRow | undefined {
-  return one<ActionVersionRow>(db, "SELECT * FROM action_versions WHERE item_id = ? AND superseded_at IS NULL", itemId);
+export function currentOutreach(db: Db, documentId: string): OutreachVersionRow | undefined {
+  return one<OutreachVersionRow>(db, "SELECT * FROM outreach_versions WHERE document_id = ? AND superseded_at IS NULL", documentId);
 }
 
-function contentOf(v: ActionVersionRow): DraftContent {
+function contentOf(v: OutreachVersionRow): DraftContent {
   return { recipientName: v.recipient_name, recipientEmail: v.recipient_email, subject: v.subject, body: v.body };
 }
 
-function insertVersion(db: Db, item: ItemRow, version: number, c: DraftContent): string {
+function insertVersion(db: Db, doc: DocumentRow, version: number, c: DraftContent, purpose: string, consent: boolean): string {
   const id = randomUUID();
   run(
     db,
-    `INSERT INTO action_versions (id, request_id, item_id, version, channel, recipient_name, recipient_email, subject, body, content_hash, created_at)
-     VALUES (?, ?, ?, ?, 'email', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO outreach_versions (id, workspace_id, document_id, version, recipient_name, recipient_email, consent_confirmed, purpose, subject, body, content_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
-    item.request_id,
-    item.id,
+    doc.workspace_id,
+    doc.id,
     version,
     c.recipientName.trim(),
     c.recipientEmail.trim(),
+    consent ? 1 : 0,
+    purpose,
     c.subject,
     c.body,
     contentHash(c),
@@ -84,47 +88,38 @@ function insertVersion(db: Db, item: ItemRow, version: number, c: DraftContent):
   return id;
 }
 
-/** Drafts the outreach in the app. Nothing is sent to Fo until the user approves this exact text. */
-export function createDraft(db: Db, itemId: string, input: { recipientName?: string; recipientEmail?: string }): string {
-  const item = getItem(db, itemId);
-  if (item.status !== "missing" && item.status !== "needs_review") throw conflict("Only a missing item needs outreach.");
-  if (item.category === "credential" || item.category === "sensitive_number") throw conflict("Paper Chase won't ask anyone for passwords or identifiers.");
-  const existing = currentVersion(db, itemId);
+/** Drafts the question to the contractor locally. Fo is not involved until this exact text is approved. */
+export function createOutreachDraft(ctx: Ctx, documentId: string, input: { contractorName?: string; contractorEmail?: string; consent?: boolean }): string {
+  const doc = getDoc(ctx.db, documentId);
+  const facts = docFacts(doc);
+  if (doc.doc_type !== "quote" || !facts) throw conflict("Kiki can only ask about a quote she has read.");
+  const existing = currentOutreach(ctx.db, documentId);
   if (existing) return existing.id;
-  const studentName = getStudentName(db);
-  if (!studentName) throw badRequest("Add your first name so Kiki can introduce herself on your behalf.");
-  const recipientName = (input.recipientName ?? "").trim();
-  if (!recipientName) throw badRequest("Add who this is for (for example, Mom).");
-
-  const request = getRequest(db, item.request_id);
-  const extraction = storedExtraction(request);
-  // The stated organization only; an unverified sender domain doesn't belong in a note to family.
-  const organization = extraction?.extraction.requester.organization ?? null;
-  const template = draftTemplate({
-    studentName,
-    itemLabel: item.label,
-    isGuarantor: item.category === "guarantor" || /guarantor|co-?signer/i.test(item.label),
-    organization,
-    deadlineText: extraction?.extraction.deadline?.text ?? null,
+  const userName = getUserName(ctx.db);
+  if (!userName) throw badRequest("Add your first name so Kiki can say who she's helping.");
+  const name = (input.contractorName ?? "").trim();
+  if (!name) throw badRequest("Add the contractor's name.");
+  if (input.consent !== true) throw badRequest("Only contact someone who has agreed to hear from your assistant.", "consent_required");
+  const project = facts.project.value ?? "renovation";
+  const draft = contractorDraft({
+    userName,
+    contractorName: name,
+    project,
+    quote: { issuer: facts.issuer.value, reference: facts.reference.value, date: facts.date.value, total: facts.total.value === null ? null : money(facts.total.value, facts.total.currency) },
   });
-  const content: DraftContent = {
-    recipientName,
-    recipientEmail: (input.recipientEmail ?? "").trim(),
-    subject: template.subject,
-    body: withGreeting(recipientName, template.body),
-  };
-  return tx(db, () => {
-    const raced = currentVersion(db, itemId);
+  const content: DraftContent = { recipientName: name, recipientEmail: (input.contractorEmail ?? "").trim(), subject: draft.subject, body: draft.body };
+  return tx(ctx.db, () => {
+    const raced = currentOutreach(ctx.db, documentId);
     if (raced) return raced.id;
-    const id = insertVersion(db, item, 1, content);
-    logEvent(db, item.request_id, "draft", `Kiki drafted a message to ${recipientName} about "${item.label}" (version 1). Nothing has been sent.`);
+    const id = insertVersion(ctx.db, doc, 1, content, draft.purpose, true);
+    logEvent(ctx.db, doc.workspace_id, "draft", `Kiki drafted a question to ${name} about ${facts.reference.value ?? "the quote"} (version 1). Nothing has been sent.`);
     return id;
   });
 }
 
-/** Every edit is a new version. Approvals are bound to a version, so they never carry over. */
-export function reviseDraft(db: Db, versionId: string, input: Partial<DraftContent>): string {
-  const v = getVersion(db, versionId);
+/** Every edit is a new version, so an approval never carries over to different text. */
+export function reviseOutreach(ctx: Ctx, versionId: string, input: Partial<DraftContent> & { consent?: boolean }): string {
+  const v = getVersion(ctx.db, versionId);
   if (v.superseded_at) throw conflict("This draft was already changed. Reload to see the latest version.", "stale_draft");
   const next: DraftContent = {
     recipientName: (input.recipientName ?? v.recipient_name).trim(),
@@ -132,96 +127,62 @@ export function reviseDraft(db: Db, versionId: string, input: Partial<DraftConte
     subject: input.subject ?? v.subject,
     body: input.body ?? v.body,
   };
-  if (next.subject.length > 200 || next.body.length > 5000 || next.recipientName.length > 80 || next.recipientEmail.length > 200) throw badRequest("That's too long.");
+  if (next.subject.length > 200 || next.body.length > 4000 || next.recipientName.length > 80 || next.recipientEmail.length > 200) throw badRequest("That's too long.");
   if (contentHash(next) === v.content_hash) return v.id;
-  const item = getItem(db, v.item_id);
-  return tx(db, () => {
-    const n = run(db, "UPDATE action_versions SET superseded_at = ? WHERE id = ? AND superseded_at IS NULL", now(), v.id);
+  const recipientChanged = next.recipientEmail.toLowerCase() !== v.recipient_email.toLowerCase();
+  if (recipientChanged && input.consent !== true) throw badRequest("Confirm the new recipient agreed to hear from your assistant.", "consent_required");
+  const doc = getDoc(ctx.db, v.document_id);
+  return tx(ctx.db, () => {
+    const n = run(ctx.db, "UPDATE outreach_versions SET superseded_at = ? WHERE id = ? AND superseded_at IS NULL", now(), v.id);
     if (n !== 1) throw conflict("This draft was already changed. Reload to see the latest version.", "stale_draft");
-    const id = insertVersion(db, item, v.version + 1, next);
-    logEvent(db, v.request_id, "draft", `You changed the message (now version ${v.version + 1}). It needs a fresh approval.`);
+    const id = insertVersion(ctx.db, doc, v.version + 1, next, v.purpose, recipientChanged ? true : Boolean(v.consent_confirmed));
+    logEvent(ctx.db, v.workspace_id, "draft", `You changed the message (now version ${v.version + 1}). It needs a fresh approval.`);
     return id;
   });
 }
 
-export function discardDraft(db: Db, versionId: string): void {
-  const v = getVersion(db, versionId);
+export function discardOutreach(ctx: Ctx, versionId: string): void {
+  const v = getVersion(ctx.db, versionId);
   if (v.superseded_at) return;
-  tx(db, () => {
-    run(db, "UPDATE action_versions SET superseded_at = ? WHERE id = ? AND superseded_at IS NULL", now(), v.id);
-    logEvent(db, v.request_id, "draft", "You set the draft aside. Nothing was sent.");
+  tx(ctx.db, () => {
+    run(ctx.db, "UPDATE outreach_versions SET superseded_at = ? WHERE id = ? AND superseded_at IS NULL", now(), v.id);
+    logEvent(ctx.db, v.workspace_id, "draft", "You set the message aside. Nothing was sent.");
   });
 }
 
-export interface SendResult {
-  dispatchId: string;
-  created: boolean;
-  work: Promise<void>;
-}
-
 /**
- * Approve and send, as one transaction: verify the user approved exactly the current version,
- * record the approval and a durable dispatch, then hand the approved text to Fo. Repeated clicks
- * and retried requests resolve to the same dispatch instead of sending again.
+ * Approve and send, as one transaction: the user approved exactly the current version, the
+ * approval and a durable dispatch are recorded, and only then is Fo asked to send it. Repeated
+ * clicks and retried requests resolve to the same dispatch.
  */
-export function approveAndSend(
-  db: Db,
-  engine: FoEngine,
-  versionId: string,
-  input: { contentHash?: string; clientRequestId?: string; confirmResend?: boolean },
-): SendResult {
+export function approveAndSend(ctx: Ctx, versionId: string, input: { contentHash?: string; clientRequestId?: string; confirmResend?: boolean }): { dispatchId: string; created: boolean } {
   const clientRequestId = input.clientRequestId ?? "";
   if (!clientRequestId || clientRequestId.length > 100) throw badRequest("Missing request id.");
-
-  const attempt = (): { dispatch: DispatchRow; created: boolean; message: string | null } =>
-    tx(db, () => {
-      const same = one<DispatchRow>(db, "SELECT * FROM dispatches WHERE client_request_id = ?", clientRequestId);
-      if (same) return { dispatch: same, created: false, message: null };
-
-      const v = getVersion(db, versionId);
-      if (v.superseded_at) throw conflict("This draft changed after you reviewed it. Review the latest version.", "stale_draft");
-      if (input.contentHash !== v.content_hash) throw conflict("What you approved doesn't match the saved draft. Review it again.", "hash_mismatch");
+  const attempt = () =>
+    tx(ctx.db, () => {
+      const same = one<DispatchRow>(ctx.db, "SELECT * FROM dispatches WHERE client_request_id = ?", clientRequestId);
+      if (same) return { dispatch: same, created: false, message: null as string | null };
+      const v = getVersion(ctx.db, versionId);
+      if (v.superseded_at) throw conflict("This message changed after you reviewed it. Review the latest version.", "stale_draft");
+      if (input.contentHash !== v.content_hash) throw conflict("What you approved doesn't match the saved message. Review it again.", "hash_mismatch");
+      if (!v.consent_confirmed) throw badRequest("Confirm the recipient agreed to hear from your assistant.", "consent_required");
       const problems = validateDraft(contentOf(v));
       if (problems.length) throw badRequest(problems.join(" "));
-
-      const request = getRequest(db, v.request_id);
-      const risk = storedRisk(request);
-      if (risk?.hasWarnings && !request.risk_reviewed_at) {
-        throw new AppError(423, "Sharing is on hold: review this request's warning signs first.", "risk_hold");
-      }
-
-      const open = one<DispatchRow>(db, "SELECT * FROM dispatches WHERE item_id = ? AND open = 1", v.item_id);
+      const open = one<DispatchRow>(ctx.db, "SELECT * FROM dispatches WHERE document_id = ? AND open = 1", v.document_id);
       if (open) return { dispatch: open, created: false, message: null };
-
-      const alreadySent = one<{ n: number }>(
-        db,
-        "SELECT COUNT(*) AS n FROM dispatches WHERE item_id = ? AND (outcome IN ('reported_sent', 'verified_sent') OR retired_at IS NOT NULL)",
-        v.item_id,
-      )!.n;
-      if (alreadySent > 0 && input.confirmResend !== true) {
-        throw conflict("Fo may already have sent a message about this. Sending again would send another email.", "already_sent");
-      }
-
+      const sentBefore = one<{ n: number }>(ctx.db, "SELECT COUNT(*) AS n FROM dispatches WHERE document_id = ? AND (outcome = 'reported_sent' OR retired_at IS NOT NULL)", v.document_id)!.n;
+      if (sentBefore > 0 && input.confirmResend !== true) throw conflict("Fo may already have sent a message about this quote. Sending again would send another email.", "already_sent");
       const approvalId = randomUUID();
-      run(
-        db,
-        "INSERT INTO approvals (id, action_version_id, content_hash, approved_at, risk_review_acknowledged) VALUES (?, ?, ?, ?, ?)",
-        approvalId,
-        v.id,
-        v.content_hash,
-        now(),
-        request.risk_reviewed_at ? 1 : 0,
-      );
-      const attemptNo = (one<{ a: number | null }>(db, "SELECT MAX(attempt) AS a FROM dispatches WHERE action_version_id = ?", v.id)?.a ?? 0) + 1;
-      const taskId = insertTask(db, "dispatch", engine.mode);
+      run(ctx.db, "INSERT INTO outreach_approvals (id, version_id, content_hash, approved_at) VALUES (?, ?, ?, ?)", approvalId, v.id, v.content_hash, now());
+      const attemptNo = (one<{ a: number | null }>(ctx.db, "SELECT MAX(attempt) AS a FROM dispatches WHERE version_id = ?", v.id)?.a ?? 0) + 1;
+      const taskId = insertTask(ctx.db, "dispatch", ctx.engine.mode);
       const reference = newReference();
-      const dispatchId = randomUUID();
+      const id = randomUUID();
       run(
-        db,
-        `INSERT INTO dispatches (id, item_id, action_version_id, approval_id, attempt, client_request_id, reference, fo_task_id, open, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-        dispatchId,
-        v.item_id,
+        ctx.db,
+        `INSERT INTO dispatches (id, document_id, version_id, approval_id, attempt, client_request_id, reference, fo_task_id, open, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        id,
+        v.document_id,
         v.id,
         approvalId,
         attemptNo,
@@ -230,21 +191,18 @@ export function approveAndSend(
         taskId,
         now(),
       );
-      logEvent(db, v.request_id, "approved", `You approved version ${v.version} to ${v.recipient_email}. Handing it to ${engine.mode === "mock" ? "Mock Fo" : "Fo"} to send.`);
-      const dispatch = one<DispatchRow>(db, "SELECT * FROM dispatches WHERE id = ?", dispatchId)!;
-      return { dispatch, created: true, message: buildDispatchMessage(contentOf(v), reference) };
+      logEvent(ctx.db, v.workspace_id, "approved", `You approved version ${v.version} to ${v.recipient_email}. Handing it to ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to send.`);
+      return { dispatch: one<DispatchRow>(ctx.db, "SELECT * FROM dispatches WHERE id = ?", id)!, created: true, message: buildDispatchMessage(contentOf(v), reference) };
     });
-
   let result;
   try {
     result = attempt();
   } catch (err) {
-    // Another process won the race on a unique index: re-read instead of failing.
     if (!isUniqueViolation(err)) throw err;
     result = attempt();
   }
-  const work = result.created && result.message ? engine.start(result.dispatch.fo_task_id, result.message) : Promise.resolve();
-  return { dispatchId: result.dispatch.id, created: result.created, work };
+  if (result.created && result.message) void ctx.engine.start(result.dispatch.fo_task_id, result.message).catch(() => undefined);
+  return { dispatchId: result.dispatch.id, created: result.created };
 }
 
 function getDispatch(db: Db, id: string): DispatchRow {
@@ -253,83 +211,86 @@ function getDispatch(db: Db, id: string): DispatchRow {
   return d;
 }
 
-/** The user answers Fo's question. Dispatch answers carry the approval's limits with them. */
-export function replyToTask(db: Db, engine: FoEngine, taskId: string, answer: string): Promise<void> {
+/** The user answers Fo's question in the mapped conversation. Answers carry the approval's limits. */
+export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<void> {
   const text = (answer ?? "").trim();
   if (!text) throw badRequest("Write an answer for Fo.");
   if (text.length > 2000) throw badRequest("That answer is too long.");
-  const task = getTask(db, taskId);
+  const task = getTask(ctx.db, taskId);
   if (!task) throw notFound("That Fo conversation doesn't exist.");
-  let message: string;
-  let requestId: string | null = null;
-  if (task.kind === "dispatch") {
-    const d = one<DispatchRow>(db, "SELECT * FROM dispatches WHERE fo_task_id = ?", taskId)!;
-    const v = getVersion(db, d.action_version_id);
+  const d = one<DispatchRow>(ctx.db, "SELECT * FROM dispatches WHERE fo_task_id = ?", taskId);
+  let message = text;
+  let wsId: string | null = null;
+  if (d) {
+    const v = getVersion(ctx.db, d.version_id);
     message = buildReplyMessage(text, contentOf(v), d.reference);
-    requestId = v.request_id;
+    wsId = v.workspace_id;
   } else {
-    const r = runForTask(db, taskId)!;
-    message = inventoryReplyMessage(text, r.reference);
-    requestId = r.request_id;
+    const w = one<WatchRow & { reference: string }>(ctx.db, "SELECT w.*, d.reference FROM watches w JOIN dispatches d ON d.id = w.dispatch_id WHERE w.conversation_id = ?", task.conversation_id ?? "");
+    message = buildFollowUpMessage(text, w?.reference ?? "");
+    wsId = w?.workspace_id ?? null;
   }
-  const work = engine.continue(taskId, message);
-  logEvent(db, requestId, "fo_reply", "You answered Fo's question.");
+  const work = ctx.engine.continue(taskId, message);
+  logEvent(ctx.db, wsId, "fo_reply", "You answered Fo's question.");
   return work;
 }
 
-/** Only possible while Fo is waiting on the user; a working turn is never interrupted. */
-export function stopDispatch(db: Db, engine: FoEngine, dispatchId: string): Promise<void> {
-  const d = getDispatch(db, dispatchId);
-  const task = getTask(db, d.fo_task_id)!;
+/** Only while Fo is waiting on the user; a working turn is never interrupted. */
+export function stopDispatch(ctx: Ctx, dispatchId: string): Promise<void> {
+  const d = getDispatch(ctx.db, dispatchId);
+  const task = getTask(ctx.db, d.fo_task_id)!;
   if (task.state !== "needs_user_input") throw conflict("You can only call this off while Fo is waiting for you.");
-  run(db, "UPDATE dispatches SET stop_requested_at = ? WHERE id = ?", now(), d.id);
-  const work = engine.continue(d.fo_task_id, buildStopMessage(d.reference));
-  const v = getVersion(db, d.action_version_id);
-  logEvent(db, v.request_id, "stop", "You asked Fo not to send the email.");
+  run(ctx.db, "UPDATE dispatches SET stop_requested_at = ? WHERE id = ?", now(), d.id);
+  const work = ctx.engine.continue(d.fo_task_id, buildStopMessage(d.reference));
+  logEvent(ctx.db, getVersion(ctx.db, d.version_id).workspace_id, "stop", "You asked Fo not to send the email.");
   return work;
 }
 
-export async function reconcileDispatch(db: Db, engine: FoEngine, dispatchId: string): Promise<{ found: boolean; note: string }> {
-  const d = getDispatch(db, dispatchId);
-  const result = await engine.reconcile(d.fo_task_id, d.reference);
-  run(db, "UPDATE dispatches SET reconciled_at = ?, reconcile_note = ? WHERE id = ?", now(), result.note, d.id);
-  const v = getVersion(db, d.action_version_id);
-  logEvent(db, v.request_id, "reconcile", result.note);
+export async function reconcileDispatch(ctx: Ctx, dispatchId: string): Promise<{ found: boolean; note: string }> {
+  const d = getDispatch(ctx.db, dispatchId);
+  const result = await ctx.engine.reconcile(d.fo_task_id, d.reference);
+  run(ctx.db, "UPDATE dispatches SET reconciled_at = ?, reconcile_note = ? WHERE id = ?", now(), result.note, d.id);
+  logEvent(ctx.db, getVersion(ctx.db, d.version_id).workspace_id, "reconcile", result.note);
   return result;
 }
 
-/**
- * After a reconciliation attempt, the user may close an uncertain attempt to allow a new one,
- * explicitly accepting that the first one might have gone out.
- */
-export function retireDispatch(db: Db, dispatchId: string, acknowledge: boolean): void {
-  const d = getDispatch(db, dispatchId);
-  const task = getTask(db, d.fo_task_id)!;
+export function retireDispatch(ctx: Ctx, dispatchId: string, acknowledge: boolean): void {
+  const d = getDispatch(ctx.db, dispatchId);
+  const task = getTask(ctx.db, d.fo_task_id)!;
   if (task.state !== "uncertain" || d.retired_at) throw conflict("Only an uncertain attempt can be closed.");
   if (!d.reconciled_at) throw conflict("Check with Fo first.");
   if (!acknowledge) throw badRequest("Confirm that you understand the first email might have been sent.");
-  const v = getVersion(db, d.action_version_id);
-  tx(db, () => {
-    run(db, "UPDATE dispatches SET retired_at = ?, open = 0 WHERE id = ?", now(), d.id);
-    logEvent(db, v.request_id, "retire", "You closed an uncertain send attempt. If Fo did send it, a new attempt will send another email.");
+  tx(ctx.db, () => {
+    run(ctx.db, "UPDATE dispatches SET retired_at = ?, open = 0 WHERE id = ?", now(), d.id);
+    logEvent(ctx.db, getVersion(ctx.db, d.version_id).workspace_id, "retire", "You closed an uncertain send attempt. If Fo did send it, a new attempt sends another email.");
   });
 }
 
-export function dispatchHandler(db: Db): TaskHandler {
+/** Starts following the dispatch's Fo conversation so Kiki can pick up its outcome. */
+function openWatch(ctx: Ctx, d: DispatchRow, task: FoTaskRow, workspaceId: string): void {
+  if (!task.conversation_id) return;
+  const id = randomUUID();
+  run(ctx.db, "INSERT OR IGNORE INTO watches (id, workspace_id, dispatch_id, conversation_id, state, created_at) VALUES (?, ?, ?, ?, 'watching', ?)", id, workspaceId, d.id, task.conversation_id, now());
+  const watch = one<WatchRow>(ctx.db, "SELECT * FROM watches WHERE dispatch_id = ?", d.id)!;
+  ctx.jobs.enqueue("watch", `watch:${watch.id}`, { watchId: watch.id }, 1);
+}
+
+export function dispatchHandler(ctx: Ctx): TaskHandler {
   return {
-    onComplete(task: FoTaskRow, response: string) {
-      const d = one<DispatchRow>(db, "SELECT * FROM dispatches WHERE fo_task_id = ?", task.id);
+    onComplete(task, response) {
+      const d = one<DispatchRow>(ctx.db, "SELECT * FROM dispatches WHERE fo_task_id = ?", task.id);
       if (!d) return { question: null };
-      const v = getVersion(db, d.action_version_id);
+      const v = getVersion(ctx.db, d.version_id);
       const fo = task.mode === "mock" ? "Mock Fo" : "Fo";
       switch (classifyDispatchReply(response)) {
         case "sent":
-          run(db, "UPDATE dispatches SET outcome = 'reported_sent', open = 0 WHERE id = ?", d.id);
-          logEvent(db, v.request_id, "reported_sent", `${fo} reports the email to ${v.recipient_email} was sent. Not independently verified.`);
+          run(ctx.db, "UPDATE dispatches SET outcome = 'reported_sent', open = 0 WHERE id = ?", d.id);
+          logEvent(ctx.db, v.workspace_id, "reported_sent", `${fo} reports the email to ${v.recipient_email} was sent. Not independently verified. Kiki is now following that conversation for a reply.`);
+          openWatch(ctx, d, task, v.workspace_id);
           return { question: null };
         case "not_sent":
-          run(db, "UPDATE dispatches SET outcome = 'not_sent', open = 0 WHERE id = ?", d.id);
-          logEvent(db, v.request_id, "not_sent", `${fo} reports it did not send the email.`);
+          run(ctx.db, "UPDATE dispatches SET outcome = 'not_sent', open = 0 WHERE id = ?", d.id);
+          logEvent(ctx.db, v.workspace_id, "not_sent", `${fo} reports it did not send the email.`);
           return { question: null };
         case "need_input":
           return { question: stripStatusLines(response) || response };
@@ -337,13 +298,16 @@ export function dispatchHandler(db: Db): TaskHandler {
           return { question: `Fo replied without saying whether the email went out:\n\n${stripStatusLines(response) || response}` };
       }
     },
-    onStateChange(task: FoTaskRow) {
+    onStateChange(task) {
       if (task.state !== "failed") return;
-      const d = one<DispatchRow>(db, "SELECT * FROM dispatches WHERE fo_task_id = ?", task.id);
+      const d = one<DispatchRow>(ctx.db, "SELECT * FROM dispatches WHERE fo_task_id = ?", task.id);
       if (!d || !d.open) return;
-      run(db, "UPDATE dispatches SET open = 0 WHERE id = ?", d.id);
-      const v = getVersion(db, d.action_version_id);
-      logEvent(db, v.request_id, "send_failed", task.failure_kind === "not_sent" || task.failure_kind === "not_started" ? `Not sent: ${task.failure_detail}` : `Fo reported a failure: ${task.failure_detail}`);
+      run(ctx.db, "UPDATE dispatches SET open = 0 WHERE id = ?", d.id);
+      const v = getVersion(ctx.db, d.version_id);
+      logEvent(ctx.db, v.workspace_id, "send_failed", task.failure_kind === "not_sent" || task.failure_kind === "not_started" ? `Not sent: ${task.failure_detail}` : `Fo reported a failure: ${task.failure_detail}`);
     },
   };
 }
+
+export const followUpHandler: TaskHandler = { onComplete: () => ({ question: null }), onStateChange: () => undefined };
+

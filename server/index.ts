@@ -3,36 +3,79 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app.ts";
 import { claudeCredentialsPresent, loadConfig } from "./config.ts";
 import { openDb } from "./db.ts";
-import { ClaudeExtractor, MockExtractor } from "./extractor.ts";
-import { createHttpServer, type FoAuth } from "./http.ts";
+import { ClaudeReader, MockReader } from "./extractor.ts";
+import { createHttpServer, type OAuthFlow } from "./http.ts";
 import { LiveFoClient } from "./fo/live.ts";
 import { MockFoClient } from "./fo/mock.ts";
 import { DbOAuthProvider } from "./fo/oauth.ts";
+import type { FoClient } from "./fo/types.ts";
+import { FakeDrive } from "./google/fake.ts";
+import { LiveDrive } from "./google/live.ts";
+import { GoogleAuth } from "./google/oauth.ts";
+import type { DriveAdapter } from "./google/types.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const config = loadConfig();
-const db = openDb(path.join(config.dataDir, "paperchase.db"));
+const db = openDb(path.join(config.dataDir, "fo-rganized.db"));
 
-let foAuth: FoAuth | null = null;
-let fo;
+// Each integration is live or mock by configuration only. A live integration that fails stays a
+// visible failure; it is never swapped for a mock behind the user's back.
+let drive: DriveAdapter;
+let googleFlow: OAuthFlow | null = null;
+let googleAuth: GoogleAuth | null = null;
+if (config.driveMode === "live") {
+  googleAuth = new GoogleAuth(db, {
+    clientId: config.google.clientId,
+    clientSecret: config.google.clientSecret,
+    redirectUri: `${config.appOrigin}/api/google/oauth/callback`,
+    scopes: config.google.scopes,
+  });
+  const auth = googleAuth;
+  drive = new LiveDrive(auth);
+  googleFlow = { begin: async () => auth.beginAuth(), finish: (code, state) => auth.finishAuth(code, state), disconnect: () => auth.disconnect() };
+} else {
+  drive = new FakeDrive("mock");
+}
+
+let fo: FoClient;
+let foFlow: OAuthFlow | null = null;
 if (config.foMode === "live") {
   const live = new LiveFoClient(config.foMcpUrl, new DbOAuthProvider(db, `${config.appOrigin}/api/fo/oauth/callback`));
-  foAuth = { begin: () => live.beginAuth(), finish: (code, state) => live.finishAuth(code, state), disconnect: () => live.disconnect() };
   fo = live;
+  foFlow = {
+    begin: async () => {
+      const r = await live.beginAuth();
+      if ("authorizationUrl" in r) return r.authorizationUrl;
+      return `${config.appOrigin}/?connected=Fo`;
+    },
+    finish: (code, state) => live.finishAuth(code, state),
+    disconnect: () => live.disconnect(),
+  };
 } else {
   fo = new MockFoClient();
 }
 
 const credentials = claudeCredentialsPresent();
-const extractor = config.claudeMode === "live" ? new ClaudeExtractor(config.anthropicModel) : new MockExtractor();
-const app = createApp({ db, fo, extractor, anthropicModel: config.anthropicModel, claudeCredentialsDetected: credentials });
+const reader = config.claudeMode === "live" ? new ClaudeReader(config.anthropicModel) : new MockReader();
+const app = createApp({
+  db,
+  drive,
+  reader,
+  fo,
+  anthropicModel: config.anthropicModel,
+  claudeCredentialsDetected: credentials,
+  google: { scopes: config.google.scopeLabel, missingScopes: () => googleAuth?.missingScopes() ?? [] },
+  watchIntervalSeconds: config.watchIntervalSeconds,
+});
 app.recover();
+app.start();
 
-const server = createHttpServer(app, config, foAuth, path.resolve(here, "../web/dist"));
+const server = createHttpServer(app, config, { google: googleFlow, fo: foFlow }, path.resolve(here, "../web/dist"));
 server.listen(config.port, "127.0.0.1", () => {
-  console.log(`Paper Chase is running at ${config.appOrigin}`);
-  console.log(`  Claude extraction: ${config.claudeMode === "live" ? `live (${config.anthropicModel})${credentials ? "" : ", but no ANTHROPIC_API_KEY was found"}` : "MOCK"}`);
-  console.log(`  Fo: ${config.foMode === "live" ? `live (${config.foMcpUrl})` : "MOCK, nothing is sent"}`);
+  console.log(`Fo-rganized is running at ${config.appOrigin}`);
+  console.log(`  Google Drive: ${config.driveMode === "live" ? (config.google.clientId ? `live (${config.google.scopeLabel} scopes)` : "live, but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET aren't set") : "MOCK (in-memory, nothing touches your Drive)"}`);
+  console.log(`  Claude reading: ${config.claudeMode === "live" ? `live (${config.anthropicModel})${credentials ? "" : ", but no ANTHROPIC_API_KEY was found"}` : "MOCK (pattern reader)"}`);
+  console.log(`  Fo: ${config.foMode === "live" ? `live (${config.foMcpUrl})` : "MOCK (nothing is sent)"}`);
 });
 
 function shutdown(): void {
