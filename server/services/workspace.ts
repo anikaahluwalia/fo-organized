@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { all, logEvent, now, one, run, tx, type Db, type DocumentRow, type FileOrigin, type FileRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
-import { DEMO_WORKSPACE_NAME, demoFileContent, MESSY_FOLDER, REVISED_QUOTE, SECOND_REVISION, type DemoDoc } from "../demo/renovation.ts";
+import { DEMO_WORKSPACE_NAME, demoFileContent, MESSY_FOLDER, NEW_SUPPLIER_INVOICE, REVISED_QUOTE, SECOND_REVISION, type DemoDoc } from "../demo/renovation.ts";
 import { toFacts, type DocFacts } from "../domain/documents.ts";
 import { CATEGORY } from "../domain/naming.ts";
 import { join } from "../domain/plan.ts";
@@ -164,9 +164,10 @@ export async function createDemoWorkspace(ctx: Ctx): Promise<WorkspaceRow> {
  * Demo step: drop the contractor's revised quote into the workspace, as if the email attachment
  * had been saved to Drive. "ambiguous" adds a second same-day revision.
  */
-export async function stageRevisedQuote(ctx: Ctx, variant: "single" | "ambiguous"): Promise<string[]> {
+export async function stageRevisedQuote(ctx: Ctx, variant: "single" | "ambiguous" | "invoice"): Promise<string[]> {
   const ws = requireWorkspace(ctx.db);
-  const added = await uploadDemoDocs(ctx, ws, variant === "ambiguous" ? [REVISED_QUOTE, SECOND_REVISION] : [REVISED_QUOTE]);
+  const docs = variant === "invoice" ? [NEW_SUPPLIER_INVOICE] : variant === "ambiguous" ? [REVISED_QUOTE, SECOND_REVISION] : [REVISED_QUOTE];
+  const added = await uploadDemoDocs(ctx, ws, docs);
   if (added.length) logEvent(ctx.db, ws.id, "staged", `Staged demo input: added ${added.map((n) => `"${n}"`).join(" and ")} to the workspace folder.`);
   ctx.jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
   return added;

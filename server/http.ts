@@ -70,11 +70,14 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   const route = (method: string, pattern: string, handler: Handler) =>
     routes.push({ method, pattern: new RegExp(`^${pattern.replace(/:[a-z]+/gi, "([A-Za-z0-9_-]+)")}$`), handler });
 
-  route("GET", "/api/state", async () => ({ ...(await app.view()), extension: { paired: extensionPaired(app.db) } }));
-  route("POST", "/api/settings", (_p, b) => app.setUserName(str(b, "userName") ?? ""));
+  route("GET", "/api/state", async () => {
+    const view = await app.view();
+    return { ...view, settings: { ...view.settings, autoText: app.autoTextEnabled() }, extension: { paired: extensionPaired(app.db) } };
+  });
+  route("POST", "/api/settings", (_p, b) => app.updateSettings({ userName: str(b, "userName"), autoText: typeof b.autoText === "boolean" ? b.autoText : undefined }));
   route("POST", "/api/workspace/select", (_p, b) => app.selectWorkspace(str(b, "folder") ?? "").then(() => ({ ok: true })));
   route("POST", "/api/workspace/demo", () => app.createDemoWorkspace().then(() => ({ ok: true })));
-  route("POST", "/api/workspace/stage-revision", (_p, b) => app.stageRevision(b.variant === "ambiguous" ? "ambiguous" : "single").then((added) => ({ added })));
+  route("POST", "/api/workspace/stage-revision", (_p, b) => app.stageRevision(b.variant === "ambiguous" ? "ambiguous" : b.variant === "invoice" ? "invoice" : "single").then((added) => ({ added })));
   route("POST", "/api/workspace/refresh", () => app.refreshInventory());
   route("POST", "/api/plans/organize", () => app.proposeOrganize());
   route("POST", "/api/plans/:id/revise", ([id], b) => {

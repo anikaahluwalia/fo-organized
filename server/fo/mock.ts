@@ -59,6 +59,8 @@ export class MockFoClient implements FoClient {
 
     if (/don't send the email/.test(args.message)) {
       convo.pending = { progress: [], final: `${MOCK_NOTE}\nOkay, I won't send it.\nKIKI-STATUS: NOT-SENT` };
+    } else if (/send ME \(the account holder/.test(args.message) && /text message \(SMS\)/.test(args.message)) {
+      convo.pending = { progress: ["Texting you (mock)…"], final: `${MOCK_NOTE}\nI would have texted you Kiki's message.\nKIKI-STATUS: SENT` };
     } else if (/send ME \(the account holder/.test(args.message)) {
       convo.pending = { progress: ["Sending you the note (mock)…"], final: `${MOCK_NOTE}\nI would have sent you Kiki's note. In mock mode nothing leaves this computer.\nKIKI-STATUS: SENT` };
     } else if (/-----BEGIN APPROVED BODY-----/.test(args.message)) {

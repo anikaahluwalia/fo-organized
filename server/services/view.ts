@@ -184,6 +184,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       origin: f.origin,
       link: f.web_link,
       doc: d && !f.is_folder && f.origin !== "created_by_kiki" ? docView(d) : null,
+      isNew: f.origin !== "created_by_kiki" && Date.parse(f.first_seen_at) > Date.parse(ws.created_at) + 60_000 && Date.now() - Date.parse(f.first_seen_at) < 30 * 60_000,
     };
   });
 

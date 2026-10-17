@@ -151,3 +151,23 @@ export const SECOND_REVISION: DemoDoc = {
 export function demoFileContent(doc: DemoDoc): Buffer {
   return makePdf(doc.title, doc.lines);
 }
+
+/** The demo's star: a new supplier invoice dropped into Drive. It doesn't say which project it's for. */
+export const NEW_SUPPLIER_INVOICE: DemoDoc = {
+  key: "northside-invoice-2",
+  fileName: "Northside invoice Oct 17.pdf",
+  mimeType: "application/pdf",
+  title: "INVOICE",
+  lines: [
+    "Northside Building Supply",
+    "Invoice No: N-5602",
+    "Date: 2026-10-17",
+    "Bill to: 12 Cedar Lane",
+    "",
+    "Transition strips, 4 pieces: $96.40",
+    "Floor levelling compound, 4 bags: $190.00",
+    "",
+    "Total (CAD): $286.40",
+    ...FOOTER,
+  ],
+};

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { OpKind } from "../db.ts";
 import type { DocFacts } from "./documents.ts";
 import { deduplicateName, indexFileName, projectFolderPath, proposedName, SUPERSEDED_FOLDER, targetFolder } from "./naming.ts";
+import { issuerKey } from "./safety.ts";
 
 export interface PlanFile {
   fileId: string;
@@ -221,6 +222,15 @@ export function buildOrganizePlan(input: {
   const moves: Move[] = [];
   const projects = new Set<string>();
 
+  // Suppliers Kiki already knows: an invoice that doesn't name its project goes where that
+  // supplier's other documents are (only when they all point to one project).
+  const supplierProjects = new Map<string, Set<string>>();
+  for (const d of input.docs) {
+    const key = issuerKey(d.facts?.issuer.value);
+    const project = d.facts?.project.value;
+    if (key && project) supplierProjects.set(key, (supplierProjects.get(key) ?? new Set()).add(project));
+  }
+
   const docs = [...input.docs].sort((a, b) => a.fileId.localeCompare(b.fileId));
   for (const doc of docs) {
     const file = fileById.get(doc.fileId);
@@ -238,7 +248,17 @@ export function buildOrganizePlan(input: {
       notes.push({ ...at, status: "needs_review", reason: doc.readError ?? "Kiki couldn't read this file, so she won't guess where it goes." });
       continue;
     }
-    const facts = doc.facts;
+    let facts = doc.facts;
+    let supplierNote: string | null = null;
+    if (!facts.project.value) {
+      const known = supplierProjects.get(issuerKey(facts.issuer.value) ?? "");
+      if (known && known.size === 1) {
+        const project = [...known][0]!;
+        const count = input.docs.filter((d) => d.docId !== doc.docId && issuerKey(d.facts?.issuer.value) === issuerKey(facts.issuer.value)).length;
+        facts = { ...facts, project: { value: project, quote: null, quoteFound: null } };
+        supplierNote = `It doesn't name a project, but ${facts.issuer.value} is the supplier on ${count} other document${count === 1 ? "" : "s"} filed under ${project}.`;
+      }
+    }
     const folder = targetFolder(facts);
     if (!folder) {
       notes.push({
@@ -264,7 +284,9 @@ export function buildOrganizePlan(input: {
       notes.push({ ...at, status: "needs_review", reason: "Drive says you can't rename this file, so Kiki left it." });
       continue;
     }
-    const why = [`It's a ${describeFacts(facts)} about ${facts.project.value!.toLowerCase()}, read from the document.`];
+    const kind = describeFacts(facts);
+    const article = /^[aeiou]/i.test(kind) ? "an" : "a";
+    const why = supplierNote ? [`It's ${article} ${kind}.`, supplierNote] : [`It's ${article} ${kind} about ${facts.project.value!.toLowerCase()}, read from the document.`];
     if (!suggested) why.push("There weren't enough facts to give it a clearer name, so it keeps its name.");
     if (facts.aiDirectedText.length) why.push("It contains text aimed at AI tools, which Kiki ignored.");
     moves.push({ file, doc, targetPath, name, reason: why.join(" ") });

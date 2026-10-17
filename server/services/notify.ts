@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { all, kvGet, kvSet, logEvent, one, type PlanOpRow, type PlanRow } from "../db.ts";
+import { all, kvGet, kvSet, logEvent, one, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
+import type { DocFacts } from "../domain/documents.ts";
+import { money } from "../domain/reconcile.ts";
 import { classifyDispatchReply, newReference, STATUS_LINES, stripStatusLines } from "../domain/outreach.ts";
 import { badRequest, conflict } from "../errors.ts";
 import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
@@ -29,10 +31,12 @@ export function notifyPreview(ctx: Ctx): { text: string; contentHash: string; pl
   return { text, contentHash: hash(text), planId: plan.id };
 }
 
-function message(text: string, reference: string): string {
-  return `Fo-rganized request (ref ${reference}). The user reviewed and approved this in the Fo-rganized app.
+function message(text: string, reference: string, channel: "note" | "text" = "note"): string {
+  const how = channel === "text" ? "a text message (SMS)" : "a short note, using the channel you normally use to reach me,";
+  const why = channel === "text" ? "The user turned on \"Fo texts me about new finds\" in the Fo-rganized app; this text is covered by that setting." : "The user reviewed and approved this in the Fo-rganized app.";
+  return `Fo-rganized request (ref ${reference}). ${why}
 
-Please send ME (the account holder, the person you're talking to) a short note, using the channel you normally use to reach me, with exactly this text:
+Please send ME (the account holder, the person you're talking to) ${how} with exactly this text:
 -----BEGIN APPROVED BODY-----
 ${text}
 -----END APPROVED BODY-----
@@ -86,4 +90,49 @@ export function notifyOutcome(response: string | null): "reported_sent" | "not_s
   if (!response) return "unclear";
   const c = classifyDispatchReply(response);
   return c === "sent" ? "reported_sent" : c === "not_sent" ? "not_sent" : "unclear";
+}
+
+const AUTO_TEXT = "settings.auto_text";
+
+export function autoTextEnabled(ctx: Ctx): boolean {
+  return kvGet(ctx.db, AUTO_TEXT) === "1";
+}
+
+export function setAutoText(ctx: Ctx, on: boolean): void {
+  kvSet(ctx.db, AUTO_TEXT, on ? "1" : undefined);
+  const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE active = 1");
+  logEvent(ctx.db, ws?.id ?? null, "settings", on ? "You turned on: Fo texts you when Kiki finds something to file. Only you are texted." : "You turned off Fo's texts about new finds.");
+}
+
+function describeDoc(f: DocFacts | null): string {
+  if (!f) return "a document";
+  const type = f.docType === "invoice" ? "invoice" : f.docType === "quote" ? "quote" : "document";
+  const details = [f.reference.value, f.date.value ? `dated ${f.date.value}` : null, f.total.value !== null ? money(f.total.value, f.total.currency) : null].filter(Boolean).join(", ");
+  return `a new ${type}${f.issuer.value ? ` from ${f.issuer.value}` : ""}${details ? ` (${details})` : ""}`;
+}
+
+/** The text Kiki asks Fo to send when she has a new proposal: facts, where it would go, and that nothing moves yet. */
+export function newFindText(ctx: Ctx, plan: PlanRow): string {
+  const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
+  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' ORDER BY seq", plan.id);
+  if (moves.length === 1) {
+    const op = moves[0]!;
+    const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
+    const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
+    const supplier = /supplier on \d+ other document/.test(op.reason) ? ` It's from a supplier you already have filed under ${(op.new_path ?? "").split("/")[1] ?? "that project"}.` : "";
+    return `Kiki here: I found ${describeDoc(facts)} in "${ws.name}".${supplier} I'd file it in ${op.new_path} as "${op.new_name}". Approve it in Fo-rganized; nothing moves until you do.`;
+  }
+  return `Kiki here: I found ${moves.length} documents to file in "${ws.name}" and prepared a plan. Approve it in Fo-rganized; nothing moves until you do.`;
+}
+
+/** Standing permission, texts to the account holder only: one text per new proposal. */
+export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
+  if (!autoTextEnabled(ctx)) return;
+  if (kvGet(ctx.db, `notify.plan.${plan.id}`)) return;
+  const text = newFindText(ctx, plan);
+  const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
+  kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
+  kvSet(ctx.db, `notify.text.${taskId}`, text);
+  logEvent(ctx.db, plan.workspace_id, "fo_text", `Kiki asked ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to text you about the new proposal.`);
+  void ctx.engine.start(taskId, message(text, newReference(), "text")).catch(() => undefined);
 }

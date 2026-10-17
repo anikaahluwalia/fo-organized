@@ -164,19 +164,45 @@ function countBy(ops: PlannedOp[], kind: string): number {
   return ops.filter((o) => o.kind === kind).length;
 }
 
-/** Proposes the first organizing pass from the latest inventory. Read-only until approved. */
+function pendingReads(db: Db, wsId: string): number {
+  return one<{ n: number }>(
+    db,
+    `SELECT COUNT(*) AS n FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
+     WHERE d.workspace_id = ? AND d.read_status IN ('pending', 'reading') AND f.present = 1`,
+    wsId,
+  )!.n;
+}
+
+function organizeDraft(db: Db, ws: WorkspaceRow): PlanDraft {
+  const docs = all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id).map(planDoc);
+  return buildOrganizePlan({ rootId: ws.root_file_id, files: planFiles(db, ws.id), docs, indexFiles: indexFiles(db, ws.id) });
+}
+
+function saveOrganize(db: Db, ws: WorkspaceRow, draft: PlanDraft): { plan: PlanRow; created: boolean } {
+  const seriesId = `organize:${ws.id}`;
+  const before = one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM plans WHERE series_id = ? AND status = 'applied'", seriesId)!.n;
+  const folders = countBy(draft.ops, "create_folder");
+  const moves = countBy(draft.ops, "move_rename");
+  const summary = [folders ? `create ${folders} folder${folders === 1 ? "" : "s"}` : null, moves ? `move or rename ${moves} file${moves === 1 ? "" : "s"}` : null, countBy(draft.ops, "write_index") ? "update the project index" : null]
+    .filter(Boolean)
+    .join(", ");
+  return savePlanVersion(db, ws, {
+    kind: "organize",
+    seriesId,
+    title: before > 0 ? (moves === 1 ? "File the new document" : "File the new documents") : "Organize the renovation paperwork",
+    summary: `Kiki would ${summary}.`,
+    draft,
+    details: { notes: draft.notes },
+    source: null,
+  });
+}
+
+/** Proposes the organizing changes the latest inventory calls for. Read-only until approved. */
 export function proposeOrganize(ctx: Ctx): { planId: string | null; created: boolean; message: string } {
   const ws = requireWorkspace(ctx.db);
   if (!ws.last_inventory_at) throw conflict("Kiki hasn't looked through the workspace yet.");
-  const pendingReads = one<{ n: number }>(
-    ctx.db,
-    `SELECT COUNT(*) AS n FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
-     WHERE d.workspace_id = ? AND d.read_status IN ('pending', 'reading') AND f.present = 1`,
-    ws.id,
-  )!.n;
-  if (pendingReads > 0) throw conflict("Kiki is still reading some documents. Try again in a moment.");
-  const docs = all<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id).map(planDoc);
-  const draft = buildOrganizePlan({ rootId: ws.root_file_id, files: planFiles(ctx.db, ws.id), docs, indexFiles: indexFiles(ctx.db, ws.id) });
+  if (pendingReads(ctx.db, ws.id) > 0) throw conflict("Kiki is still reading some documents. Try again in a moment.");
+  const draft = organizeDraft(ctx.db, ws);
   const seriesId = `organize:${ws.id}`;
   if (draft.ops.length === 0) {
     const open = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", seriesId);
@@ -184,21 +210,25 @@ export function proposeOrganize(ctx: Ctx): { planId: string | null; created: boo
     logEvent(ctx.db, ws.id, "plan", "Kiki checked the workspace: everything she can place is already organized.");
     return { planId: null, created: false, message: "Everything Kiki can place is already organized. Nothing to change." };
   }
-  const folders = countBy(draft.ops, "create_folder");
-  const moves = countBy(draft.ops, "move_rename");
-  const summary = [folders ? `create ${folders} folder${folders === 1 ? "" : "s"}` : null, moves ? `move or rename ${moves} file${moves === 1 ? "" : "s"}` : null, countBy(draft.ops, "write_index") ? "write the project index" : null]
-    .filter(Boolean)
-    .join(", ");
-  const { plan, created } = savePlanVersion(ctx.db, ws, {
-    kind: "organize",
-    seriesId,
-    title: "Organize the renovation paperwork",
-    summary: `Kiki would ${summary}.`,
-    draft,
-    details: { notes: draft.notes },
-    source: null,
-  });
+  const { plan, created } = saveOrganize(ctx.db, ws, draft);
   return { planId: plan.id, created, message: created ? "Kiki proposed a plan." : "This plan is unchanged from the one already proposed." };
+}
+
+/**
+ * Called after Kiki reads new documents: if something now needs filing, she prepares the
+ * proposal herself. It still changes nothing until approved, and a proposal the user set aside
+ * isn't re-proposed unless something changes.
+ */
+export function autoPropose(ctx: Ctx): { plan: PlanRow; created: boolean } | null {
+  const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE active = 1");
+  if (!ws?.last_inventory_at || pendingReads(ctx.db, ws.id) > 0) return null;
+  const seriesId = `organize:${ws.id}`;
+  if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('approved', 'executing')", seriesId)) return null;
+  const draft = organizeDraft(ctx.db, ws);
+  if (!draft.ops.some((o) => o.kind === "move_rename")) return null;
+  const hash = hashWithExclusions(draft.ops, new Set());
+  if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status = 'discarded' AND content_hash = ?", seriesId, hash)) return null;
+  return saveOrganize(ctx.db, ws, draft);
 }
 
 /** Rename or exclude steps. The result is a new version; any approval of the old one no longer applies. */

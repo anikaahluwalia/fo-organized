@@ -156,7 +156,10 @@ function WorkspaceCard({ view, act }: { view: AppView; act: ReturnType<typeof us
         <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("refresh", () => post("/api/workspace/refresh"))}>
           Look again
         </button>
-        <span className="hint">{ws.lastInventoryAt ? `Last looked at ${time(ws.lastInventoryAt)}` : "Looking now…"}</span>
+        <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("stage-invoice", () => post("/api/workspace/stage-revision", { variant: "invoice" }))}>
+          Staged: drop a new invoice for me
+        </button>
+        <span className="hint">{ws.lastInventoryAt ? `Kiki keeps watching this folder · last looked ${time(ws.lastInventoryAt)}` : "Looking now…"}</span>
       </div>
     </section>
   );
@@ -177,6 +180,7 @@ function InventoryCard({ view }: { view: AppView }) {
             <div className="item-head">
               <span className="item-label">{f.name}</span>
               <span className="row">
+                {f.isNew && <Badge kind="live">New</Badge>}
                 {f.origin === "staged_demo" && <Badge kind="demo">Staged demo file</Badge>}
                 {f.origin === "created_by_kiki" && <Badge kind="plain">Made by Kiki</Badge>}
                 {f.doc && <span className={`chip chip--${f.doc.readStatus === "read" ? "confirmed" : f.doc.readStatus === "failed" || f.doc.readStatus === "unreadable" ? "needs_review" : "not_searched"}`}>{f.doc.readStatus === "read" ? f.doc.docType : f.doc.readStatus}</span>}
@@ -359,6 +363,30 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
   );
 }
 
+function FoTextStatus({ n, mock }: { n: NotificationView; mock: boolean }) {
+  const fo = mock ? "Mock Fo" : "Fo";
+  const label =
+    n.outcome === "reported_sent"
+      ? `${fo} reports it texted you.`
+      : n.state === "failed"
+        ? "The text wasn't sent."
+        : n.state === "uncertain"
+          ? "Not sure the text went out."
+          : n.state === "needs_user_input"
+            ? `${fo} has a question.`
+            : n.outcome === "not_sent"
+              ? `${fo} says it didn't send the text.`
+              : `${fo} is texting you…`;
+  return (
+    <div className={`notice ${n.outcome === "reported_sent" ? "notice--ok" : n.state === "failed" || n.state === "uncertain" ? "notice--bad" : "notice--info"}`} style={{ marginBottom: 14 }}>
+      <strong>{label}</strong>
+      {n.text && <p className="hint">“{n.text}”</p>}
+      {(n.question || n.failureDetail) && <p>{n.question ?? n.failureDetail}</p>}
+      {mock && n.outcome === "reported_sent" && <p>Mock mode: no text was actually sent.</p>}
+    </div>
+  );
+}
+
 function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
   const proposed = view.plans.find((p) => p.status === "proposed");
   const requestId = useMemo(() => newId(), [proposed?.id]);
@@ -369,6 +397,23 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
   return (
     <section className="card decision" aria-labelledby="decide-title">
       <h2 id="decide-title">Decisions</h2>
+      {view.workspace && (
+        <label className="check" style={{ margin: "8px 0 14px" }}>
+          <input
+            type="checkbox"
+            checked={Boolean(view.settings.autoText)}
+            disabled={act.busy !== null}
+            onChange={(e) => act.run("auto-text", () => post("/api/settings", { autoText: e.target.checked }))}
+          />
+          <span>
+            <strong>Fo texts me when Kiki finds something to file.</strong>
+            <span className="hint" style={{ display: "block" }}>
+              Only you are texted. Nothing moves until you approve here.
+            </span>
+          </span>
+        </label>
+      )}
+      {view.notifications[0] && (proposed || running) && <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} />}
       {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
       {view.workspace && !proposed && !running && (
         <div className="stack">

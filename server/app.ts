@@ -21,8 +21,8 @@ import {
   setUserName,
   stopDispatch,
 } from "./services/outreach.ts";
-import { approvePlan, discardPlan, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
-import { notifyHandler, notifyPreview, notifySend } from "./services/notify.ts";
+import { approvePlan, autoPropose, discardPlan, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
+import { autoNotifyProposal, autoTextEnabled, notifyHandler, notifyPreview, notifySend, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { dismissOutcome, followUp, pasteReply, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
 import { activeWorkspace, createDemoWorkspace, requireWorkspace, runInventory, runReading, selectWorkspace, stageRevisedQuote } from "./services/workspace.ts";
@@ -37,6 +37,8 @@ export interface AppDeps {
   google?: { scopes: "narrow" | "full"; missingScopes: () => string[] };
   engineOptions?: EngineOptions;
   watchIntervalSeconds?: number;
+  /** Seconds between read-only looks at the workspace; 0 turns watching off (tests). */
+  workspacePollSeconds?: number;
 }
 
 /** Composes adapters, the job queue, the Fo engine and the services. */
@@ -46,8 +48,19 @@ export function createApp(deps: AppDeps) {
   const ctx = { db, drive, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30 } as Ctx;
   ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler }, deps.engineOptions);
 
-  jobs.register("inventory", async (p) => void (await runInventory(ctx, String(p.workspaceId))));
-  jobs.register("read", async (p) => void (await runReading(ctx, String(p.workspaceId))));
+  const pollSeconds = deps.workspacePollSeconds ?? 10;
+  // Kiki keeps looking at the selected folder (read-only) so she notices new files on her own.
+  jobs.register("inventory", async (p) => {
+    const wsId = String(p.workspaceId);
+    await runInventory(ctx, wsId);
+    return pollSeconds > 0 && activeWorkspace(db)?.id === wsId ? { rescheduleSeconds: pollSeconds } : undefined;
+  });
+  // After reading something new, she prepares a proposal herself and (if allowed) has Fo text you.
+  jobs.register("read", async (p) => {
+    await runReading(ctx, String(p.workspaceId));
+    const proposal = autoPropose(ctx);
+    if (proposal?.created) autoNotifyProposal(ctx, proposal.plan);
+  });
   jobs.register("execute_plan", async (p, job) => executePlan(ctx, String(p.planId), job.attempts + 1));
   jobs.register("watch", async (p) => watchJob(ctx, String(p.watchId), ctx.watchIntervalSeconds));
   jobs.register("outcome", async (p) => runOutcome(ctx, String(p.outcomeId)));
@@ -99,10 +112,14 @@ export function createApp(deps: AppDeps) {
     forgetConnectionCache() {
       driveConn = null;
     },
-    setUserName: (name: string) => setUserName(db, name),
+    updateSettings(input: { userName?: string; autoText?: boolean }) {
+      if (input.userName !== undefined) setUserName(db, input.userName);
+      if (input.autoText !== undefined) setAutoText(ctx, input.autoText);
+    },
+    autoTextEnabled: () => autoTextEnabled(ctx),
     selectWorkspace: (input: string) => selectWorkspace(ctx, input),
     createDemoWorkspace: () => createDemoWorkspace(ctx),
-    stageRevision: (variant: "single" | "ambiguous") => stageRevisedQuote(ctx, variant),
+    stageRevision: (variant: "single" | "ambiguous" | "invoice") => stageRevisedQuote(ctx, variant),
     refreshInventory() {
       const ws = requireWorkspace(db);
       jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });

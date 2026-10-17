@@ -32,6 +32,8 @@ export interface Config {
   google: { clientId: string | null; clientSecret: string | null; scopes: string[]; scopeLabel: "narrow" | "full" };
   /** Seconds between checks of a watched Fo conversation. */
   watchIntervalSeconds: number;
+  /** Seconds between read-only looks at the workspace folder, so Kiki notices new files. */
+  workspacePollSeconds: number;
 }
 
 function mode(value: string | undefined, fallback: IntegrationMode): IntegrationMode {
@@ -64,6 +66,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       scopeLabel: full ? "full" : "narrow",
     },
     watchIntervalSeconds: Number(env.WATCH_INTERVAL_SECONDS ?? (env.FO_MODE === "mock" || base === "mock" ? 3 : 30)),
+    workspacePollSeconds: Number(env.WORKSPACE_POLL_SECONDS ?? (driveMode === "mock" ? 4 : 10)),
   };
 }
 

@@ -56,6 +56,7 @@ export interface FileView {
   origin: "found" | "staged_demo" | "supplied_by_user" | "created_by_kiki";
   link: string | null;
   doc: DocView | null;
+  isNew: boolean;
 }
 
 export interface InventoryView {
@@ -272,7 +273,7 @@ export interface NotificationView {
 export interface AppView {
   notifications: NotificationView[];
   integrations: IntegrationsView;
-  settings: { userName: string | null };
+  settings: { userName: string | null; autoText?: boolean };
   workspace: WorkspaceView | null;
   inventory: InventoryView;
   plans: PlanView[];
