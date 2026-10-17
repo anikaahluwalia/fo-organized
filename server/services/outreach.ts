@@ -98,7 +98,8 @@ export function createDraft(db: Db, itemId: string, input: { recipientName?: str
 
   const request = getRequest(db, item.request_id);
   const extraction = storedExtraction(request);
-  const organization = extraction?.extraction.requester.organization ?? extraction?.requesterDomain ?? null;
+  // The stated organization only; an unverified sender domain doesn't belong in a note to family.
+  const organization = extraction?.extraction.requester.organization ?? null;
   const template = draftTemplate({
     studentName,
     itemLabel: item.label,

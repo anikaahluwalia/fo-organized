@@ -9,11 +9,12 @@
   },
   "scripts": {
     "dev": "node scripts/dev.ts",
-    "server": "node --watch server/index.ts",
+    "server": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch server/index.ts",
     "build": "vite build",
-    "start": "vite build && node server/index.ts",
+    "start": "vite build && node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.ts",
+    "start:mock": "vite build && PAPERCHASE_MODE=mock node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
-    "test": "node --test test/*.test.ts"
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
