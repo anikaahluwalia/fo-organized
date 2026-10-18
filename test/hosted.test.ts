@@ -39,7 +39,7 @@ async function online(t: TestContext) {
   t.after(() => new Promise<void>((r) => (server.closeAllConnections(), server.close(() => r()))));
   const signIn = async (password = PASSWORD, from?: string) => {
     const res = await request(port, { method: "POST", path: "/login", body: `password=${encodeURIComponent(password)}&next=%2F`, origin: ORIGIN, forwardedFor: from });
-    const cookie = String(res.headers["set-cookie"] ?? "").split(";")[0];
+    const cookie = String(res.headers["set-cookie"] ?? "").split(";")[0] ?? "";
     return { res, cookie };
   };
   return { rig, port, config, signIn };
