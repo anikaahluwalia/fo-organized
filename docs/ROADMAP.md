@@ -42,7 +42,7 @@ Each step is done only when its acceptance check passes against what actually ha
 | 5 | **Keep the index current** | Each entry links to the real file; current, superseded and accepted are distinct; missing and unclear documents are pointed out. | |
 | 6 | **Notice new files** | A new file is read, matched to its collection and proposed through Fo once; filed files aren't proposed again. | |
 | 7 | **Fo talks to others for you** | An approved message goes out through Fo, the reply comes back on the mapped conversation, and a revised version is found (Drive first, then Gmail), compared and proposed. | |
-| 8 | **Submission** | A tight demo of one complete story in a real test Drive folder, one ambiguity resolved, and the real reason it's needed. | |
+| 8 | **Submission** | A tight demo of one complete story in a real test Drive folder, one ambiguity resolved, and the real reason it's needed. Add Remotion's agent skill (`remotion-dev/skills`, vetted first) for the demo video then. | |
 
 ## Findings to settle in each step
 

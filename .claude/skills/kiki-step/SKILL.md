@@ -16,7 +16,7 @@ The plan, the acceptance check of every step and the open findings filed under e
 3. **Settle the findings filed under the step.** For each one, write a test that reproduces it. If it reproduces, fix it; if it doesn't, note why it's dismissed. Never fix a finding you couldn't reproduce.
 4. **Build the smallest change** that passes. Keep application code in control of bounds, approvals, execution and retries; the model only interprets.
 5. **Check what actually happened**: FakeDrive state in tests, Drive read back in the app. "Kiki said it worked" is not evidence.
-6. **Review** with the `kiki-review` checklist; for UI work, look at it with `kiki-ui-check` and follow `kiki-design`.
+6. **Simplify, then review**: run the `kiki-simplifier` agent on the step's diff, then go through the `kiki-review` checklist. For UI work, look at it with `kiki-ui-check` and follow `kiki-design`. To explain an architecture or a flow, draw it with the `excalidraw-diagram` skill into `docs/diagrams/`.
 7. **Run the full checks**: `npm test`, `npm run typecheck`, `npx vite build`.
 8. **Record and commit**: results in `docs/evals/step-N-*.md`, the step's status in the roadmap, then commit and push to `main` (no AI attribution lines).
 9. **Report and stop.** Tell the user what passed, what was measured, what's still open, and the next step's plan. The next step starts only when they say so.

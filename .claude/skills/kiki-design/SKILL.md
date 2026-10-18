@@ -5,7 +5,7 @@ description: Kiki's look, voice and UI rules for the web app and the Chrome side
 
 # Designing for Kiki
 
-The character, her states and her motion are specified in `docs/KIKI-DESIGN.md`; the UI order and labels come from `docs/FO-RGANIZED-BRIEF.md`. Read the relevant part before changing UI. Tokens and components live in `web/src/styles.css` (side panel: `extension/panel.css`): reuse them rather than adding new colors or one-off styles.
+The character, her states and her motion are specified in `docs/KIKI-DESIGN.md`; the UI order and labels come from `docs/FO-RGANIZED-BRIEF.md`. Read the relevant part before changing UI. For visual decisions, follow the `frontend-design` skill's process (plan, check the plan against the brief, build, critique with screenshots) with those two documents and this file as the brief: the brief always wins over generic aesthetic advice. Its list of "AI-generated tells" (all-caps eyebrow labels, middle-dot meta strings, the same card everywhere) applies to Kiki too. Tokens and components live in `web/src/styles.css` (side panel: `extension/panel.css`): reuse them rather than adding new colors or one-off styles.
 
 ## Voice
 

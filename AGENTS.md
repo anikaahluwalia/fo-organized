@@ -8,6 +8,7 @@ The workflows are written as skills in `.claude/skills/<name>/SKILL.md`. Read th
 - `kiki-eval`: evaluation sets for model-driven behavior; "invented" facts are bugs.
 - `kiki-review`: the trust and reliability checklist to review changes against.
 - `kiki-ui-check`: checking the web app and the Chrome side panel in a real browser.
-- `kiki-design`: Kiki's voice, honest labels and layout.
+- `kiki-design`: Kiki's voice, honest labels and layout, with Anthropic's `frontend-design` skill for visual decisions.
+- `.claude/agents/kiki-simplifier.md`: a behavior-preserving simplification pass over a step's diff.
 
 The short version: one step at a time from `docs/ROADMAP.md`; acceptance check first; never change real documents or send messages without the user's OK; port 8787 is the user's live app; commit and push working milestones to `main` without AI attribution lines.

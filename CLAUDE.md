@@ -5,7 +5,7 @@ Kiki keeps a Google Drive workspace organized; Fo (Wajo's assistant) is who the 
 ## How to work here
 
 - Work one roadmap step at a time with the process in `.claude/skills/kiki-step/SKILL.md`: acceptance check first, settle the findings filed under the step, report, and stop before the next step.
-- Measure model behavior with evaluation sets (`kiki-eval`), review changes against Kiki's trust rules (`kiki-review`), look at UI in a real browser (`kiki-ui-check`) and follow `kiki-design` for anything the user sees.
+- Measure model behavior with evaluation sets (`kiki-eval`), simplify the step's diff with the `kiki-simplifier` agent and review it against Kiki's trust rules (`kiki-review`), look at UI in a real browser (`kiki-ui-check`) and follow `kiki-design` (with Anthropic's `frontend-design`) for anything the user sees. Diagrams: the `excalidraw-diagram` skill, rendered with `node scripts/ui/render-excalidraw.mjs` (that skill is installed locally only; it has no license to redistribute).
 
 ## Commands
 

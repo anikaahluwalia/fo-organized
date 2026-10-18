@@ -9,3 +9,6 @@ dist/
 !.env.example
 .claude/worktrees/
 eval-results/
+
+# Third-party skill without a license: installed locally, not redistributed.
+.claude/skills/excalidraw-diagram/
