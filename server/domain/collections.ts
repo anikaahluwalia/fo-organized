@@ -84,25 +84,25 @@ const CATCH_ALL = new Set(
  * "Downloads", "New folder"). A folder the user made ("School", "Taxes", "Archive") is where they
  * meant it to be, so Kiki leaves it there.
  */
-export function isFiledPath(path: string): boolean {
+export function isFiledPath(path: string, roots: string[] = KIKI_ROOTS): boolean {
   if (!path) return false;
   const segments = path.split("/");
-  return KIKI_ROOTS.includes(segments[0]!) || segments.some((s) => !words(s).every((w) => CATCH_ALL.has(w)));
+  return roots.includes(segments[0]!) || segments.some((s) => !words(s).every((w) => CATCH_ALL.has(w)));
 }
 
 /** Folders the user keeps that can take documents: outside Kiki's own folders, named after something specific. */
-export function userFolders(files: Folder[]): { path: string; name: string; words: string[] }[] {
+export function userFolders(files: Folder[], roots: string[] = KIKI_ROOTS): { path: string; name: string; words: string[] }[] {
   const folders = files.filter((f) => f.isFolder && !f.isShortcut);
   const full = (f: Folder) => (f.path ? `${f.path}/${f.name}` : f.name);
   return folders
-    .filter((f) => !KIKI_ROOTS.includes(full(f).split("/")[0]!) && !KIKI_INTERNAL.has(f.name))
+    .filter((f) => !roots.includes(full(f).split("/")[0]!) && !KIKI_INTERNAL.has(f.name))
     .map((f) => ({ path: full(f), name: f.name, words: identifying(f.name) }))
     .filter((f) => f.words.length > 0);
 }
 
 /** Collections Kiki already made: the folders directly inside Projects (or the earlier Renovations). */
-export function kikiCollections(files: Folder[]): string[] {
-  return files.filter((f) => f.isFolder && !f.isShortcut && KIKI_ROOTS.includes(f.path)).map((f) => f.name);
+export function kikiCollections(files: Folder[], roots: string[] = KIKI_ROOTS): string[] {
+  return files.filter((f) => f.isFolder && !f.isShortcut && roots.includes(f.path)).map((f) => f.name);
 }
 
 /**
@@ -110,22 +110,22 @@ export function kikiCollections(files: Folder[]): string[] {
  * path or its name; a collection Kiki keeps, however it's spelled; or a new collection by that
  * name. Null when it climbs out of a folder, or more than one of their folders could be meant.
  */
-export function choosePlace(place: string, files: Folder[]): Destination | null {
+export function choosePlace(place: string, files: Folder[], roots: string[] = KIKI_ROOTS): Destination | null {
   const wanted = place.trim().replace(/^\/+|\/+$/g, "");
   if (!wanted || wanted.split("/").some((s) => /^\s*\.+\s*$/.test(s))) return null;
   // A path inside Kiki's own folders ("Projects/Flooring/Invoices") names that collection.
   const [root, collection] = wanted.split("/");
-  if (KIKI_ROOTS.includes(root!) && collection) {
-    return { kind: "kiki", how: "choice", name: kikiCollections(files).find((c) => c.toLowerCase() === collection.toLowerCase()) ?? collection, path: null, because: place };
+  if (roots.includes(root!) && collection) {
+    return { kind: "kiki", how: "choice", name: kikiCollections(files, roots).find((c) => c.toLowerCase() === collection.toLowerCase()) ?? collection, path: null, because: place };
   }
   const full = (f: Folder) => (f.path ? `${f.path}/${f.name}` : f.name);
-  const theirs = files.filter((f) => f.isFolder && !f.isShortcut && !KIKI_ROOTS.includes(full(f).split("/")[0]!) && !KIKI_INTERNAL.has(f.name));
+  const theirs = files.filter((f) => f.isFolder && !f.isShortcut && !roots.includes(full(f).split("/")[0]!) && !KIKI_INTERNAL.has(f.name));
   const lower = wanted.toLowerCase();
   const byPath = theirs.filter((f) => full(f).toLowerCase() === lower);
   const named = byPath.length ? byPath : theirs.filter((f) => f.name.toLowerCase() === lower || isSameCollection(f.name, wanted));
   if (named.length > 1) return null;
   if (named.length === 1) return { kind: "user", how: "choice", name: named[0]!.name, path: full(named[0]!), because: place };
-  const kept = kikiCollections(files).filter((name) => isSameCollection(name, wanted));
+  const kept = kikiCollections(files, roots).filter((name) => isSameCollection(name, wanted));
   return { kind: "kiki", how: "choice", name: kept.length === 1 ? kept[0]! : wanted, path: null, because: place };
 }
 
@@ -167,10 +167,12 @@ export function assignCollections(input: {
   /** Filed documents and where they are, so a supplier's next invoice goes where its others went. */
   filed: { facts: DocFacts | null; collection: string | null }[];
   files: Folder[];
+  /** Kiki's own top-level folders here ("Renovations" only when she made it). */
+  roots?: string[];
 }): Map<string, Destination> {
   const out = new Map<string, Destination>();
-  const users = userFolders(input.files);
-  const existing = kikiCollections(input.files).map((name) => ({ name, words: words(name) }));
+  const users = userFolders(input.files, input.roots);
+  const existing = kikiCollections(input.files, input.roots).map((name) => ({ name, words: words(name) }));
   const factWords = (f: DocFacts) => new Set([...words(f.project.value), ...words(f.title?.value), ...words(f.issuer.value)]);
 
   // 1. A folder the user keeps.

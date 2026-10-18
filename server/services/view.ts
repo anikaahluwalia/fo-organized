@@ -191,11 +191,12 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
     };
   });
 
-  // Plans: the latest version of each series.
+  // Plans: the latest version of each series, and every earlier plan that changed something (so
+  // its undo stays within reach after later filings).
   const plans = all<PlanRow>(
     db,
-    `SELECT p.* FROM plans p WHERE p.workspace_id = ? AND p.version = (SELECT MAX(version) FROM plans q WHERE q.series_id = p.series_id)
-     ORDER BY p.created_at DESC LIMIT 20`,
+    `SELECT p.* FROM plans p WHERE p.workspace_id = ? AND (p.version = (SELECT MAX(version) FROM plans q WHERE q.series_id = p.series_id) OR p.status IN ('applied', 'partial', 'stale'))
+     ORDER BY p.created_at DESC LIMIT 30`,
     ws.id,
   );
   const openUndo = new Set(all<{ s: string }>(db, "SELECT series_id AS s FROM plans WHERE kind = 'undo' AND status IN ('proposed', 'approved', 'executing', 'applied')").map((r) => r.s));

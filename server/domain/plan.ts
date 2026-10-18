@@ -12,6 +12,8 @@ export interface PlanFile {
   parentId: string | null;
   path: string; // folder path the file lives in, relative to the workspace root ("" = root)
   version: string | null;
+  /** Kiki created it (a folder of her own layout). */
+  byKiki?: boolean;
   size?: number | null;
   createdTime: string | null;
   isFolder: boolean;
@@ -164,12 +166,12 @@ class Folders {
 }
 
 /** Folders that already hold this kind of document (a collection's type folder, the user's folders), to offer. */
-function placesThatFit(facts: DocFacts, files: PlanFile[]): string[] {
+function placesThatFit(facts: DocFacts, files: PlanFile[], roots: string[]): string[] {
   const has = new Set(files.filter((f) => f.isFolder && !f.isShortcut).map((f) => (f.path ? `${f.path}/${f.name}` : f.name)));
-  const typed = kikiCollections(files)
+  const typed = kikiCollections(files, roots)
     .map((c) => targetFolder({ ...facts, project: { value: c, quote: null, quoteFound: null } }, files))
     .filter((p): p is string => p !== null && has.has(p));
-  return [...typed, ...userFolders(files).map((u) => u.path)].slice(0, 4);
+  return [...typed, ...userFolders(files, roots).map((u) => u.path)].slice(0, 4);
 }
 
 /** Why a document goes where it goes, citing what that rests on; null when its label already says it. */
@@ -270,11 +272,18 @@ export function buildOrganizePlan(input: {
   const readable = docs.filter(
     (d) => d.readStatus === "read" && d.facts && fileById.get(d.fileId) && !fileById.get(d.fileId)!.isShortcut && !copyOf.has(d.docId) && !input.undone?.has(d.fileId),
   );
-  const placeOf = (path: string) => (KIKI_ROOTS.includes(path.split("/")[0]!) ? (path.split("/")[1] ?? null) : `user:${path}`);
+  // "Renovations" is Kiki's earlier layout only where she made it (a folder she created, or a
+  // collection whose index she keeps); otherwise it's the user's own folder.
+  const legacy = input.files.some((f) => f.isFolder && !f.isShortcut && (f.path === "Renovations" || (f.path === "" && f.name === "Renovations")) && (f.byKiki || (f.path === "Renovations" && input.indexFiles[f.name] !== undefined)));
+  const roots = legacy ? KIKI_ROOTS : KIKI_ROOTS.filter((r) => r !== "Renovations");
+  // Folders as the naming rules see them: a user's own "Renovations" isn't Kiki's to reuse.
+  const layout = legacy ? input.files : input.files.filter((f) => !(f.isFolder && f.path === "Renovations"));
+  const placeOf = (path: string) => (roots.includes(path.split("/")[0]!) ? (path.split("/")[1] ?? null) : `user:${path}`);
   const destinations: Map<string, Destination> = assignCollections({
-    inbox: readable.filter((d) => !isFiledPath(fileById.get(d.fileId)!.path)).map((d) => ({ docId: d.docId, facts: d.facts! })),
-    filed: readable.filter((d) => isFiledPath(fileById.get(d.fileId)!.path)).map((d) => ({ facts: d.facts, collection: placeOf(fileById.get(d.fileId)!.path) })),
+    inbox: readable.filter((d) => !isFiledPath(fileById.get(d.fileId)!.path, roots)).map((d) => ({ docId: d.docId, facts: d.facts! })),
+    filed: readable.filter((d) => isFiledPath(fileById.get(d.fileId)!.path, roots)).map((d) => ({ facts: d.facts, collection: placeOf(fileById.get(d.fileId)!.path) })),
     files: input.files,
+    roots,
   });
   const resolved = new Map<string, { targetPath: string; name: string }>();
   const setAside: PlanDoc[] = [];
@@ -303,16 +312,16 @@ export function buildOrganizePlan(input: {
       setAside.push(doc);
       continue;
     }
-    if (!chosen && isFiledPath(file.path)) {
+    if (!chosen && isFiledPath(file.path, roots)) {
       // Still counts for keeping its collection's index in Drive.
       const collection = placeOf(file.path);
       if (collection && !collection.startsWith("user:")) projects.add(collection);
       notes.push({ ...at, status: "already_organized", reason: `Filed in ${file.path}. Kiki leaves filed documents where they are.` });
       continue;
     }
-    const dest = chosen ? choosePlace(chosen, input.files) : destinations.get(doc.docId);
+    const dest = chosen ? choosePlace(chosen, input.files, roots) : destinations.get(doc.docId);
     const facts = dest?.kind === "kiki" ? { ...doc.facts, project: { value: dest.name, quote: null, quoteFound: null } } : doc.facts;
-    const folder = !dest || facts.docType === "unknown" ? null : dest.kind === "user" ? dest.path : targetFolder(facts, input.files);
+    const folder = !dest || facts.docType === "unknown" ? null : dest.kind === "user" ? dest.path : targetFolder(facts, layout);
     if (chosen && !folder) {
       notes.push({ ...at, status: "left_in_place", reason: `You asked for "${chosen}", but Kiki couldn't tell which folder that is. Say its full path, like "School/CS 245".`, unplaced: true, version: file.version });
       continue;
@@ -323,7 +332,7 @@ export function buildOrganizePlan(input: {
         ...at,
         status: unknown ? "needs_review" : "left_in_place",
         reason: unknown ? "Kiki couldn't tell what kind of document this is." : `This ${describeFacts(facts)} doesn't say which project or folder it belongs to, so Kiki is leaving it where it is.`,
-        ...(unknown ? {} : { unplaced: true, version: file.version, options: placesThatFit(facts, input.files) }),
+        ...(unknown ? {} : { unplaced: true, version: file.version, options: placesThatFit(facts, layout, roots) }),
       });
       continue;
     }
@@ -593,7 +602,7 @@ export interface UndoSource {
 }
 
 /** Reverses verified changes, newest first. Folders Kiki created stay; nothing is deleted. */
-export function buildUndoPlan(input: { project: string | null; changes: UndoSource[]; indexFile: { fileId: string; version: string | null } | null; rootId: string; files: PlanFile[] }): PlanDraft {
+export function buildUndoPlan(input: { projects: { name: string; indexFile: { fileId: string; version: string | null } | null }[]; changes: UndoSource[]; rootId: string; files: PlanFile[] }): PlanDraft {
   const ops: PlannedOp[] = [];
   const folders = new Folders(input.rootId, input.files, ops);
   for (const c of [...input.changes].sort((a, b) => b.opSeq - a.opSeq)) {
@@ -635,6 +644,7 @@ export function buildUndoPlan(input: { project: string | null; changes: UndoSour
       });
     }
   }
-  if (input.project && ops.length) indexOp(ops, folders, input.project, input.indexFile, ops.map((o) => o.seq));
+  const changed = ops.map((o) => o.seq);
+  if (changed.length) for (const p of input.projects) indexOp(ops, folders, p.name, p.indexFile, changed);
   return { ops, notes: [] };
 }

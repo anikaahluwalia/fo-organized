@@ -295,6 +295,30 @@ function PlaceEditor({ planId, fileId, options, act }: { planId: string; fileId:
   );
 }
 
+/** Plans applied before the latest one: one line each, with their undo. */
+function EarlierChanges({ plans, act }: { plans: PlanView[]; act: ReturnType<typeof useAction> }) {
+  if (!plans.length) return null;
+  return (
+    <section className="card" aria-labelledby="earlier-title">
+      <h2 id="earlier-title">Earlier changes</h2>
+      <ul className="plain-list">
+        {plans.map((p) => (
+          <li key={p.id} className="row">
+            <span>
+              <strong>{p.title}</strong> <span className="hint">· {p.counts.verified} of {p.counts.total - p.counts.excluded} verified{p.finishedAt ? ` · ${time(p.finishedAt)}` : ""}</span>
+            </span>
+            {p.canUndo && (
+              <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`undo-${p.id}`, () => post(`/api/plans/${p.id}/undo`))}>
+                Undo…
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAction> }) {
   // A finished, verified plan is a record: one line until you want the steps.
   const done = plan.status === "applied";
@@ -335,7 +359,7 @@ function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAct
       {done && (
         <div className="row">
           <span className="hint">
-            {plan.counts.verified} of {plan.counts.total} changes verified in Drive{plan.finishedAt ? ` · ${time(plan.finishedAt)}` : ""}.
+            {plan.counts.verified} of {plan.counts.total - plan.counts.excluded} changes verified in Drive{plan.finishedAt ? ` · ${time(plan.finishedAt)}` : ""}.
           </span>
           <button className="btn btn--quiet btn--small" aria-expanded={open} onClick={() => setOpen(!open)}>
             {open ? "Hide the steps" : `Show the ${steps} step${steps === 1 ? "" : "s"}`}
@@ -786,7 +810,7 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
             className="btn btn--small"
             style={{ marginTop: 8 }}
             disabled={act.busy !== null}
-            onClick={() => act.run("retry", () => post(broken.status === "stale" ? "/api/plans/organize" : `/api/plans/${broken.id}/resume`))}
+            onClick={() => act.run("retry", () => post(broken.status === "stale" ? `/api/plans/${broken.id}/refresh` : `/api/plans/${broken.id}/resume`))}
           >
             {broken.status === "stale" ? "Refresh the plan" : "Try again"}
           </button>
@@ -932,6 +956,7 @@ export function App() {
             .map((p) => (
               <PlanCard key={p.id} plan={p} act={act} />
             ))}
+          <EarlierChanges plans={livePlans.filter((p) => ["applied", "partial"].includes(p.status) && !shownPlans.includes(p))} act={act} />
           <IndexCard view={view} act={act} />
           <Activity view={view} />
         </main>

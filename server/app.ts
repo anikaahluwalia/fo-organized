@@ -25,6 +25,7 @@ import {
 } from "./services/outreach.ts";
 import { approvePlan, autoPropose, discardPlan, placeFile, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
 import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
+import { refreshPlan } from "./services/refresh.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
@@ -154,6 +155,7 @@ export function createApp(deps: AppDeps) {
     resumePlan: (planId: string) => resumePlan(ctx, planId),
     proposeUndo: (planId: string) => ({ planId: proposeUndo(ctx, planId) }),
     askThroughFo: (planId: string) => askThroughFo(ctx, planId),
+    refreshPlan: (planId: string) => refreshPlan(ctx, planId),
     placeFile: (planId: string, fileId: string, place: string) => placeFile(ctx, planId, fileId, place),
     acceptQuote,
     notifyPreview: () => notifyPreview(ctx),

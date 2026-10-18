@@ -759,10 +759,9 @@ describe("plan.ts buildUndoPlan", () => {
 
   test("undo reverses verified changes newest first, bound to their current state, and deletes nothing", () => {
     const draft = buildUndoPlan({
-      project: "Flooring",
+      projects: [{ name: "Flooring", indexFile: { fileId: "index-1", version: "index-v2" } }],
       rootId: ROOT,
       files: folders,
-      indexFile: { fileId: "index-1", version: "index-v2" },
       changes: [
         move(5, "id-deposit", "Oakline invoice deposit.pdf", "2026-10-01 Invoice - Oakline Flooring Co. - INV-3307.pdf"),
         move(6, "id-northside", "invoice final FINAL.pdf", "2026-10-03 Invoice - Northside Building Supply - N-5581.pdf"),
@@ -790,10 +789,9 @@ describe("plan.ts buildUndoPlan", () => {
 
   test("undo skips a move it has no original location for, and leaves the index alone without a project", () => {
     const draft = buildUndoPlan({
-      project: null,
+      projects: [],
       rootId: ROOT,
       files: folders,
-      indexFile: null,
       changes: [move(5, "id-orphan", "orphan.pdf", "Orphan.pdf", null), move(6, "id-deposit", "Oakline invoice deposit.pdf", "Deposit.pdf")],
     });
     assert.deepEqual(

@@ -1,4 +1,5 @@
-import { logEvent, now, one, run, tx, type DocumentRow, type PlanOpRow, type PlanRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
+import { createHash } from "node:crypto";
+import { kvGet, kvSet, logEvent, now, one, run, tx, type DocumentRow, type PlanOpRow, type PlanRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
 import { CATEGORY } from "../domain/naming.ts";
 import { changeToken, DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } from "../google/types.ts";
 import type { Ctx } from "./context.ts";
@@ -128,6 +129,9 @@ class Execution {
         else if (op.kind === "write_index") await this.writeIndex(op);
       } catch (err) {
         if (err instanceof StopPlan) {
+          // An undo puts each file back on its own: one you changed since stays as it is, and the
+          // others still go back. Any other plan stops, so you can review what changed.
+          if (this.plan.kind === "undo") continue;
           for (const rest of planOps(this.ctx.db, this.plan.id)) {
             if (rest.state === "pending") this.set(rest, "skipped", { error: "Not started: the plan stopped because a file changed since preview." });
           }
@@ -291,7 +295,9 @@ class Execution {
   private recordProject(op: PlanOpRow): void {
     if (!op.doc_id) return;
     const [category, project] = (op.new_path ?? "").split("/");
-    if (this.plan.kind !== "undo" && (category === CATEGORY || category === "Renovations") && project) {
+    // Under "Renovations" only for Kiki's earlier layout: a project whose index she keeps there.
+    const legacy = category === "Renovations" && project && one(this.ctx.db, "SELECT id FROM projects WHERE workspace_id = ? AND name = ? AND index_file_id IS NOT NULL", this.ws.id, project);
+    if (this.plan.kind !== "undo" && (category === CATEGORY || legacy) && project) {
       run(this.ctx.db, "UPDATE documents SET project_id = ?, updated_at = ? WHERE id = ?", ensureProject(this.ctx.db, this.ws.id, project).id, now(), op.doc_id);
     } else if (this.plan.kind === "undo" && category !== CATEGORY && category !== "Renovations") {
       run(this.ctx.db, "UPDATE documents SET project_id = NULL, updated_at = ? WHERE id = ? AND json_extract(facts_json, '$.project.value') IS NULL", now(), op.doc_id);
@@ -329,12 +335,25 @@ class Execution {
     if (!project) return this.set(op, "failed", { error: "That project isn't in the index." });
     const parentId = await this.resolveParent(op);
     const csv = buildIndexCsv(this.ctx.db, project, now());
+    // The index to write: the one planned; else one the project got meanwhile (another plan made
+    // it); else Kiki's own from an earlier attempt at this step.
     let file: DriveFile | null = op.file_id ? await this.tryGet(op.file_id) : null;
+    if (!file && project.index_file_id && project.index_file_id !== op.generated_id) file = await this.tryGet(project.index_file_id);
+    if (!file && op.generated_id) file = await this.tryGet(op.generated_id);
+    const sentKey = `index.sent.${op.id}`;
     if (file) {
-      if (changeToken(file) !== op.pre_version && changeToken(file) !== project.index_file_version) {
-        this.set(op, "failed", { error: "Someone edited the index file since Kiki last wrote it, so she didn't overwrite it." });
-        return;
+      // Never write to an index that left its folder: moved elsewhere, or out of the workspace.
+      if (file.parents[0] !== parentId) return this.set(op, "failed", { error: `The index file isn't in ${op.folder_path} any more, so Kiki didn't write to it.` });
+      // Only overwrite what Kiki wrote last: a version she recorded, or the exact bytes she sent.
+      const token = changeToken(file);
+      const sent = kvGet(this.ctx.db, sentKey);
+      if (token !== op.pre_version && token !== project.index_file_version && !(sent && file.contentKey === sent)) {
+        return this.set(op, "failed", { error: "Someone edited the index file since Kiki last wrote it, so she didn't overwrite it." });
       }
+    }
+    // Recorded before sending, so a retry after an interrupted write recognizes Kiki's own bytes.
+    kvSet(this.ctx.db, sentKey, createHash("md5").update(csv).digest("hex"));
+    if (file) {
       file = await this.ctx.drive.updateContent(file.id, "text/csv", csv);
     } else {
       let generated = op.generated_id;
@@ -342,16 +361,12 @@ class Execution {
         generated = (await this.ctx.drive.generateIds(1))[0]!;
         run(this.ctx.db, "UPDATE plan_ops SET generated_id = ? WHERE id = ?", generated, op.id);
       }
-      file = await this.tryGet(generated);
-      if (!file) {
-        try {
-          file = await this.ctx.drive.createFile({ id: generated, name: op.new_name!, parentId, mimeType: "text/csv", content: csv });
-        } catch (err) {
-          if (err instanceof DriveError && (err.kind === "conflict" || err.delivery === "unknown")) file = await this.tryGet(generated);
-          if (!file) throw err;
-        }
+      try {
+        file = await this.ctx.drive.createFile({ id: generated, name: op.new_name!, parentId, mimeType: "text/csv", content: csv });
+      } catch (err) {
+        if (err instanceof DriveError && (err.kind === "conflict" || err.delivery === "unknown")) file = await this.tryGet(generated);
+        if (!file) throw err;
       }
-      file = await this.ctx.drive.updateContent(file.id, "text/csv", csv);
     }
     const check = await this.ctx.drive.getFile(file.id);
     const content = await this.ctx.drive.readContent(check, 2_000_000);
@@ -386,7 +401,10 @@ export async function executePlan(ctx: Ctx, planId: string, attempt = 1): Promis
   } catch (err) {
     if (err instanceof DriveError && err.retryable && attempt < 3) throw err; // the job retries with backoff
     const reason = err instanceof DriveError && err.kind === "auth" ? "Google sign-in expired. Reconnect Google Drive, then retry the unfinished steps." : `Paused: ${err instanceof Error ? err.message : String(err)}`;
-    run(ctx.db, "UPDATE plan_ops SET state = 'uncertain', error = ? WHERE plan_id = ? AND state = 'running'", reason, planId);
+    // Drive answered with an error, so nothing changed: the step failed. Only a call whose answer
+    // was lost is uncertain (Try again reads Drive first).
+    const definite = err instanceof DriveError && err.delivery === "not_sent";
+    run(ctx.db, `UPDATE plan_ops SET state = '${definite ? "failed" : "uncertain"}', error = ? WHERE plan_id = ? AND state = 'running'`, reason, planId);
     logEvent(ctx.db, ws.id, "plan", reason);
   }
   finalize(ctx, planId);

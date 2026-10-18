@@ -67,6 +67,7 @@ export function createApi({ base, fetch: fetchFn, getToken, timeoutMs = 15000 })
     discard: (planId) => request("POST", plan(planId, "discard")),
     resume: (planId) => request("POST", plan(planId, "resume")),
     organize: () => request("POST", "/api/plans/organize"),
+    refresh: (planId) => request("POST", plan(planId, "refresh")),
     // Selecting a folder asks Google Drive about it first, so it can take a little longer.
     selectFolder: (folder) => request("POST", "/api/workspace/select", { folder }, 45000),
     setAutoText: (on) => request("POST", "/api/settings", { autoText: Boolean(on) }),

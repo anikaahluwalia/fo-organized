@@ -43,6 +43,7 @@ export function planFiles(db: Db, wsId: string): PlanFile[] {
     parentId: f.parent_id,
     path: f.path,
     version: f.version,
+    byKiki: f.origin === "created_by_kiki",
     size: f.size,
     createdTime: f.created_time,
     isFolder: Boolean(f.is_folder),
@@ -206,11 +207,16 @@ function pendingReads(db: Db, wsId: string): number {
 function organizeDraft(db: Db, ws: WorkspaceRow, places: Map<string, string> = new Map()): PlanDraft {
   // So are quotes that could be the revision Kiki is following up on.
   const held = heldFileIds(db, ws.id);
-  // Files a pending quote update will move are that plan's business, not this one's.
+  // Files a pending (or stale, until you refresh it) quote update will move are that plan's
+  // business, not this one's; so are the moves a partly applied plan didn't finish (they belong to
+  // its Try again).
   const reserved = new Set(
     all<{ file_id: string }>(
       db,
-      "SELECT o.file_id FROM plan_ops o JOIN plans p ON p.id = o.plan_id WHERE p.workspace_id = ? AND p.kind = 'version_update' AND p.status IN ('proposed', 'approved', 'executing') AND o.file_id IS NOT NULL",
+      `SELECT o.file_id FROM plan_ops o JOIN plans p ON p.id = o.plan_id WHERE p.workspace_id = ? AND o.file_id IS NOT NULL AND (
+         (p.kind = 'version_update' AND p.status IN ('proposed', 'approved', 'executing'))
+         OR (p.kind = 'version_update' AND p.status = 'stale' AND p.version = (SELECT MAX(q.version) FROM plans q WHERE q.series_id = p.series_id))
+         OR (p.status IN ('partial', 'failed') AND o.kind = 'move_rename' AND o.state IN ('pending', 'running', 'uncertain', 'failed', 'skipped')))`,
       ws.id,
     ).map((r) => r.file_id),
   );
@@ -522,6 +528,8 @@ export function resumePlan(ctx: Ctx, planId: string): void {
   if (!["approved", "executing", "partial", "failed"].includes(plan.status)) throw conflict("This plan can't be resumed.");
   const retryable = one<{ n: number }>(ctx.db, "SELECT COUNT(*) AS n FROM plan_ops WHERE plan_id = ? AND state IN ('pending', 'uncertain', 'running', 'failed', 'skipped')", planId)!.n;
   if (!retryable) throw conflict("Nothing left to retry in this plan.");
+  const open = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('proposed', 'approved', 'executing') AND id <> ?", plan.series_id, planId);
+  if (open) throw conflict(`"${open.title}" is open for this folder. Approve it or set it aside, then try again.`);
   tx(ctx.db, () => {
     run(ctx.db, "UPDATE plan_ops SET state = 'pending', error = NULL WHERE plan_id = ? AND state IN ('failed', 'skipped')", planId);
     // The index was written with what had worked; write it again after the retried steps.
@@ -583,9 +591,10 @@ export function proposeUndo(ctx: Ctx, planId: string): string {
     }
   }
   if (changes.length === 0) throw conflict("There are no verified changes left to undo.");
-  const project = rows.find((r) => r.kind === "write_index")?.folder_path?.split("/")[1] ?? null;
-  const idx = project ? (indexFiles(ctx.db, ws.id)[project] ?? null) : null;
-  const draft = buildUndoPlan({ project, changes, indexFile: idx, rootId: ws.root_file_id, files: planFiles(ctx.db, ws.id) });
+  // Every project whose index the plan wrote gets its index rewritten, not just the first.
+  const projects = [...new Set(rows.filter((r) => r.kind === "write_index").map((r) => r.folder_path?.split("/")[1]).filter((p): p is string => Boolean(p)))];
+  const idx = indexFiles(ctx.db, ws.id);
+  const draft = buildUndoPlan({ projects: projects.map((p) => ({ name: p, indexFile: idx[p] ?? null })), changes, rootId: ws.root_file_id, files: planFiles(ctx.db, ws.id) });
   const { plan: undo } = savePlanVersion(ctx.db, ws, {
     kind: "undo",
     seriesId: `undo:${planId}`,

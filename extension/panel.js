@@ -383,7 +383,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     retry(b) {
       return act(
         "retry",
-        () => (b.action === "refresh" ? api.organize() : api.resume(b.id)),
+        () => (b.action === "refresh" ? api.refresh(b.id) : api.resume(b.id)),
         (r) => (b.action === "refresh" ? (typeof r?.message === "string" ? r.message : null) : "Kiki is retrying the unfinished steps. Finished steps won't run again."),
       );
     },

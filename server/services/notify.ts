@@ -154,7 +154,7 @@ export function notifyPlanId(ctx: Ctx, taskId: string): string | null {
   const r = replyState(ctx, taskId);
   if (r?.planId) return r.planId;
   const row = one<{ key: string }>(ctx.db, "SELECT key FROM kv WHERE (key LIKE 'notify.done.%' OR key LIKE 'notify.plan.%' OR key LIKE 'notify.summary.%') AND value = ?", taskId);
-  return row ? row.key.replace(/^notify\.(done|plan|summary)\./, "") : null;
+  return row ? row.key.replace(/^notify\.(done|plan|summary)\./, "").replace(/\.(done|stopped)$/, "") : null;
 }
 
 export function saveReply(ctx: Ctx, taskId: string, state: ReplyState): void {
@@ -269,9 +269,12 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
 
 /** After a plan you approved by text is applied, Fo texts you that it's done. */
 export function sendDoneText(ctx: Ctx, planId: string): void {
-  if (!kvGet(ctx.db, `notify.approved_by_text.${planId}`) || kvGet(ctx.db, `notify.done.${planId}`)) return;
+  if (!kvGet(ctx.db, `notify.approved_by_text.${planId}`)) return;
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", planId);
   if (!plan || !["applied", "partial", "failed", "stale"].includes(plan.status)) return;
+  // One text per outcome: a "done" can still follow a "stopped" once Try again finishes it.
+  const outcome = plan.status === "applied" ? "done" : "stopped";
+  if (kvGet(ctx.db, `notify.done.${planId}.${outcome}`) || (outcome === "stopped" && kvGet(ctx.db, `notify.done.${planId}.done`))) return;
   const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state = 'verified' ORDER BY seq", planId);
   const text = plan.status !== "applied"
     ? `Kiki: the approved plan stopped (${plan.status}). ${all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state = 'verified'", planId).length} steps were verified in Drive. The remaining changes need review; I have not marked the plan done.`
@@ -279,7 +282,7 @@ export function sendDoneText(ctx: Ctx, planId: string): void {
       ? `Kiki: done. It's filed in ${inert(moves[0]!.new_path)} as "${inert(moves[0]!.new_name)}".`
       : `Kiki: done. I filed ${moves.length} documents and updated the index.`;
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
-  kvSet(ctx.db, `notify.done.${planId}`, taskId);
+  kvSet(ctx.db, `notify.done.${planId}.${outcome}`, taskId);
   kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "done");
   logEvent(ctx.db, plan.workspace_id, "fo_text", `Kiki asked ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to text you that it's done.`);

@@ -90,6 +90,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   route("POST", "/api/plans/:id/resume", ([id]) => app.resumePlan(id!));
   route("POST", "/api/plans/:id/undo", ([id]) => app.proposeUndo(id!));
   route("POST", "/api/plans/:id/ask-fo", ([id]) => app.askThroughFo(id!));
+  route("POST", "/api/plans/:id/refresh", ([id]) => app.refreshPlan(id!));
   route("POST", "/api/plans/:id/place", ([id], b) => app.placeFile(id!, str(b, "fileId") ?? "", str(b, "place") ?? ""));
   route("POST", "/api/documents/:id/accept", ([id], b) => app.acceptQuote(id!, b.accepted === true));
   route("POST", "/api/documents/:id/outreach", ([id], b) =>

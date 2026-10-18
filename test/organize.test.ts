@@ -794,7 +794,7 @@ describe("undo", () => {
     assert.throws(() => rig.app.proposeUndo(applied.id), conflictError, "nothing is left to undo");
   });
 
-  test("a file changed after organizing makes its undo step stale instead of overwriting the change", async (t) => {
+  test("a file changed after organizing makes its undo step stale instead of overwriting the change, and the rest still go back", async (t) => {
     const rig = newRig(t);
     await organized(rig);
     const applied = await appliedPlan(rig);
@@ -812,10 +812,10 @@ describe("undo", () => {
     assert.equal(brightStep?.state, "stale");
     assert.match(brightStep?.error ?? "", /changed since you previewed/);
     assert.equal(rig.drive.pathOf(bright), inWorkspace(QUOTES, "Bright Floors - keep.pdf"), "their rename is kept");
-    // The step before it was undone; the ones after it didn't run, and say so.
+    // Every other file still goes back: undo works wherever nothing changed since.
     assert.equal(undo.ops.find((o) => o.after?.name === "scan_0012.pdf")?.state, "verified");
     assert.equal(rig.drive.pathOf(scan), inWorkspace("scan_0012.pdf"));
-    assert.ok(undo.ops.filter((o) => o.seq > brightStep!.seq).every((o) => o.state === "skipped"));
+    assert.ok(undo.ops.filter((o) => o.kind === "move_rename" && o.seq !== brightStep!.seq).every((o) => o.state === "verified"));
   });
 });
 

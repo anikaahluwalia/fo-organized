@@ -398,7 +398,7 @@ export function proposeVersionUpdate(ctx: Ctx, outcomeId: string, chosenDocId: s
   if (saved.created) autoNotifyProposal(ctx, saved.plan);
 }
 
-function proposeConfirmCurrent(ctx: Ctx, outcomeId: string, interp: Outcome): void {
+export function proposeConfirmCurrent(ctx: Ctx, outcomeId: string, interp: Outcome): void {
   const { ws, asked } = load(ctx, outcomeId);
   const facts = docFacts(asked)!;
   const { label, statement } = sourceOf(ctx, outcomeId);
