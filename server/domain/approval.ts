@@ -30,6 +30,23 @@ If you cannot access the reply or relay it here, say so honestly. Kiki cannot as
 Please don't move or change any files yourself. Kiki executes approved changes and reports the verified result.`;
 }
 
+/** Your answer, compared as words: case, spacing and surrounding punctuation don't matter. */
+export const sameAnswer = (a: string, b: string) => {
+  const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/^[\s"'“”‘’.,!]+|[\s"'“”‘’.,!]+$/g, "").replace(/\s+/g, " ");
+  return norm(a) === norm(b);
+};
+
+/**
+ * Kiki's own check on Fo's "approved": your words are a plain, unconditional yes. A question,
+ * a hedge, a condition or a change ("not sure", "maybe later", "yes but skip one") isn't, and
+ * then nothing is approved; you can still approve in Kiki with one click.
+ */
+export function isPlainYes(answer: string): boolean {
+  const t = answer.normalize("NFKC").toLowerCase();
+  if (/\?|\b(not sure|unsure|maybe|perhaps|later|wait|hold|no|nope|not|don'?t|do not|but|except|unless|if|only|instead|skip|rename|change|why|what|which|hmm)\b/.test(t)) return false;
+  return /\b(yes|yeah|yep|yup|ok|okay|sure|go ahead|go for it|do it|approved?|sounds good|please do|file (it|them)|confirm(ed)?|agreed?|fine)\b/.test(t);
+}
+
 export function parseApprovalReport(text: string, binding: ApprovalBinding): ApprovalReport | null {
   const lines = text.split(/\r?\n/).filter((line) => line.startsWith("KIKI-DECISION:"));
   if (lines.length !== 1) return null;

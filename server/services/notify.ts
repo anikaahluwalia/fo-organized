@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { inert } from "../domain/inert.ts";
-import { approvalInstructions, parseApprovalReport, type ApprovalBinding } from "../domain/approval.ts";
+import { approvalInstructions, isPlainYes, parseApprovalReport, sameAnswer, type ApprovalBinding } from "../domain/approval.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
 import { all, kvGet, kvSet, logEvent, one, tx, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
 import type { DocFacts } from "../domain/documents.ts";
@@ -130,6 +130,8 @@ export interface ReplyState {
   clarification?: string;
   /** After you asked for changes: the version Kiki made from them, or why she couldn't. */
   revision?: { planId: string | null; version: number | null; note: string | null };
+  /** What you answered Fo in Kiki, in order. A decision counts only as Fo's reply to the latest. */
+  answers?: { text: string; at: string }[];
 }
 
 const REPLY_WINDOW_MS = 30 * 60_000;
@@ -179,21 +181,25 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   }
   if (["asking", "working"].includes(task.state)) return { rescheduleSeconds: 6 };
   const binding: ApprovalBinding = { requestId: state.requestId, planId: state.planId, contentHash: state.contentHash };
-  // Only Fo's report on the mapped conversation can authorize execution. Inbound SMS chats
-  // are not reliably correlated by MCP; do not search unrelated chats for an affirmative.
-  const reports: { text: string; at?: string | null }[] = [];
-  if (task.final_response && task.state === "complete") reports.push({ text: task.final_response, at: task.updated_at });
-  if (task.conversation_id) {
+  // For now you answer in Kiki (a text reply can't be tied to this request yet), so a decision
+  // counts only as Fo's reply to the latest answer Kiki relayed. Nothing before it, nothing in
+  // another conversation, and never something Fo reports without an answer from you.
+  const answer = state.answers?.at(-1);
+  if (!answer) return decide ? undefined : { rescheduleSeconds: 6 };
+  const answeredAtMs = Date.parse(answer.at);
+  let latest: string | null = null;
+  if (task.state === "complete" && task.final_response && Date.parse(task.updated_at) >= answeredAtMs) {
+    // Fo's reply to your latest answer: the newest word, even if the transcript lags behind it.
+    latest = task.final_response;
+  } else if (task.conversation_id) {
     try {
-      const turns = await ctx.fo.getConversation(task.conversation_id);
-      reports.push(...turns.filter((t) => t.role === "assistant"));
+      const turns = (await ctx.fo.getConversation(task.conversation_id)).filter((t) => t.role === "assistant" && t.at && Date.parse(t.at) >= answeredAtMs);
+      latest = turns.at(-1)?.text ?? null;
     } catch {
-      // A completed ask_fo/get_fo_reply response is also a report from this mapped conversation.
+      latest = null;
     }
   }
-  // Use the newest report, so a later clarification cannot be bypassed by an older approval.
-  for (const turn of reports.reverse()) {
-    if (turn.at && (!Number.isFinite(Date.parse(turn.at)) || Date.parse(turn.at) < sentAtMs)) continue;
+  for (const turn of latest ? [{ text: latest }] : []) {
     const report = parseApprovalReport(turn.text, binding);
     if (!report) continue;
     if (report.decision === "clarification") {
@@ -202,13 +208,20 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     }
     if (report.decision === "changes_requested") {
       // Never an approval: Kiki makes a new version from your words, and it goes back to Fo.
-      saveReply(ctx, taskId, { ...state, status: "adjusting", text: report.userReply, source: "relayed_by_fo", at: new Date().toISOString() });
+      // Your own words, as relayed from Kiki, are what Kiki reads for the changes.
+      saveReply(ctx, taskId, { ...state, status: "adjusting", text: answer.text, source: "relayed_by_fo", at: new Date().toISOString() });
       ctx.jobs.enqueue("adjust", `adjust:${taskId}`, { taskId });
       logEvent(ctx.db, plan.workspace_id, "fo_reply", `You asked for changes through Fo: "${report.userReply}". Kiki is preparing a new version.`);
       return;
     }
     const reply = { verdict: report.decision, text: report.userReply, source: "relayed_by_fo" as const };
     const at = new Date().toISOString();
+    if (reply.verdict === "approved" && (!sameAnswer(report.userReply, answer.text) || !isPlainYes(answer.text))) {
+      // Fo says yes, but your own words aren't a plain yes, or aren't what Fo quotes: nothing is approved.
+      saveReply(ctx, taskId, { ...state, clarification: `Fo reported an approval, but your answer ("${inert(answer.text, 200)}") isn't a plain yes to this version, so Kiki didn't apply it. Answer again, or approve it in Kiki.` });
+      logEvent(ctx.db, plan.workspace_id, "fo_reply", `Fo reported an approval, but your answer wasn't a plain yes, so Kiki didn't apply anything.`);
+      return;
+    }
     if (reply.verdict === "declined") {
       saveReply(ctx, taskId, { ...state, status: "declined", text: reply.text, source: reply.source, at });
       logEvent(ctx.db, plan.workspace_id, "fo_reply", `You replied "${reply.text}" to Fo's text, so Kiki isn't filing it.`);
@@ -229,7 +242,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     return;
   }
   // Fo is waiting for your answer in Kiki: it comes back through Kiki, so there's nothing to poll.
-  if (decide && task.state === "needs_user_input") return;
+  if (task.state === "needs_user_input") return;
   return { rescheduleSeconds: 6 };
 }
 

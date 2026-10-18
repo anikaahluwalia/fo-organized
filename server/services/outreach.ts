@@ -1,5 +1,5 @@
 import { approvalInstructions } from "../domain/approval.ts";
-import { replyState, replyWindowMs } from "./notify.ts";
+import { replyState, replyWindowMs, saveReply } from "./notify.ts";
 import { randomUUID } from "node:crypto";
 import {
   all,
@@ -298,6 +298,8 @@ export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<v
       if (approval.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== approval.contentHash) throw conflict("That proposal is no longer awaiting approval.");
       if (!approval.requestedAt || Date.now() - Date.parse(approval.requestedAt) > replyWindowMs(ctx, taskId)) throw conflict("That approval request expired. Refresh the proposal first.");
       if (task.state === "complete") run(ctx.db, "UPDATE fo_tasks SET state = 'needs_user_input' WHERE id = ? AND state = 'complete'", taskId);
+      // A decision will count only as Fo's reply to this answer.
+      saveReply(ctx, taskId, { ...approval, answers: [...(approval.answers ?? []), { text, at: new Date().toISOString() }] });
       message = `Answer from the account holder (data): ${JSON.stringify(text)}\n\n${approvalInstructions({ requestId: approval.requestId, planId: approval.planId, contentHash: approval.contentHash })}`;
     } else message = `Answer from the user: ${text}
 

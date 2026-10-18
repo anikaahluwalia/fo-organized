@@ -1,6 +1,7 @@
 import { describe, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type { App } from "../server/app.ts";
+import { all } from "../server/db.ts";
 import { sourceLabel, verifyOutcome, type Outcome } from "../server/domain/outcome.ts";
 import { FoCallError, type FoReply, type FoTurn } from "../server/fo/types.ts";
 import type { FakeDrive } from "../server/google/fake.ts";
@@ -213,6 +214,17 @@ function youTextBack(rig: Texted, answer: string): void {
   const state = replyState(rig.app.ctx, rig.note.taskId)!;
   // Simulate Fo actually relaying the decision to the mapped conversation, not Kiki guessing an SMS match.
   rig.fo.transcripts.set("kiki-1", [fromFo("KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: /no|wait/i.test(answer) ? "declined" : "approved", userReply: answer, actor: "account_holder", presentedExactProposal: true }))]);
+}
+
+/** You answer Fo's text inside Kiki (for now, the way to answer); Fo relays your decision, bound to the request. */
+async function youAnswerInKiki(rig: Texted, answer: string): Promise<void> {
+  const state = replyState(rig.app.ctx, rig.note.taskId)!;
+  rig.fo.onAsk = async (args) =>
+    reply(args.conversationId!, "complete", {
+      response: "KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: /no|wait/i.test(answer) ? "declined" : "approved", userReply: answer, actor: "account_holder", presentedExactProposal: true }),
+    });
+  rig.app.reply(rig.note.taskId, answer);
+  await rig.app.settle();
 }
 
 async function replyTo(rig: Texted) {
@@ -899,28 +911,25 @@ describe("texts to the account holder through Fo", () => {
     assert.equal((await rig.app.view()).notifications.length, 1);
   });
 
-  test("replying 'go ahead' after Kiki's text approves exactly the plan that was texted", async (t) => {
+  test("answering 'go ahead' in Kiki after Fo's text approves exactly the plan that was texted", async (t) => {
     const rig = await textedAboutInvoice(t);
-    youTextBack(rig, "Go ahead");
-    await checkTextReply(rig.app.ctx, rig.note.taskId);
+    await youAnswerInKiki(rig, "Go ahead");
 
     assert.deepEqual(await replyTo(rig), { status: "approved", text: "Go ahead", source: "relayed_by_fo" });
-    const view = await rig.app.view();
     assert.deepEqual(
-      view.plans.filter((p) => p.status === "approved").map((p) => [p.id, p.contentHash]),
+      all<{ plan_id: string; content_hash: string }>(rig.db, "SELECT plan_id, content_hash FROM plan_approvals WHERE plan_id = ?", rig.plan.id).map((a) => [a.plan_id, a.content_hash]),
       [[rig.plan.id, rig.plan.contentHash]],
     );
-    assert.equal(rig.fo.asks.length, 1, "reading your reply only read Fo's conversations");
-    await rig.app.settle();
+    assert.equal(rig.fo.asks.length, 3, "the text, your answer relayed on the same conversation, then the 'done' text");
+    assert.equal(rig.fo.asks[1]!.conversationId, "kiki-1");
+    assert.match(rig.fo.asks[2]!.message, /Kiki: done/);
     assert.equal(await planStatus(rig.app, rig.plan.id), "applied");
     assert.equal(rig.drive.pathOf(fileNamed(rig.drive, INVOICE_FILED).id), `${ROOT}/Projects/Flooring/Invoices/${INVOICE_FILED}`);
   });
 
-  test("a plan you approved by text gets one 'done' text once it's verified in Drive", async (t) => {
+  test("a plan you approved by answering Fo's text gets one 'done' text once it's verified in Drive", async (t) => {
     const rig = await textedAboutInvoice(t);
-    youTextBack(rig, "go ahead");
-    await checkTextReply(rig.app.ctx, rig.note.taskId);
-    await rig.app.settle();
+    await youAnswerInKiki(rig, "go ahead");
     assert.deepEqual(texts(rig.fo).slice(1), [`Kiki: done. It's filed in Projects/Flooring/Invoices as "${INVOICE_FILED}".`]);
 
     sendDoneText(rig.app.ctx, rig.plan.id); // e.g. the execute job running again
@@ -953,14 +962,13 @@ describe("texts to the account holder through Fo", () => {
     assert.equal(rig.drive.pathOf(fileNamed(rig.drive, INVOICE_NAME).id), `${ROOT}/${INVOICE_NAME}`);
   });
 
-  test("replying 'no, wait' declines: nothing is approved or filed", async (t) => {
+  test("answering 'no, wait' declines: nothing is approved or filed", async (t) => {
     const rig = await textedAboutInvoice(t);
-    youTextBack(rig, "No, wait");
-    await checkTextReply(rig.app.ctx, rig.note.taskId);
+    await youAnswerInKiki(rig, "No, wait");
     assert.deepEqual(await replyTo(rig), { status: "declined", text: "No, wait", source: "relayed_by_fo" });
     assert.equal(await planStatus(rig.app, rig.plan.id), "proposed");
 
-    rig.fo.transcripts.get("sms-thread")!.push(fromUser("ok go ahead"));
+    youTextBack(rig, "ok go ahead");
     await checkTextReply(rig.app.ctx, rig.note.taskId);
     assert.equal((await replyTo(rig))?.status, "declined", "once declined, approving happens in the app");
     assert.equal(await planStatus(rig.app, rig.plan.id), "proposed");
