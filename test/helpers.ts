@@ -4,13 +4,15 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createApp, type App } from "../server/app.ts";
 import { openDb, type Db } from "../server/db.ts";
-import { MockExtractor } from "../server/extractor.ts";
+import { MockReader } from "../server/extractor.ts";
+import { MockFoClient } from "../server/fo/mock.ts";
 import type { FoClient, FoConnection, FoConversationSummary, FoReply, FoTurn } from "../server/fo/types.ts";
+import { FakeDrive } from "../server/google/fake.ts";
 
 export type AskArgs = { message: string; conversationId?: string; newConversation?: boolean };
 export type PollArgs = { conversationId: string; waitSeconds: number };
 
-/** A scriptable Fo. Each test decides what ask_fo and get_fo_reply do. */
+/** A scriptable Fo: each test decides what ask_fo and get_fo_reply do. Reports itself as live. */
 export class FakeFo implements FoClient {
   readonly mode = "live" as const;
   asks: AskArgs[] = [];
@@ -44,56 +46,50 @@ export class FakeFo implements FoClient {
   }
 }
 
+export const reply = (conversationId: string, status: FoReply["status"], extra: Partial<FoReply> = {}): FoReply => ({ status, conversationId, ...extra });
+
 export function tempDbPath(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "paper-chase-test-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kiki-test-"));
   return path.join(dir, `${randomUUID()}.db`);
 }
 
-export function makeApp(fo: FoClient, dbOrPath: Db | string = ":memory:"): App {
-  const db = typeof dbOrPath === "string" ? openDb(dbOrPath) : dbOrPath;
-  return createApp({
+export interface TestRig {
+  app: App;
+  db: Db;
+  drive: FakeDrive;
+  fo: FoClient;
+}
+
+/**
+ * An app wired to an in-memory Drive (FakeDrive), the pattern reader and a mock or scripted Fo.
+ * Background folder polling is off: tests call app.settle() to run due jobs deterministically.
+ */
+export function makeRig(opts: { drive?: FakeDrive; fo?: FoClient; db?: Db | string } = {}): TestRig {
+  const db = opts.db === undefined ? openDb(":memory:") : typeof opts.db === "string" ? openDb(opts.db) : opts.db;
+  const drive = opts.drive ?? new FakeDrive("mock");
+  const fo = opts.fo ?? new MockFoClient({ stepMs: 5, replyDelayMs: 0 });
+  const app = createApp({
     db,
+    drive,
+    reader: new MockReader(),
     fo,
-    extractor: new MockExtractor(),
     anthropicModel: "test-model",
     claudeCredentialsDetected: false,
     engineOptions: { pollWaitSeconds: 0, backoffBaseMs: 1 },
+    watchIntervalSeconds: 0,
+    workspacePollSeconds: 0,
   });
+  return { app, db, drive, fo };
 }
 
-/** Creates the staged ordinary request, confirms its checklist and marks the guarantor letter missing. */
-export async function readyRequest(app: App, demoKey = "maple-street") {
-  const { id } = app.createRequest({ demoKey });
-  await app.whenIdle();
-  let view = (await app.view(id)).current!;
-  app.confirmChecklist(id, view.items.map((i) => ({ id: i.id })));
-  view = (await app.view(id)).current!;
-  const guarantor = view.items.find((i) => /guarantor/i.test(i.label))!;
-  app.decideItem(guarantor.id, "missing");
-  return { requestId: id, guarantorId: guarantor.id };
+/** Creates the demo folder, reads it, and applies the first organizing plan (9 verified steps). */
+export async function organized(rig: TestRig): Promise<void> {
+  await rig.app.createDemoWorkspace();
+  await rig.app.settle();
+  const plan = (await rig.app.view()).plans.find((p) => p.status === "proposed");
+  if (!plan) throw new Error("expected an organizing proposal");
+  rig.app.approvePlan(plan.id, { contentHash: plan.contentHash, clientRequestId: `setup-${plan.id}` });
+  await rig.app.settle();
 }
 
-/** A request plus an approved-ready draft to mom@example.com. Returns the draft's version and hash. */
-export async function readyDraft(app: App, demoKey = "maple-street") {
-  const ids = await readyRequest(app, demoKey);
-  app.setStudentName("Anika");
-  const { versionId } = app.createDraft(ids.guarantorId, { recipientName: "Mom", recipientEmail: "mom@example.com" });
-  const draft = (await app.view(ids.requestId)).current!.outreach[0]!.draft!;
-  return { ...ids, versionId, contentHash: draft.contentHash };
-}
-
-export async function outreach(app: App, requestId: string) {
-  return (await app.view(requestId)).current!.outreach[0]!;
-}
-
-export const reply = (conversationId: string, status: FoReply["status"], extra: Partial<FoReply> = {}): FoReply => ({ status, conversationId, ...extra });
-
-export function deferred<T>() {
-  let resolve!: (v: T) => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
