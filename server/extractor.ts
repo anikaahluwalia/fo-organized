@@ -13,9 +13,12 @@ export interface Reader {
 }
 
 export class ReadError extends Error {
-  constructor(message: string) {
+  /** A passing problem (rate limit, overload, network): read again later instead of giving up. */
+  readonly retryable: boolean;
+  constructor(message: string, opts: { retryable?: boolean } = {}) {
     super(message);
     this.name = "ReadError";
+    this.retryable = opts.retryable ?? false;
   }
 }
 
@@ -46,10 +49,10 @@ function claudeError(err: unknown, model: string): ReadError {
     return new ReadError("Claude isn't configured on the server. Set ANTHROPIC_API_KEY in .env and restart, or run in mock mode.");
   }
   if (err instanceof Anthropic.NotFoundError) return new ReadError(`The Claude model "${model}" isn't available to this API key.`);
-  if (err instanceof Anthropic.RateLimitError) return new ReadError("Claude is rate-limiting requests. Kiki will try again.");
+  if (err instanceof Anthropic.RateLimitError) return new ReadError("Claude is rate-limiting requests. Kiki will try again.", { retryable: true });
   if (err instanceof Anthropic.BadRequestError) return new ReadError(`Claude rejected the request: ${err.message}`);
-  if (err instanceof Anthropic.InternalServerError) return new ReadError("Claude had a temporary problem. Kiki will try again.");
-  if (err instanceof Anthropic.APIConnectionError) return new ReadError("Couldn't reach Claude. Check the network.");
+  if (err instanceof Anthropic.InternalServerError) return new ReadError("Claude had a temporary problem. Kiki will try again.", { retryable: true });
+  if (err instanceof Anthropic.APIConnectionError) return new ReadError("Couldn't reach Claude. Kiki will try again.", { retryable: true });
   if (err instanceof Anthropic.APIError) return new ReadError(`Claude request failed: ${err.message}`);
   return new ReadError(err instanceof Error ? err.message : String(err));
 }

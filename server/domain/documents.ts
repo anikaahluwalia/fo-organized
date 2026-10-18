@@ -82,6 +82,19 @@ export interface DocFacts {
 
 const refKey = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/[^A-Z0-9]/g, "") : "");
 
+/** The quote names this reference as a whole token: "Quote Q-1042" names Q-1042, "Q-10421" doesn't. */
+export function namesReference(quote: string, reference: string): boolean {
+  const parts = reference.toUpperCase().match(/[A-Z0-9]+/g);
+  if (!parts) return false;
+  const body = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s./#-]*");
+  return new RegExp(`(?<![A-Z0-9])${body}(?![A-Z0-9])`).test(quote.toUpperCase());
+}
+
+/** The quote states this number as a number of its own: "valid for 30 days" states 30, not 3. */
+export function statesNumber(quote: string, n: number): boolean {
+  return new RegExp(`(?<![\\d.,])${n}(?![\\d.,]\\d|\\d)`).test(quote);
+}
+
 function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -136,7 +149,7 @@ export function toFacts(read: ReadResult, text: string | null): DocFacts {
   const date = fact(isoDate(read.document_date.value), read.document_date.quote);
   // A reference to another document counts only if its evidence is in the text and names it.
   const refersTo = (read.refers_to ?? [])
-    .filter((r) => r.reference?.trim() && r.quote && check(r.quote) !== false && refKey(r.quote).includes(refKey(r.reference)))
+    .filter((r) => r.reference?.trim() && r.quote && check(r.quote) !== false && namesReference(r.quote, r.reference))
     .map((r) => ({ docType: r.doc_type, reference: r.reference!.trim(), quote: r.quote }))
     .filter((r) => refKey(r.reference) !== refKey(reference.value))
     .slice(0, 5);
@@ -147,7 +160,7 @@ export function toFacts(read: ReadResult, text: string | null): DocFacts {
     const until = isoDate(v.until);
     const days = v.days;
     if (until) validUntil = { value: until, quote: v.quote, quoteFound: vFound, basis: "stated" };
-    else if (typeof days === "number" && Number.isInteger(days) && days > 0 && days <= 3660 && date.value && v.quote.includes(String(days))) {
+    else if (typeof days === "number" && Number.isInteger(days) && days > 0 && days <= 3660 && date.value && statesNumber(v.quote, days)) {
       validUntil = { value: addDays(date.value, days), quote: v.quote, quoteFound: vFound, basis: "days" };
     }
   }
@@ -212,8 +225,8 @@ export function mockRead(text: string): ReadResult {
             : /\bitinerary\b/i.test(head) ? "itinerary"
             : /\bcorrespondence\b/i.test(head) ? "correspondence"
             : "other";
-  const issuerLine = lines.find((l, i) => i > 0 && i < 4 && !l.includes(":") && /\b(co\.?|ltd\.?|inc\.?|llc|supply|flooring|floors|contracting|city of)\b/i.test(l)) ?? null;
-  const refLine = line(text, /\b(quote|invoice|licence|license|permit|ref(erence)?)\s*(no|number|#)\.?\s*:?/i);
+  const issuerLine = lines.find((l, i) => i > 0 && i < 4 && !l.includes(":") && !l.includes(",") && /\b(co\.?|ltd\.?|inc\.?|llc|supply|flooring|floors|contracting|city of)\b/i.test(l)) ?? null;
+  const refLine = line(text, /\b(quote|invoice|licence|license|permit|contract|receipt|ref(erence)?)\s*(no|number|#)\.?\s*:?/i);
   const ref = refLine ? (/(?:no|number|#)\.?\s*:?\s*([A-Z0-9][A-Z0-9-]{1,30})/i.exec(refLine)?.[1] ?? null) : null;
   const dateLine = line(text, /^date\s*:/i);
   const date = dateLine ? (/(\d{4}-\d{2}-\d{2})/.exec(dateLine)?.[1] ?? null) : null;

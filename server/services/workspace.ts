@@ -256,8 +256,9 @@ async function upgradeFacts(ctx: Ctx, doc: DocumentRow): Promise<boolean> {
     );
     return true;
   } catch (err) {
-    // A document Kiki can't read again keeps what she knew; she doesn't keep retrying it.
-    if (err instanceof ReadError || (err instanceof DriveError && err.kind === "not_found")) {
+    // A document Kiki can't read again keeps what she knew; she doesn't keep retrying it. A
+    // passing problem (rate limit, network) is retried later, so the new facts aren't lost.
+    if ((err instanceof ReadError && !err.retryable) || (err instanceof DriveError && err.kind === "not_found")) {
       markDone();
       return false;
     }
@@ -333,7 +334,7 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
         });
         readCount++;
       } catch (err) {
-        if (err instanceof ReadError) {
+        if (err instanceof ReadError && !err.retryable) {
           run(ctx.db, "UPDATE documents SET read_status = 'failed', read_error = ?, updated_at = ? WHERE id = ?", err.message, now(), doc.id);
           continue;
         }
