@@ -32,16 +32,14 @@ export function notifyPreview(ctx: Ctx): { text: string; contentHash: string; pl
 }
 
 function message(text: string, reference: string, channel: "note" | "text" = "note"): string {
-  const how = channel === "text" ? "a text message (SMS)" : "a short note, using the channel you normally use to reach me,";
-  const why = channel === "text" ? "The user turned on \"Fo texts me about new finds\" in the Kiki app; this text is covered by that setting." : "The user reviewed and approved this in the Kiki app.";
-  return `Kiki request (ref ${reference}). ${why}
+  const how = channel === "text" ? "Please text me (an SMS to my phone, nobody else) this exact message:" : "Please send me (nobody else) this exact note, the way you normally reach me:";
+  return `${how}
 
-Please send ME (the account holder, the person you're talking to) ${how} with exactly this text:
 -----BEGIN APPROVED BODY-----
 ${text}
 -----END APPROVED BODY-----
 
-Don't contact anyone else, don't attach anything, and don't take any other action.
+This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.
 
 End your reply with exactly one of these lines:
 ${STATUS_LINES.sent}
