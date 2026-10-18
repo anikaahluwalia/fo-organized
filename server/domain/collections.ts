@@ -87,7 +87,9 @@ const CATCH_ALL = new Set(
 export function isFiledPath(path: string, roots: string[] = KIKI_ROOTS): boolean {
   if (!path) return false;
   const segments = path.split("/");
-  return roots.includes(segments[0]!) || segments.some((s) => !words(s).every((w) => CATCH_ALL.has(w)));
+  // Loose in Projects itself, outside any project, isn't filed: it was dropped there.
+  if (roots.includes(segments[0]!)) return segments.length > 1;
+  return segments.some((s) => !words(s).every((w) => CATCH_ALL.has(w)));
 }
 
 /** Folders the user keeps that can take documents: outside Kiki's own folders, named after something specific. */

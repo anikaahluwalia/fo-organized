@@ -110,3 +110,20 @@ test("a proposal that never reached Fo is texted when Kiki starts, once", async 
   await rig.app.settle();
   assert.equal(fo.asks.filter((a) => a.message.startsWith("Please text me")).length, 1, "not again");
 });
+
+test("a file dropped loose into Projects (outside any project) is new, and you hear about it", async (t) => {
+  const fo = new FakeFo();
+  const rig = makeRig({ fo });
+  rig.app.ctx.watchIntervalSeconds = 3600;
+  t.after(() => rig.app.close());
+  fo.onAsk = async (_args, n) => reply(`kiki-${n}`, "complete", { response: TEXTED });
+  await organized(rig);
+  rig.app.updateSettings({ autoText: true });
+  const projects = [...rig.drive.files.values()].find((f) => f.name === "Projects" && f.mimeType === "application/vnd.google-apps.folder")!;
+  rig.drive.addFile("thoughts.txt", projects.id, "text/plain", "NOTES\nTitle: Garden ideas\nPlant tomatoes in May.");
+  rig.app.refreshInventory();
+  await rig.app.settle();
+  const texts = (await rig.app.view()).notifications.filter((n) => n.purpose === "find");
+  assert.equal(texts.length, 1, "one text");
+  assert.match(texts[0]!.text ?? "", /where should "thoughts" go\?/);
+});

@@ -386,7 +386,8 @@ function describeDoc(f: DocFacts | null): string {
 /** What Fo texts: what Kiki found, where she'd put it, and how to say yes. */
 /** Moves that file a document, as opposed to setting an exact copy aside. */
 /** Already inside the folders Kiki files into (Projects, or the earlier Renovations). */
-export const alreadyFiled = (path: string | null) => /^(Projects|Renovations)(\/|$)/.test(path ?? "");
+/** In a project (not loose in Projects itself, where a file you drop isn't filed yet). */
+export const alreadyFiled = (path: string | null) => /^(Projects|Renovations)\/./.test(path ?? "");
 
 /** New documents to file, documents already filed that would be renamed or moved, and exact copies set aside. */
 function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; fresh: PlanOpRow[]; refiled: number; copies: number; freshCopies: PlanOpRow[] } {
