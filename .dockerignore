@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+.data
+node_modules
+web/dist
+eval-results
+test
+docs
+extension
+demo-files
+*.log

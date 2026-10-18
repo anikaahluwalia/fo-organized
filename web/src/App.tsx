@@ -959,6 +959,11 @@ export function App() {
           </div>
         </div>
         <Integrations view={view} act={act} />
+        {view.signedIn && (
+          <a className="btn btn--small btn--quiet" href="/logout">
+            Sign out
+          </a>
+        )}
       </header>
       {view.integrations.drive.missingScopes.length > 0 && (
         <div className="notice notice--warn toast" role="alert">

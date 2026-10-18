@@ -43,6 +43,26 @@ export interface Config {
   watchIntervalSeconds: number;
   /** Seconds between read-only looks at the workspace folder, so Kiki notices new files. */
   workspacePollSeconds: number;
+  /**
+   * Kiki is online: her address (APP_ORIGIN) is https and not this machine. Then she listens on
+   * every interface, serves the app and the answer links from that one address, and won't start
+   * without a password.
+   */
+  hosted: boolean;
+  /** Where the server listens: this machine only, unless she's online (or HOST says otherwise). */
+  listenHost: string;
+  /** The password to sign in to the app (KIKI_PASSWORD). Server-side only; never logged. */
+  password: string | null;
+}
+
+const MIN_PASSWORD = 12;
+
+/** Why Kiki can't start with this configuration (empty when she can). */
+export function configProblems(c: Config): string[] {
+  const problems: string[] = [];
+  if (c.hosted && !c.password) problems.push(`Kiki is online (APP_ORIGIN is ${c.appOrigin}), so set KIKI_PASSWORD (${MIN_PASSWORD} characters or more) first.`);
+  if (c.password !== null && c.password.length < MIN_PASSWORD) problems.push(`KIKI_PASSWORD needs ${MIN_PASSWORD} characters or more.`);
+  return problems;
 }
 
 function mode(value: string | undefined, fallback: IntegrationMode): IntegrationMode {
@@ -58,11 +78,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const base = mode(env.KIKI_MODE, "live");
   const full = env.GOOGLE_DRIVE_SCOPES !== "narrow";
   const driveMode = mode(env.DRIVE_MODE, base);
+  const appOrigin = (env.APP_ORIGIN ?? `http://localhost:${port}`).replace(/\/$/, "");
+  const hosted = /^https:\/\//i.test(appOrigin) && !["localhost", "127.0.0.1", "[::1]"].includes(new URL(appOrigin).hostname);
+  const publicUrl = /^https:\/\/[a-z0-9.-]+(:\d+)?\/?$/i.test(env.KIKI_PUBLIC_URL ?? "") ? env.KIKI_PUBLIC_URL!.replace(/\/$/, "") : hosted ? appOrigin : null;
   return {
     port,
-    appOrigin: env.APP_ORIGIN ?? `http://localhost:${port}`,
+    appOrigin,
+    hosted,
+    listenHost: env.HOST || (hosted ? "0.0.0.0" : "127.0.0.1"),
+    password: env.KIKI_PASSWORD ? env.KIKI_PASSWORD : null,
     devOrigins: ["http://localhost:5173", "http://127.0.0.1:5173"],
-    publicUrl: /^https:\/\/[a-z0-9.-]+(:\d+)?\/?$/i.test(env.KIKI_PUBLIC_URL ?? "") ? env.KIKI_PUBLIC_URL!.replace(/\/$/, "") : null,
+    publicUrl,
     foWebhookSecret: env.FO_WEBHOOK_SECRET || null,
     dataDir: path.resolve(env.DATA_DIR ?? ".data"),
     claudeMode: mode(env.CLAUDE_MODE, base),

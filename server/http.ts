@@ -4,6 +4,7 @@ import path from "node:path";
 import type { App } from "./app.ts";
 import type { Config } from "./config.ts";
 import { AppError, badRequest, notFound } from "./errors.ts";
+import { cookieValue, endSession, LoginLimiter, loginPage, passwordMatches, safeNext, SESSION_COOKIE, sessionCookie, sessionValid, startSession } from "./auth.ts";
 import { createPairingCode, extensionStatus, pairExtension, unpairAll, verifyExtensionToken } from "./extension.ts";
 import { answerPage, submitAnswer } from "./services/answerlink.ts";
 import { receiveFoEvent, verifyFoWebhook } from "./services/fowebhook.ts";
@@ -82,8 +83,16 @@ async function readJson(req: http.IncomingMessage): Promise<Body> {
 export function createHttpServer(app: App, config: Config, oauth: { google: OAuthFlow | null; fo: OAuthFlow | null }, staticDir: string): http.Server {
   const allowedOrigins = new Set([config.appOrigin, ...config.devOrigins]);
   const allowedHosts = new Set([...allowedOrigins].map((o) => new URL(o).host));
-  // Kiki's public address (a tunnel), if any: it serves the answer pages and Fo's webhook, nothing else.
-  const publicHost = config.publicUrl ? new URL(config.publicUrl).host : null;
+  // Kiki's public address (a tunnel to this machine), if any: it serves the answer pages and Fo's
+  // webhook, nothing else. Online, the app's own address is the public one and serves everything.
+  const appHost = new URL(config.appOrigin).host;
+  const publicHost = config.publicUrl && new URL(config.publicUrl).host !== appHost ? new URL(config.publicUrl).host : null;
+  const secure = config.appOrigin.startsWith("https://");
+  const limiter = new LoginLimiter();
+  // Where a sign-in attempt comes from: online, the address the proxy in front of Kiki saw (the
+  // last one it added); here, the connection's own.
+  const clientOf = (req: http.IncomingMessage) =>
+    (config.hosted ? String(req.headers["x-forwarded-for"] ?? "").split(",").pop()?.trim() : "") || req.socket.remoteAddress || "unknown";
   let returnTo = config.appOrigin;
 
   const routes: { method: string; pattern: RegExp; handler: Handler }[] = [];
@@ -92,7 +101,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
 
   route("GET", "/api/state", async () => {
     const view = await app.view();
-    return { ...view, settings: { ...view.settings, autoText: app.autoTextEnabled() }, extension: extensionStatus(app.db) };
+    return { ...view, settings: { ...view.settings, autoText: app.autoTextEnabled() }, extension: extensionStatus(app.db), signedIn: Boolean(config.password) };
   });
   route("POST", "/api/settings", (_p, b) => app.updateSettings({ userName: str(b, "userName"), autoText: typeof b.autoText === "boolean" ? b.autoText : undefined }));
   route("POST", "/api/workspace/select", (_p, b) => app.selectWorkspace(str(b, "folder") ?? "").then(() => ({ ok: true })));
@@ -217,6 +226,8 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   }
 
   return http.createServer(async (req, res) => {
+    // Online, browsers keep to https for this address.
+    if (secure) res.setHeader("Strict-Transport-Security", "max-age=31536000");
     const origin = req.headers.origin;
     const fromExtension = typeof origin === "string" && origin.startsWith("chrome-extension://");
     const cors: Record<string, string> = fromExtension ? { "Access-Control-Allow-Origin": origin!, Vary: "Origin" } : {};
@@ -279,6 +290,44 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
       if (isPublic) {
         res.writeHead(404, { ...SECURITY_HEADERS, "Content-Type": "text/plain; charset=utf-8" });
         return res.end("Not found.");
+      }
+      // For the host's health check: says only that Kiki is up.
+      if (url.pathname === "/healthz" && method === "GET") return send(200, { ok: true });
+
+      if (config.password) {
+        const page = (status: number, body: string, headers: Record<string, string> = {}) => {
+          res.writeHead(status, { ...SECURITY_HEADERS, ...headers, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+          res.end(body);
+        };
+        const session = cookieValue(req.headers.cookie, SESSION_COOKIE);
+        if (url.pathname === "/login") {
+          if (method === "GET") return page(200, loginPage(safeNext(url.searchParams.get("next"))));
+          if (method !== "POST") return send(405, { error: "Method not allowed." });
+          // The sign-in form posts to itself; another site can't sign you in (or out of your account).
+          if (origin && origin !== "null" && !allowedOrigins.has(origin)) return send(403, { error: "Cross-site requests aren't allowed." });
+          const from = clientOf(req);
+          const form = await readForm(req);
+          const next = safeNext(form.next);
+          const wait = limiter.waitMs(from);
+          if (wait) return page(429, loginPage(next, `Too many wrong passwords. Try again in ${Math.ceil(wait / 60_000)} minutes.`));
+          if (!passwordMatches(config.password, form.password ?? "")) {
+            limiter.failed(from);
+            return page(401, loginPage(next, "That isn't the password."));
+          }
+          limiter.succeeded(from);
+          endSession(app.db, session);
+          const started = startSession(app.db);
+          return page(303, "", { Location: next, "Set-Cookie": sessionCookie(started.token, started.maxAgeSeconds, secure) });
+        }
+        if (url.pathname === "/logout") {
+          endSession(app.db, session);
+          return page(303, "", { Location: "/login", "Set-Cookie": sessionCookie("", 0, secure) });
+        }
+        // Everything else needs you signed in (the side panel has its own token, checked below).
+        if (!fromExtension && !sessionValid(app.db, session)) {
+          if (url.pathname.startsWith("/api/")) return send(401, { error: "Sign in to Kiki first.", code: "login" });
+          return page(302, "", { Location: `/login?next=${encodeURIComponent(safeNext(url.pathname + url.search))}` });
+        }
       }
 
       if (method === "GET" && url.pathname === "/api/google/oauth/callback") return await oauthCallback(oauth.google, "Google Drive", url, res);

@@ -36,6 +36,7 @@ Connect Google Drive and Fo from the top of the page, then set up the renovation
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client of type "Web application", redirect URI `http://localhost:8787/api/google/oauth/callback`. Enable the Drive API; consent screen in Testing with your account as a test user. Testing consents expire after 7 days. |
 | Gmail (optional) | To let Kiki find emailed revisions, enable the Gmail API in the same Google Cloud project and add the `gmail.readonly` scope to the consent screen. Kiki asks for it only when you press "Let Kiki look in Gmail (read-only)", on top of your existing Google sign-in. She never sends or changes mail. |
 | `GOOGLE_DRIVE_SCOPES` | Optional. Default is the full `drive` scope, because moving files you added to Drive yourself needs it (with `drive.readonly` + `drive.metadata` + `drive.file`, Google refuses with "The user has not granted the app write access to the file"). `narrow` keeps that narrower set, which only works for files Kiki uploaded. Kiki is restricted to one folder by the app itself, not by the OAuth scope. |
+| `APP_ORIGIN`, `KIKI_PASSWORD`, `HOST`, `DATA_DIR` | For running online (see "Putting Kiki online"): the address, the sign-in password, where to listen, where the database lives. |
 | `FO_API_KEY` | Optional. A Wajo API key (`wak_…`, from wajo.ai/user/api-keys) for Fo, in place of "Connect Fo". Kiki sends it as a bearer token to Fo only; it stays in `.env`. Useful where no one can click through a sign-in (a hosted Kiki). |
 | `KIKI_MODE`, `DRIVE_MODE`, `CLAUDE_MODE`, `FO_MODE` | `live` (default) or `mock`. Mock is labelled everywhere and never stands in for a live integration that fails. |
 | `WORKSPACE_POLL_SECONDS`, `WATCH_INTERVAL_SECONDS` | How often Kiki looks at the folder (default 10 s live) and at a followed Fo conversation (default 30 s live). |
@@ -65,6 +66,31 @@ With a Fo webhook, a plain text reply works too, in any thread you have with Fo.
 3. Send the test event from Wajo; its delivery should show as succeeded.
 
 Only deliveries signed with that secret, sent within the last five minutes, count; a retry of one is handled once. Without the secret, Kiki's texts say to answer at the link.
+
+### Putting Kiki online (Railway)
+
+On your laptop, Kiki stops when it sleeps and a tunnel's address changes on every restart. Online, she keeps one address, so answer links and Fo's webhook keep working. The app then needs a password; answer links (their own token) and Fo's webhook (Wajo's signature) don't.
+
+1. **Railway:** New project, "Deploy from GitHub repo", this repository. It builds with the `Dockerfile` (`railway.json` sets the health check).
+2. **Volume:** add one mounted at `/data` (Kiki's database lives there, `DATA_DIR=/data`). Without it, every deploy starts from scratch.
+3. **Address:** Settings, Networking, "Generate domain". That's `https://<name>.up.railway.app`.
+4. **Variables** (Railway's Variables tab, never in the repository):
+
+   | Variable | Value |
+   |---|---|
+   | `APP_ORIGIN` | `https://<name>.up.railway.app` (answer links use it too) |
+   | `KIKI_PASSWORD` | 12+ characters; what you sign in with |
+   | `ANTHROPIC_API_KEY` | your Claude key |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | as on your laptop |
+   | `FO_API_KEY` | a `wak_…` key from wajo.ai/user/api-keys |
+   | `FO_WEBHOOK_SECRET` | after step 6 |
+
+   Railway sets `PORT`; Kiki listens on it. She won't start online without `KIKI_PASSWORD`.
+5. **Google:** in the Google Cloud console, add `https://<name>.up.railway.app/api/google/oauth/callback` to the OAuth client's redirect URIs. (In "Testing", Google's consent lasts 7 days; publish the consent screen to keep Kiki connected longer.)
+6. **Fo's webhook:** in Wajo, add a webhook with the URL `https://<name>.up.railway.app/hooks/fo`, put its secret in `FO_WEBHOOK_SECRET`, and redeploy. Delete the one pointing at your tunnel.
+7. Open the address, sign in, connect Google Drive, and choose the folder again (Kiki's online database starts empty).
+
+Run one Kiki at a time against the same folder: stop the laptop one once she's online.
 
 ## Demo script (about 5 minutes)
 

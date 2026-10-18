@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.ts";
-import { claudeCredentialsPresent, loadConfig } from "./config.ts";
+import { claudeCredentialsPresent, configProblems, loadConfig } from "./config.ts";
 import { openDb } from "./db.ts";
 import { ClaudeReader, MockReader } from "./extractor.ts";
 import { createHttpServer, type OAuthFlow } from "./http.ts";
@@ -17,6 +17,11 @@ import type { DriveAdapter } from "./google/types.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const config = loadConfig();
+const problems = configProblems(config);
+if (problems.length) {
+  for (const p of problems) console.error(p);
+  process.exit(1);
+}
 const db = openDb(path.join(config.dataDir, "fo-rganized.db"));
 
 // Each integration is live or mock by configuration only. A live integration that fails stays a
@@ -83,8 +88,8 @@ app.recover();
 app.start();
 
 const server = createHttpServer(app, config, { google: googleFlow, fo: foFlow }, path.resolve(here, "../web/dist"));
-server.listen(config.port, "127.0.0.1", () => {
-  console.log(`Kiki is running at ${config.appOrigin}`);
+server.listen(config.port, config.listenHost, () => {
+  console.log(`Kiki is running at ${config.appOrigin}${config.password ? " (sign-in required)" : ""}`);
   console.log(`  Google Drive: ${config.driveMode === "live" ? (config.google.clientId ? `live (${config.google.scopeLabel} scopes)` : "live, but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET aren't set") : "MOCK (in-memory, nothing touches your Drive)"}`);
   console.log(`  Claude reading: ${config.claudeMode === "live" ? `live (${config.anthropicModel})${credentials ? "" : ", but no ANTHROPIC_API_KEY was found"}` : "MOCK (pattern reader)"}`);
   console.log(`  Fo: ${config.foMode === "live" ? `live (${config.foMcpUrl}, ${config.foApiKey ? "API key" : "Wajo sign-in"})` : "MOCK (nothing is sent)"}`);

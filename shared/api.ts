@@ -349,6 +349,8 @@ export interface AppView {
   lessons: LessonView[];
   busy: { inventory: boolean; reading: boolean; executing: boolean; interpreting: boolean };
   kiki: KikiView;
+  /** Added by the HTTP layer: you signed in with a password (Kiki is online), so you can sign out. */
+  signedIn?: boolean;
   /** Added by the HTTP layer: whether a Chrome side panel is paired with this app. */
   extension?: { paired: boolean; pairedAt?: string | null; codePending?: boolean };
 }
