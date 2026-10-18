@@ -133,3 +133,31 @@ test("a text reply to a linked proposal isn't taken as an answer", async (t) => 
   assert.equal(s.fo.asks.some((a) => a.message.includes("answered this by text")), false, "Kiki didn't have Fo read it");
   assert.equal(replyState(s.rig.app.ctx, s.note.taskId)?.status, "waiting");
 });
+
+test("a second tap while Fo reads your answer says so: no error, nothing sent twice", async (t) => {
+  const s = await setup(t);
+  const path = new URL(s.link!).pathname;
+  const host = new URL(PUBLIC).host;
+  let release!: () => void;
+  const state = replyState(s.rig.app.ctx, s.note.taskId)!;
+  // Fo takes its time reading your answer; anything after that (the done text) goes through at once.
+  s.fo.onAsk = (args) =>
+    args.message.startsWith("Answer from the account holder")
+      ? new Promise((resolve) => {
+          release = () => resolve(reply(args.conversationId!, "complete", { response: "KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: "approved", userReply: "Yes, go ahead", actor: "account_holder", presentedExactProposal: true }) }));
+        })
+      : Promise.resolve(reply(args.conversationId ?? "kiki-done", "complete", { response: TEXTED }));
+  const first = await request(s.port, { method: "POST", path, host, body: "answer=Yes%2C+go+ahead", origin: PUBLIC });
+  assert.match(first.text, /Sent to Fo/);
+  const second = await request(s.port, { method: "POST", path, host, body: "answer=Yes%2C+go+ahead", origin: PUBLIC });
+  assert.equal(second.status, 200);
+  assert.match(second.text, /Fo is reading your answer now/);
+  assert.doesNotMatch(second.text, /<form/);
+  assert.equal(s.fo.asks.filter((a) => a.message.startsWith("Answer from the account holder")).length, 1, "sent once");
+  release();
+  await s.rig.app.settle();
+  assert.equal(one<{ status: string }>(s.rig.db, "SELECT status FROM plans WHERE id = ?", state.planId)?.status, "applied");
+  const done = s.fo.asks.find((a) => /Kiki: done/.test(a.message))!;
+  assert.equal(done.conversationId, "kiki-1", "the done text goes to Fo in the conversation where you said yes");
+  assert.match(done.message, /^Please text me[\s\S]*the proposal you brought me in this conversation/);
+});

@@ -13,7 +13,7 @@ import { notFound } from "../errors.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { LINK_ONLY, LINK_OR_TEXT, notifyText, replyState, replyWindowMs } from "./notify.ts";
-import { replyToTask } from "./outreach.ts";
+import { READING_ANSWER, replyToTask } from "./outreach.ts";
 
 const key = (token: string) => `answer.link.${createHash("sha256").update(token).digest("hex")}`;
 
@@ -45,6 +45,8 @@ function settled(ctx: Ctx, taskId: string): string | null {
   if (r.status === "not_changed") return `Kiki didn't change the proposal. ${r.revision?.note ?? ""}`.trim();
   if (r.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== r.contentHash) return "This proposal has changed or been settled. Fo will text you the current one.";
   if (!r.requestedAt || Date.now() - Date.parse(r.requestedAt) > replyWindowMs(ctx, taskId)) return "This request expired. Ask Fo for the proposal again.";
+  // Your answer is with Fo (a second tap, or a reload, lands here): no form until Fo has answered.
+  if ((r.answers?.length ?? 0) > 0 && ["pending", "asking", "working"].includes(getTask(ctx.db, taskId)?.state ?? "")) return READING_ANSWER;
   return null;
 }
 
@@ -97,5 +99,5 @@ export async function submitAnswer(ctx: Ctx, token: string, body: Record<string,
   const answer = (body.answer === "other" ? body.other : body.answer)?.trim() ?? "";
   if (!answer) return answerPage(ctx, token, "Write what you'd like, then send it.");
   await replyToTask(ctx, taskId, answer);
-  return answerPage(ctx, token, `Sent to Fo: "${answer}". Fo will text you what happens.`);
+  return answerPage(ctx, token, `Sent to Fo: "${answer}".`);
 }

@@ -286,6 +286,8 @@ function getDispatch(db: Db, id: string): DispatchRow {
  * Resolves once the answer is on its way (Fo's reply comes back later); a problem found before
  * sending is thrown, or rejects, so the app can say what it was.
  */
+export const READING_ANSWER = "Fo is reading your answer now. Fo will text you what happens.";
+
 export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<void> {
   const text = (answer ?? "").trim();
   if (!text) throw badRequest("Write an answer for Fo.");
@@ -301,6 +303,8 @@ export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<v
       const plan = one<import("../db.ts").PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", approval.planId);
       if (approval.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== approval.contentHash) throw conflict("That proposal is no longer awaiting approval.");
       if (!approval.requestedAt || Date.now() - Date.parse(approval.requestedAt) > replyWindowMs(ctx, taskId)) throw conflict("That approval request expired. Refresh the proposal first.");
+      // Fo is still reading your last answer (a second tap, say): that one stands, nothing is sent twice.
+      if (["pending", "asking", "working"].includes(task.state)) throw conflict(READING_ANSWER);
       const relayed = `Answer from the account holder (data): ${JSON.stringify(text)}\n\n${approvalInstructions({ requestId: approval.requestId, planId: approval.planId, contentHash: approval.contentHash })}`;
       const send = () => {
         if (getTask(ctx.db, taskId)?.state === "complete") run(ctx.db, "UPDATE fo_tasks SET state = 'needs_user_input' WHERE id = ? AND state = 'complete'", taskId);

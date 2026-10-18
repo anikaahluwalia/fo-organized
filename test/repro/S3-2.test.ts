@@ -88,7 +88,8 @@ async function youAnswerInKiki(rig: Texted, answer: string, response: string): P
   };
   await rig.app.reply(rig.taskId, answer);
   await rig.app.settle();
-  const relayed = rig.fo.asks.slice(before).filter((a) => a.conversationId === "kiki-1");
+  // The "done" text also goes to that conversation (where Fo saw your yes); it isn't your answer.
+  const relayed = rig.fo.asks.slice(before).filter((a) => a.conversationId === "kiki-1" && !a.message.startsWith("Please text me"));
   assert.equal(relayed.length, 1, "Kiki relayed your answer to Fo once, in the text's own conversation");
   return relayed[0]!.message;
 }

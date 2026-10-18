@@ -62,7 +62,7 @@ export function notifyPreview(ctx: Ctx): { text: string; contentHash: string; pl
   return { text, contentHash: hash(text), planId: plan.id };
 }
 
-function message(text: string, reference: string, channel: "note" | "text" = "note", expectReply = false): string {
+function message(text: string, reference: string, channel: "note" | "text" = "note", expectReply = false, context = ""): string {
   const how = channel === "text" ? "Please text me (an SMS to my phone, nobody else) this exact message:" : "Please send me (nobody else) this exact note, the way you normally reach me:";
   const reply = expectReply
     ? `
@@ -75,7 +75,7 @@ I may text back "go ahead". If I do, please don't move or change any files yours
 ${text}
 -----END APPROVED BODY-----
 
-This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${/\nAnswer here: \S+$/.test(text) ? ` Keep the link exactly as written.${text.includes(LINK_ONLY) ? " Don't invite me to reply by text: the link is how I answer." : ""}` : ""}${reply}
+This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${/\nAnswer here: \S+$/.test(text) ? ` Keep the link exactly as written.${text.includes(LINK_ONLY) ? " Don't invite me to reply by text: the link is how I answer." : ""}` : ""}${context ? ` ${context}` : ""}${reply}
 
 End your reply with exactly one of these lines:
 ${STATUS_LINES.sent}
@@ -277,9 +277,14 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   return { rescheduleSeconds: 6 };
 }
 
-/** After a plan you approved by text is applied, Fo texts you that it's done. */
+/**
+ * After a plan you approved by text is applied, Fo texts you that it's done: in the conversation
+ * where Fo brought you the proposal and reported your yes, so Fo can see it's the outcome of that.
+ * (Asked in a new conversation, Fo had no record of any of it and held the text.)
+ */
 export function sendDoneText(ctx: Ctx, planId: string): void {
-  if (!kvGet(ctx.db, `notify.approved_by_text.${planId}`)) return;
+  const requestTask = kvGet(ctx.db, `notify.approved_by_text.${planId}`);
+  if (!requestTask) return;
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", planId);
   if (!plan || !["applied", "partial", "failed", "stale"].includes(plan.status)) return;
   // One text per outcome: a "done" can still follow a "stopped" once Try again finishes it.
@@ -296,7 +301,12 @@ export function sendDoneText(ctx: Ctx, planId: string): void {
   kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "done");
   logEvent(ctx.db, plan.workspace_id, "fo_text", `Kiki asked ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to text you that it's done.`);
-  void ctx.engine.start(taskId, message(text, newReference(), "text")).catch(() => undefined);
+  const conversationId = getTask(ctx.db, requestTask)?.conversation_id;
+  const context = `It's the outcome of "${inert(plan.title)}" (version ${plan.version}), the proposal you brought me in this conversation and whose answer you reported to Kiki: Kiki ${plan.status === "applied" ? "applied it and read every change back from Google Drive" : "started applying it and read back from Google Drive what got done"}, and the text above is that verified result.`;
+  const send = conversationId
+    ? ctx.engine.startInConversation(taskId, conversationId, message(text, newReference(), "text", false, context))
+    : ctx.engine.start(taskId, message(text, newReference(), "text"));
+  void send.catch(() => undefined);
 }
 
 /** Fo's reply as you should read it: its own words, without Kiki's status and decision lines. */

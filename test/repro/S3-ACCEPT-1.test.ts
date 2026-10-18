@@ -491,7 +491,7 @@ test("Kiki restarts while your answer is with Fo: nothing is re-sent, and Fo's r
   assert.equal((await restarted.app.view()).plans.find((p) => p.id === s.plan.id)?.status, "applied");
   assert.equal(all(restarted.db, "SELECT * FROM plan_approvals WHERE client_request_id NOT LIKE 'setup-%'").length, 1);
   assert.equal(
-    fo.asks.filter((a) => a.conversationId === CONV).length,
+    fo.asks.filter((a) => a.conversationId === CONV && !a.message.startsWith("Please text me")).length,
     0,
     "your answer wasn't sent again",
   );
