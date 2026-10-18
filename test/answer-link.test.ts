@@ -68,13 +68,13 @@ test("the link opens the proposal, and your yes there goes to Fo on the request'
       response: "KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: "approved", userReply: "Yes, go ahead", actor: "account_holder", presentedExactProposal: true }),
     });
   const sent = await request(s.port, { method: "POST", path, host, body: "answer=Yes%2C+go+ahead", origin: PUBLIC });
-  assert.equal(sent.status, 200);
-  assert.match(sent.text, /Sent to Fo/);
-  assert.equal(s.fo.asks.at(-1)?.conversationId, "kiki-1", "your answer went to Fo on the request's own conversation");
+  assert.equal(sent.status, 303, "sent, then back to the page (so a reload doesn't post it again)");
+  assert.ok(s.fo.asks.some((a) => a.conversationId === "kiki-1" && a.message.startsWith("Answer from the account holder")), "your answer went to Fo on the request's own conversation");
   await s.rig.app.settle();
   assert.equal(one<{ status: string }>(s.rig.db, "SELECT status FROM plans WHERE id = ?", state.planId)?.status, "applied");
   const after = await request(s.port, { path, host });
-  assert.match(after.text, /You said yes/, "the page then says where things stand, with no form");
+  assert.match(after.text, /All done/, "the page then says where things stand, with no form");
+  assert.match(after.text, /You can close this tab/);
   assert.doesNotMatch(after.text, /<form/);
 });
 
@@ -100,8 +100,8 @@ test("a browser posting the page with \"Origin: null\" (strict referrer policy) 
   const path = new URL(s.link!).pathname;
   const page = await request(s.port, { path, host: new URL(PUBLIC).host });
   const res = await request(s.port, { method: "POST", path, host: new URL(PUBLIC).host, body: "answer=Yes%2C+go+ahead", origin: "null" });
-  assert.equal(res.status, 200, res.text);
-  assert.match(res.text, /Sent to Fo/);
+  assert.equal(res.status, 303, res.text);
+  assert.ok(s.fo.asks.some((a) => a.message.startsWith("Answer from the account holder")));
   void page;
 });
 
@@ -134,7 +134,7 @@ test("a text reply to a linked proposal isn't taken as an answer", async (t) => 
   assert.equal(replyState(s.rig.app.ctx, s.note.taskId)?.status, "waiting");
 });
 
-test("a second tap while Fo reads your answer says so: no error, nothing sent twice", async (t) => {
+test("after you answer, the page says you can close it; a second tap sends nothing twice", async (t) => {
   const s = await setup(t);
   const path = new URL(s.link!).pathname;
   const host = new URL(PUBLIC).host;
@@ -147,12 +147,14 @@ test("a second tap while Fo reads your answer says so: no error, nothing sent tw
           release = () => resolve(reply(args.conversationId!, "complete", { response: "KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: "approved", userReply: "Yes, go ahead", actor: "account_holder", presentedExactProposal: true }) }));
         })
       : Promise.resolve(reply(args.conversationId ?? "kiki-done", "complete", { response: TEXTED }));
-  const first = await request(s.port, { method: "POST", path, host, body: "answer=Yes%2C+go+ahead", origin: PUBLIC });
-  assert.match(first.text, /Sent to Fo/);
+  assert.equal((await request(s.port, { method: "POST", path, host, body: "answer=Yes%2C+go+ahead", origin: PUBLIC })).status, 303);
+  const page = await request(s.port, { path, host });
+  assert.match(page.text, /Got it!/);
+  assert.match(page.text, /You said &quot;Yes, go ahead&quot;\./);
+  assert.match(page.text, /You can close this tab\. Fo will let you know what happens\./);
+  assert.doesNotMatch(page.text, /<form/);
   const second = await request(s.port, { method: "POST", path, host, body: "answer=Yes%2C+go+ahead", origin: PUBLIC });
-  assert.equal(second.status, 200);
-  assert.match(second.text, /Fo is reading your answer now/);
-  assert.doesNotMatch(second.text, /<form/);
+  assert.equal(second.status, 303, "a second tap just shows the same page");
   assert.equal(s.fo.asks.filter((a) => a.message.startsWith("Answer from the account holder")).length, 1, "sent once");
   release();
   await s.rig.app.settle();

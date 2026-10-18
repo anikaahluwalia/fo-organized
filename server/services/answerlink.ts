@@ -13,7 +13,7 @@ import { notFound } from "../errors.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { LINK_ONLY, LINK_OR_TEXT, notifyText, replyState, replyWindowMs } from "./notify.ts";
-import { READING_ANSWER, replyToTask } from "./outreach.ts";
+import { replyToTask } from "./outreach.ts";
 
 const key = (token: string) => `answer.link.${createHash("sha256").update(token).digest("hex")}`;
 
@@ -34,33 +34,60 @@ function requestFor(ctx: Ctx, token: string): string {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-/** Where the request stands, in plain words, or null while it's waiting for you. */
-function settled(ctx: Ctx, taskId: string): string | null {
+/** Where things stand once you've answered (or the request is over), or null while it waits for you. */
+interface Status {
+  title: string;
+  text: string;
+  /** What happens next, shown on its own line. */
+  next?: string;
+  /** A check mark for "Fo has your answer", rather than a plain note. */
+  done: boolean;
+}
+
+
+function settled(ctx: Ctx, taskId: string): Status | null {
   const r = replyState(ctx, taskId);
-  if (!r) return "There's nothing to answer here.";
+  if (!r) return { title: "Nothing to answer", text: "There's nothing waiting for you here.", done: false };
   const plan = one<PlanRow>(ctx.db, "SELECT status, content_hash FROM plans WHERE id = ?", r.planId);
-  if (r.status === "approved") return "You said yes. Kiki is applying it, and Fo will text you when it's done.";
-  if (r.status === "declined") return "You said no, so nothing changes.";
-  if (r.status === "adjusting" || r.status === "revised") return "You asked for changes. Fo will text you the new version.";
-  if (r.status === "not_changed") return `Kiki didn't change the proposal. ${r.revision?.note ?? ""}`.trim();
-  if (r.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== r.contentHash) return "This proposal has changed or been settled. Fo will text you the current one.";
-  if (!r.requestedAt || Date.now() - Date.parse(r.requestedAt) > replyWindowMs(ctx, taskId)) return "This request expired. Ask Fo for the proposal again.";
-  // Your answer is with Fo (a second tap, or a reload, lands here): no form until Fo has answered.
-  if ((r.answers?.length ?? 0) > 0 && ["pending", "asking", "working"].includes(getTask(ctx.db, taskId)?.state ?? "")) return READING_ANSWER;
+  if (r.status === "approved") {
+    return plan?.status === "applied"
+      ? { title: "All done", text: "Kiki filed it and checked every change in Drive.", next: "You can close this tab.", done: true }
+      : { title: "You said yes", text: "Kiki is filing it now.", next: "You can close this tab. Fo will text you when it's done.", done: true };
+  }
+  if (r.status === "declined") return { title: "Nothing changes", text: "You said no, so Kiki leaves everything as it is.", next: "You can close this tab.", done: true };
+  if (r.status === "adjusting" || r.status === "revised") return { title: "Got it!", text: "Kiki is making the changes you asked for.", next: "You can close this tab. Fo will text you the new version.", done: true };
+  if (r.status === "not_changed") return { title: "Kiki didn't change it", text: `${r.revision?.note ?? ""} Fo will text you about it.`.trim(), done: false };
+  if (r.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== r.contentHash) return { title: "This one's settled", text: "This proposal has changed or been settled. Fo will text you the current one.", done: false };
+  if (!r.requestedAt || Date.now() - Date.parse(r.requestedAt) > replyWindowMs(ctx, taskId)) return { title: "This link expired", text: "Ask Fo for the proposal again.", done: false };
+  // Your answer is with Fo (just sent, or a reload): no form until Fo has answered.
+  if ((r.answers?.length ?? 0) > 0 && ["pending", "asking", "working"].includes(getTask(ctx.db, taskId)?.state ?? "")) {
+    const said = r.answers!.at(-1)!.text;
+    return { title: "Got it!", text: said ? `You said "${said}".` : "Fo has your answer.", next: "You can close this tab. Fo will let you know what happens.", done: true };
+  }
   return null;
 }
 
-/** The answer page: the proposal Fo texted you, Fo's question if it asked one, and the answer form. */
+/** The answer page: the proposal Fo texted you, Fo's question if it asked one, and the answer form; once you've answered, where things stand. */
 export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   const taskId = requestFor(ctx, token);
   const task = getTask(ctx.db, taskId);
   // The text as Fo sent it, without its own link (you're on that page).
   const proposal = (notifyText(ctx, taskId) ?? "").replace(/\s*Answer here: \S+\s*$/, "").replace(LINK_ONLY, "").replace(LINK_OR_TEXT, "").trim();
-  const done = settled(ctx, taskId);
+  const status = settled(ctx, taskId);
   const question = task?.state === "needs_user_input" && task.question ? task.question.replace(/^\W*KIKI-(DECISION|STATUS)\s*:.*$/gim, "").trim() : null;
-  const form = done
-    ? `<p class="note">${esc(done)}</p>`
-    : `<form method="post">
+  const body = status
+    ? `<section class="status">
+  ${status.done ? `<div class="check" aria-hidden="true">&#10003;</div>` : ""}
+  <h1>${esc(status.title)}</h1>
+  <p>${esc(status.text)}</p>
+  ${status.next ? `<p class="next">${esc(status.next)}</p>` : ""}
+</section>
+<details><summary>The proposal</summary><pre>${esc(proposal)}</pre></details>`
+    : `<h1>Kiki</h1><p class="muted">Your answer goes to Fo, and Fo texts you what happens.</p>
+${notice ? `<p class="note">${esc(notice)}</p>` : ""}
+${question ? `<div class="ask"><strong>Fo asks:</strong><br>${esc(question)}</div>` : ""}
+<pre>${esc(proposal)}</pre>
+<form method="post">
   <div class="row">
     <button name="answer" value="Yes, go ahead" class="primary">Yes, go ahead</button>
     <button name="answer" value="No, leave it as it is">No</button>
@@ -71,8 +98,8 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
 </form>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kiki</title>
 <style>
-:root{--bg:#fff7f9;--ink:#3a2620;--muted:#7a6460;--line:#f0d5dc;--accent:#3a2620}
-@media (prefers-color-scheme:dark){:root{--bg:#1f1719;--ink:#f7e9ec;--muted:#c9b3b8;--line:#4a3438;--accent:#f4b6c4}}
+:root{--bg:#fff7f9;--ink:#3a2620;--muted:#7a6460;--line:#f0d5dc;--accent:#3a2620;--ok:#2f7d4f}
+@media (prefers-color-scheme:dark){:root{--bg:#1f1719;--ink:#f7e9ec;--muted:#c9b3b8;--line:#4a3438;--accent:#f4b6c4;--ok:#8fd4a8}}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,system-ui,sans-serif}
 main{max-width:560px;margin:0 auto;padding:20px 16px 40px}
 h1{font-size:20px;margin:0 0 4px}.muted{color:var(--muted);font-size:14px;margin:0 0 16px}
@@ -82,22 +109,24 @@ pre{white-space:pre-wrap;font:inherit;background:transparent;border:1px solid va
 .primary{background:var(--accent);color:var(--bg);border-color:var(--accent);flex:1}
 label{display:block;font-size:14px;color:var(--muted);margin:0 0 6px}textarea{width:100%;box-sizing:border-box;font:inherit;border:1px solid var(--line);border-radius:12px;padding:10px;background:transparent;color:var(--ink);margin:0 0 10px}
 .note{border:1px solid var(--line);border-radius:12px;padding:12px}
+.status{text-align:center;padding:48px 8px 32px}.status h1{font-size:24px;margin:0 0 8px}.status p{margin:0 auto;max-width:34ch;color:var(--muted)}.status .next{margin-top:16px;color:var(--ink);font-weight:600}
+.check{width:56px;height:56px;margin:0 auto 16px;border-radius:50%;background:var(--ok);color:var(--bg);font-size:30px;line-height:56px}
+details{border-top:1px solid var(--line);padding-top:12px}summary{color:var(--muted);font-size:14px;cursor:pointer;margin:0 0 12px}
 </style></head><body><main>
-<h1>Kiki</h1><p class="muted">Your answer goes to Fo, and Fo texts you what happens.</p>
-${notice ? `<p class="note">${esc(notice)}</p>` : ""}
-${question ? `<div class="ask"><strong>Fo asks:</strong><br>${esc(question)}</div>` : ""}
-<pre>${esc(proposal)}</pre>
-${form}
+${body}
 </main></body></html>`;
 }
 
-/** Your answer from the page: sent to Fo on the request's own conversation, like the answer box in Kiki. */
-export async function submitAnswer(ctx: Ctx, token: string, body: Record<string, string>): Promise<string> {
+/**
+ * Your answer from the page: sent to Fo on the request's own conversation, like the answer box in
+ * Kiki. Null once it's sent: the page then redirects to itself, which shows where things stand (and
+ * a reload doesn't post it again). Otherwise the page to show.
+ */
+export async function submitAnswer(ctx: Ctx, token: string, body: Record<string, string>): Promise<string | null> {
   const taskId = requestFor(ctx, token);
-  const done = settled(ctx, taskId);
-  if (done) return answerPage(ctx, token);
+  if (settled(ctx, taskId)) return null;
   const answer = (body.answer === "other" ? body.other : body.answer)?.trim() ?? "";
   if (!answer) return answerPage(ctx, token, "Write what you'd like, then send it.");
   await replyToTask(ctx, taskId, answer);
-  return answerPage(ctx, token, `Sent to Fo: "${answer}".`);
+  return null;
 }

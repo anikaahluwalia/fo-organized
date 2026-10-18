@@ -244,7 +244,11 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
           // yours, so a browser's "null" origin (sent under strict referrer policies) is fine.
           const own = isPublic ? config.publicUrl : config.appOrigin;
           if (origin && origin !== "null" && origin !== own) return html(403, "Cross-site requests aren't allowed.");
-          return html(200, await submitAnswer(app.ctx, answer[1]!, await readForm(req)));
+          const page = await submitAnswer(app.ctx, answer[1]!, await readForm(req));
+          if (page) return html(200, page);
+          // Sent: show where things stand with a plain GET, so a reload doesn't post it again.
+          res.writeHead(303, { ...SECURITY_HEADERS, Location: url.pathname, "Cache-Control": "no-store" });
+          return res.end();
         } catch (err) {
           const message = err instanceof AppError ? err.message : "Something went wrong. Ask Fo for the proposal again.";
           return html(err instanceof AppError ? err.status : 500, `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kiki</title><p style="font:16px system-ui;padding:20px">${message.replace(/[&<>"']/g, "")}</p>`);
