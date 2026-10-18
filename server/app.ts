@@ -46,6 +46,7 @@ export interface AppDeps {
   google?: { scopes: "narrow" | "full"; missingScopes: () => string[] };
   engineOptions?: EngineOptions;
   watchIntervalSeconds?: number;
+  publicUrl?: string | null;
   /** Seconds between read-only looks at the workspace; 0 turns watching off (tests). */
   workspacePollSeconds?: number;
 }
@@ -54,7 +55,7 @@ export interface AppDeps {
 export function createApp(deps: AppDeps) {
   const { db, drive, reader, fo } = deps;
   const jobs = new JobQueue(db);
-  const ctx = { db, drive, gmail: deps.gmail ?? null, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30 } as Ctx;
+  const ctx = { db, drive, gmail: deps.gmail ?? null, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30, publicUrl: deps.publicUrl ?? null } as Ctx;
   ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler(ctx) }, deps.engineOptions);
 
   const pollSeconds = deps.workspacePollSeconds ?? 10;

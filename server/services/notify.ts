@@ -11,6 +11,7 @@ import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { approvePlan } from "./plans.ts";
 import { proposalLines } from "./proposal.ts";
+import { answerLink } from "./answerlink.ts";
 import { requireWorkspace } from "./workspace.ts";
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -144,7 +145,8 @@ const DECIDE_WINDOW_MS = 7 * 24 * 3600_000;
 
 /** How long an answer to this request counts: a text reply soon after, an answer in Kiki for days. */
 export function replyWindowMs(ctx: Ctx, taskId: string): number {
-  return notifyPurpose(ctx, taskId) === "decide" ? DECIDE_WINDOW_MS : REPLY_WINDOW_MS;
+  // A text with an answer link waits as long as an answer in Kiki: the link is tied to the request.
+  return notifyPurpose(ctx, taskId) === "decide" || kvGet(ctx.db, `answer.linked.${taskId}`) ? DECIDE_WINDOW_MS : REPLY_WINDOW_MS;
 }
 export function replyState(ctx: Ctx, taskId: string): ReplyState | null {
   const raw = kvGet(ctx.db, `notify.reply.${taskId}`);
@@ -428,9 +430,16 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
   return `${findSummary(ctx, plan)}\n\nProposed changes (version ${plan.version}):\n${proposalLines(ctx, plan)}\nNothing is deleted. You can answer Fo naturally, ask a question, ask for changes, or decline.`;
 }
 
+/** A text with its answer link: the link is where you answer, so the text points to it. */
+function withLink(text: string, link: string | null): string {
+  if (!link) return text;
+  return `${text.replace(/Reply to this text, or answer in Kiki:/g, "Answer at the link below:")}\n\nAnswer here: ${link}`;
+}
+
 /** The request that has Fo text you a proposal (and only you), with the binding for your answer. */
-export function textedProposal(ctx: Ctx, plan: PlanRow, binding: ApprovalBinding, lead?: string): { body: string; request: string } {
-  const body = `${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`;
+export function textedProposal(ctx: Ctx, plan: PlanRow, binding: ApprovalBinding, lead?: string, taskId?: string): { body: string; request: string } {
+  const link = taskId ? answerLink(ctx, taskId) : null;
+  const body = withLink(`${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`, link);
   return { body, request: message(body, newReference(), "text") + "\n\n" + approvalInstructions(binding) };
 }
 
@@ -445,8 +454,10 @@ export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   // One text per distinct proposal, even if it gets re-saved as a new version.
   if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
   kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);
-  const text = newFindText(ctx, plan);
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
+  // The link to answer it: your answer there stays tied to this exact proposal.
+  const link = answerLink(ctx, taskId);
+  const text = withLink(newFindText(ctx, plan), link);
   kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
   kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "find");

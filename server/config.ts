@@ -23,6 +23,11 @@ export interface Config {
   appOrigin: string;
   /** Extra origins allowed to call the API (the Vite dev server). */
   devOrigins: string[];
+  /**
+   * Kiki's public https address (a tunnel to this machine), so answer links in Fo's texts open on
+   * your phone. Only the answer pages are served there. Null: texts carry no link.
+   */
+  publicUrl: string | null;
   dataDir: string;
   claudeMode: IntegrationMode;
   anthropicModel: string;
@@ -53,6 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port,
     appOrigin: env.APP_ORIGIN ?? `http://localhost:${port}`,
     devOrigins: ["http://localhost:5173", "http://127.0.0.1:5173"],
+    publicUrl: /^https:\/\/[a-z0-9.-]+(:\d+)?\/?$/i.test(env.KIKI_PUBLIC_URL ?? "") ? env.KIKI_PUBLIC_URL!.replace(/\/$/, "") : null,
     dataDir: path.resolve(env.DATA_DIR ?? ".data"),
     claudeMode: mode(env.CLAUDE_MODE, base),
     anthropicModel: env.ANTHROPIC_MODEL ?? "claude-opus-5-5",

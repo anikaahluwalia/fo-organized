@@ -29,10 +29,10 @@ ${approvalInstructions(binding)}`;
 }
 
 /** A request to Fo about one proposal version: its task, binding and what Kiki asked. */
-function newRequest(ctx: Ctx, plan: PlanRow, message: (binding: ApprovalBinding) => string, texted?: (binding: ApprovalBinding) => { body: string; request: string }): { taskId: string; message: string; byText: boolean } {
+function newRequest(ctx: Ctx, plan: PlanRow, message: (binding: ApprovalBinding) => string, texted?: (binding: ApprovalBinding, taskId: string) => { body: string; request: string }): { taskId: string; message: string; byText: boolean } {
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   const binding: ApprovalBinding = { requestId: randomUUID(), planId: plan.id, contentHash: plan.content_hash };
-  const t = texted?.(binding);
+  const t = texted?.(binding, taskId);
   const text = t ? t.request : message(binding);
   kvSet(ctx.db, `notify.purpose.${taskId}`, t ? "find" : "decide");
   kvSet(ctx.db, `notify.text.${taskId}`, t ? t.body : text);
@@ -122,7 +122,7 @@ export async function handleChangeRequest(ctx: Ctx, taskId: string, opts: { quie
       : `I answered ${said}, but Kiki didn't change the proposal. ${note ?? ""}`.trim();
     // You answered by text: the next version comes back to you as a text too.
     const byText = Boolean(state.answers?.at(-1)?.via);
-    const sent = newRequest(ctx, target, (binding) => decideMessage(ctx, ws, target, binding, lead), byText ? (binding) => textedProposal(ctx, target, binding, next ? `Kiki: you asked for changes, so here's version ${next.version}.` : `Kiki: she didn't change the proposal. ${note ?? ""}`.trim()) : undefined);
+    const sent = newRequest(ctx, target, (binding) => decideMessage(ctx, ws, target, binding, lead), byText ? (binding, id) => textedProposal(ctx, target, binding, next ? `Kiki: you asked for changes, so here's version ${next.version}.` : `Kiki: she didn't change the proposal. ${note ?? ""}`.trim(), id) : undefined);
     saveReply(ctx, taskId, { ...state, status: next ? "revised" : "not_changed", revision: { planId: next?.id ?? null, version: next?.version ?? null, note } });
     logEvent(ctx.db, ws.id, "plan", next ? `You asked for changes through Fo, so Kiki made version ${next.version} of "${next.title}". It needs your decision.` : `You answered through Fo, but Kiki didn't change the proposal. ${note ?? ""}`.trim());
     return sent;

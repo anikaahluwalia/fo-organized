@@ -75,6 +75,7 @@ const app = createApp({
   claudeCredentialsDetected: credentials,
   google: { scopes: config.google.scopeLabel, missingScopes: () => googleAuth?.missingScopes() ?? [] },
   watchIntervalSeconds: config.watchIntervalSeconds,
+  publicUrl: config.publicUrl,
   workspacePollSeconds: config.workspacePollSeconds,
 });
 app.recover();

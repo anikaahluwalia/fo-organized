@@ -17,4 +17,6 @@ export interface Ctx {
   engine: FoEngine;
   jobs: JobQueue;
   watchIntervalSeconds: number;
+  /** Kiki's public https address for answer links in texts, if she has one. */
+  publicUrl?: string | null;
 }

@@ -41,6 +41,20 @@ Connect Google Drive and Fo from the top of the page, then set up the renovation
 
 Fo signs in with your Wajo account from the app (OAuth with dynamic client registration and PKCE). Google and Fo tokens stay in `.data/` on this machine.
 
+### Answering Fo's texts from your phone
+
+A text reply to Fo starts a separate Fo conversation, so it can't be tied to Kiki's request. Instead, each text Fo sends you ends with a link to a small page for that one proposal ("Yes", "No", or a change or question in your own words). Your answer goes to Fo on the request's own conversation, so it stays linked, and Fo texts you what happens.
+
+Your phone has to reach Kiki for that. Give Kiki a public https address with a tunnel, and put it in `.env`:
+
+```bash
+brew install cloudflared
+cloudflared tunnel --url http://localhost:8787   # prints https://<random>.trycloudflare.com
+# in .env:  KIKI_PUBLIC_URL=https://<random>.trycloudflare.com   then restart Kiki
+```
+
+The public address serves only the answer pages: each link is an unguessable, one-request token, and the app and its API stay reachable only from this machine. A quick tunnel's address changes every time it starts; update `.env` when it does.
+
 ## Demo script (about 5 minutes)
 
 Uses a dedicated test folder, never real business documents. Everything below also runs with `npm run start:mock`, labelled Mock.
