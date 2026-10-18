@@ -113,6 +113,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   route("POST", "/api/updates/:id/recheck", ([id]) => app.recheckOutcome(id!));
   route("POST", "/api/updates/:id/gmail/search", ([id]) => app.searchGmail(id!));
   route("POST", "/api/attention/dismiss", (_p, b) => app.dismissAttention(String(b.key ?? "")));
+  route("POST", "/api/documents/:id/current", ([id]) => app.markCurrent(id!));
   route("POST", "/api/updates/:id/gmail/save", ([id], b) => {
     if (typeof b.index !== "number") throw badRequest("Choose an attachment.");
     return app.saveGmailAttachment(id!, b.index);

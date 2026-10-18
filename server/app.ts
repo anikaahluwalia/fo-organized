@@ -27,6 +27,7 @@ import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, not
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
 import { dismissAttention } from "./services/attention.ts";
+import { proposeMarkCurrent } from "./services/current.ts";
 import { dismissOutcome, followUp, pasteReply, pickUpArrivals, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
 import { activeWorkspace, createDemoWorkspace, requireWorkspace, runInventory, runReading, selectWorkspace, stageRevisedQuote } from "./services/workspace.ts";
 
@@ -179,6 +180,7 @@ export function createApp(deps: AppDeps) {
     saveGmailAttachment: (outcomeId: string, index: number) => saveEmailedAttachment(ctx, outcomeId, index),
     dismissOutcome: (outcomeId: string) => dismissOutcome(ctx, outcomeId),
     dismissAttention: (key: string) => dismissAttention(ctx, key),
+    markCurrent: (documentId: string) => proposeMarkCurrent(ctx, documentId),
 
     /**
      * After a restart: Drive steps that were mid-call become uncertain (the executor reads the

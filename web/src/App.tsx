@@ -377,6 +377,11 @@ function AttentionCard({ view, act }: { view: AppView; act: ReturnType<typeof us
                     Ask {row.issuer ?? "the contractor"} if it's final
                   </button>
                 )}
+                {row && a.kind === "which_current" && (
+                  <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`current-${row.docId}`, () => post(`/api/documents/${row.docId}/current`))}>
+                    {row.reference ?? "The latest"} is the current one
+                  </button>
+                )}
                 <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`dismiss-${a.key}`, () => post("/api/attention/dismiss", { key: a.key }))}>
                   Got it
                 </button>
@@ -429,6 +434,11 @@ function IndexCard({ view, act }: { view: AppView; act: ReturnType<typeof useAct
                     {r.canAsk && asking !== r.docId && (
                       <button className="btn btn--quiet btn--small" onClick={() => setAsking(r.docId)}>
                         Ask the contractor if this is final
+                      </button>
+                    )}
+                    {r.status !== "current" && (
+                      <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`current-${r.docId}`, () => post(`/api/documents/${r.docId}/current`))}>
+                        This is the current one
                       </button>
                     )}
                     <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`accept-${r.docId}`, () => post(`/api/documents/${r.docId}/accept`, { accepted: !r.acceptedAt }))}>
