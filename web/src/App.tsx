@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppView, AttentionItemView, NotificationView, PlanView } from "../../shared/api.ts";
 import { getState, newId, post, time } from "./api.ts";
 import { Kiki } from "./Kiki.tsx";
-import { AskContractor, OutreachCard, UpdateCard } from "./Contractor.tsx";
+import { AskContractor, AskForCopy, OutreachCard, UpdateCard } from "./Contractor.tsx";
 import { ExtensionPairing } from "./ExtensionPairing.tsx";
 
 const KIKI_STATE_NAMES: Record<string, string> = {
@@ -377,6 +377,12 @@ function AttentionCard({ view, act }: { view: AppView; act: ReturnType<typeof us
                     Ask {row.issuer ?? "the contractor"} if it's final
                   </button>
                 )}
+                {a.copy && !a.copy.asked && asking !== a.key && (
+                  <button className="btn btn--quiet btn--small" onClick={() => setAsking(a.key)}>
+                    Ask {a.copy.issuer ?? "them"} for a copy
+                  </button>
+                )}
+                {a.copy?.asked && <span className="hint">Kiki asked for a copy. The message is with Fo's cards.</span>}
                 {row && a.kind === "which_current" && (
                   <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`current-${row.docId}`, () => post(`/api/documents/${row.docId}/current`))}>
                     {row.reference ?? "The latest"} is the current one
@@ -387,6 +393,7 @@ function AttentionCard({ view, act }: { view: AppView; act: ReturnType<typeof us
                 </button>
               </div>
               {row && asking === a.key && <AskContractor row={row} view={view} act={act} onDone={() => setAsking(null)} />}
+              {a.copy && asking === a.key && <AskForCopy copy={a.copy} view={view} act={act} onDone={() => setAsking(null)} />}
             </li>
           );
         })}

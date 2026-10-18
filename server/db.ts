@@ -248,6 +248,9 @@ CREATE TABLE IF NOT EXISTS outreach_versions (
   content_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
   superseded_at TEXT,
+  -- ask_final: "is this the final quote?" request_copy: "could you send a copy of X?" (X in request_json)
+  kind TEXT NOT NULL DEFAULT 'ask_final' CHECK (kind IN ('ask_final', 'request_copy')),
+  request_json TEXT,
   UNIQUE (document_id, version)
 );
 
@@ -329,7 +332,15 @@ export function openDb(file: string): Db {
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Columns added after a database was first created. Each step is idempotent. */
+function migrate(db: Db): void {
+  const has = (table: string, column: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+  if (!has("outreach_versions", "kind")) db.exec("ALTER TABLE outreach_versions ADD COLUMN kind TEXT NOT NULL DEFAULT 'ask_final' CHECK (kind IN ('ask_final', 'request_copy'))");
+  if (!has("outreach_versions", "request_json")) db.exec("ALTER TABLE outreach_versions ADD COLUMN request_json TEXT");
 }
 
 /** Run fn inside BEGIN IMMEDIATE ... COMMIT. fn must be synchronous: no awaits inside a transaction. */
@@ -596,6 +607,9 @@ export interface OutreachVersionRow {
   content_hash: string;
   created_at: string;
   superseded_at: string | null;
+  kind: "ask_final" | "request_copy";
+  /** For request_copy: the document asked for, { docType, reference }. */
+  request_json: string | null;
 }
 
 export interface OutreachApprovalRow {

@@ -28,6 +28,7 @@ import { indexFiles, planDoc, planFiles, refreshOrganizeProposal, savePlanVersio
 import { docFacts, runInventory, runReading } from "./workspace.ts";
 import { searchEmailedAttachments } from "./attachments.ts";
 import { rejectCandidates, revisionCandidates, versionDocs, waitingForRevision } from "./holds.ts";
+import { referenceOnFile, requestOf } from "./outreach.ts";
 import { issuerKey } from "../domain/safety.ts";
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -165,6 +166,7 @@ export async function runOutcome(ctx: Ctx, outcomeId: string): Promise<void> {
   const rows = load(ctx, outcomeId);
   const { o, turn, v, asked } = rows;
   if (o.status !== "interpreting") return;
+  const request = requestOf(v);
   let interp: Outcome;
   if (o.interpretation_json) interp = JSON.parse(o.interpretation_json) as Outcome;
   else {
@@ -172,9 +174,11 @@ export async function runOutcome(ctx: Ctx, outcomeId: string): Promise<void> {
     try {
       interp = await ctx.reader.interpret({
         contractorName: v.recipient_name,
-        askedDocument: facts
-          ? `${facts.issuer.value ?? "Contractor"} ${describeQuote({ issuer: facts.issuer.value, reference: facts.reference.value, date: facts.date.value, total: facts.total.value === null ? null : money(facts.total.value) })}`
-          : "the quote",
+        askedDocument: request
+          ? `a copy of ${request.docType} ${request.reference}`
+          : facts
+            ? `${facts.issuer.value ?? "Contractor"} ${describeQuote({ issuer: facts.issuer.value, reference: facts.reference.value, date: facts.date.value, total: facts.total.value === null ? null : money(facts.total.value) })}`
+            : "the quote",
         message: turn.text,
         source: turn.source,
       });
@@ -193,6 +197,9 @@ export async function runOutcome(ctx: Ctx, outcomeId: string): Promise<void> {
 
   if (interp.source_kind === "fo_question" || (interp.question_for_user && !interp.relevant)) {
     setOutcome(ctx, o.id, { status: "needs_clarification", question: interp.question_for_user ?? turn.text });
+  } else if (request) {
+    // Asked for a copy: whatever they said, what matters is whether the copy is here yet.
+    await reconcileCopy(ctx, o.id);
   } else if (!interp.relevant) {
     setOutcome(ctx, o.id, { status: "no_outcome" });
   } else if (interp.points_to_newer_version || interp.asked_document_is_final === "no") {
@@ -255,6 +262,70 @@ export async function reconcileOutcome(ctx: Ctx, outcomeId: string): Promise<voi
       candidates,
     });
   }
+}
+
+/** A copy was asked for. Is it in the folder now? If not, look in Gmail (if allowed), or wait for it to land. */
+async function reconcileCopy(ctx: Ctx, outcomeId: string): Promise<void> {
+  const { ws, v } = load(ctx, outcomeId);
+  const request = requestOf(v)!;
+  await runInventory(ctx, ws.id);
+  await runReading(ctx, ws.id);
+  if (referenceOnFile(ctx.db, ws.id, request.reference)) return copyArrived(ctx, outcomeId);
+  let found: { filename: string }[] = [];
+  let gmailProblem: string | null = null;
+  if (ctx.gmail?.available()) {
+    try {
+      found = await searchEmailedAttachments(ctx, outcomeId);
+    } catch (err) {
+      gmailProblem = err instanceof Error ? err.message : String(err);
+    }
+  }
+  setOutcome(ctx, outcomeId, {
+    status: "needs_clarification",
+    question: found.length
+      ? `${v.recipient_name} answered, and Kiki found ${found.length === 1 ? `"${found[0]!.filename}"` : `${found.length} attachments`} in their email since Fo asked. Save the copy to the folder?`
+      : gmailProblem
+        ? `${v.recipient_name} answered, but Kiki couldn't look in Gmail just now (${gmailProblem}). When the copy of ${request.reference} is in the folder, Kiki will file it.`
+        : `${v.recipient_name} answered. When the copy of ${request.reference} is in the folder, Kiki will file it${ctx.gmail?.available() ? "" : " (or let Kiki look in Gmail)"}.`,
+    candidates: [],
+  });
+}
+
+/** The asked-for copy is in the folder: the request is done, and the regular filing takes it from here. */
+function copyArrived(ctx: Ctx, outcomeId: string): void {
+  const { ws, v, w } = load(ctx, outcomeId);
+  const request = requestOf(v)!;
+  tx(ctx.db, () => {
+    setOutcome(ctx, outcomeId, { status: "resolved" });
+    run(ctx.db, "UPDATE watches SET state = 'closed' WHERE id = ?", w.id);
+    logEvent(ctx.db, ws.id, "copy_arrived", `The copy of ${request.reference} is in the folder. Kiki will file it with the rest, and stopped following the conversation with ${v.recipient_name}.`);
+  });
+}
+
+/**
+ * A copy Kiki asked for landed in the folder (dropped in Drive, or saved from Gmail): close the
+ * request, whether or not the contractor's answer came through Fo yet.
+ */
+export function pickUpCopies(ctx: Ctx, wsId: string): number {
+  let picked = 0;
+  const watching = all<WatchRow & { request_json: string }>(
+    ctx.db,
+    `SELECT w.*, v.request_json FROM watches w JOIN dispatches d ON d.id = w.dispatch_id JOIN outreach_versions v ON v.id = d.version_id
+     WHERE w.workspace_id = ? AND w.state IN ('watching', 'paused') AND v.kind = 'request_copy'`,
+    wsId,
+  );
+  for (const w of watching) {
+    const request = JSON.parse(w.request_json) as { reference: string };
+    if (!referenceOnFile(ctx.db, wsId, request.reference)) continue;
+    const open = one<OutcomeRow>(ctx.db, "SELECT * FROM outcomes WHERE watch_id = ? AND status IN ('needs_clarification', 'interpreting') ORDER BY created_at DESC LIMIT 1", w.id);
+    if (open) copyArrived(ctx, open.id);
+    else {
+      run(ctx.db, "UPDATE watches SET state = 'closed' WHERE id = ?", w.id);
+      logEvent(ctx.db, wsId, "copy_arrived", `The copy of ${request.reference} is in the folder. Kiki will file it with the rest, and stopped waiting for an answer.`);
+    }
+    picked++;
+  }
+  return picked;
 }
 
 function sourceOf(ctx: Ctx, outcomeId: string): { interp: Outcome; label: string; statement: string; turn: ObservedTurnRow } {

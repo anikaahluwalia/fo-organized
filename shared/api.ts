@@ -217,6 +217,9 @@ export interface DraftView {
 
 export interface OutreachView {
   documentId: string;
+  kind: "ask_final" | "request_copy";
+  /** The card's heading: "Ask about …" or "Ask … for a copy of …". */
+  title: string;
   quoteLabel: string;
   draft: DraftView | null;
   dispatches: DispatchView[];
@@ -292,6 +295,8 @@ export interface AttentionItemView {
   evidence: string | null;
   /** A quote Fo could ask the contractor about, when asking makes sense right now. */
   askDocId: string | null;
+  /** For a missing document: who could send a copy, and whether Kiki already asked. */
+  copy: { documentId: string; reference: string; issuer: string | null; asked: boolean } | null;
 }
 
 export interface AppView {

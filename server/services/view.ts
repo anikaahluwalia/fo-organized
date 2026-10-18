@@ -44,7 +44,7 @@ import { money, type Candidate, type QuoteDiff } from "../domain/reconcile.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { projectIndexRows } from "./indexfile.ts";
-import { getUserName } from "./outreach.ts";
+import { getUserName, requestOf } from "./outreach.ts";
 import { activeWorkspace, docFacts } from "./workspace.ts";
 import { notifyOutcome, notifyPurpose, notifyText, replyState } from "./notify.ts";
 import { foundAttachments } from "./attachments.ts";
@@ -235,6 +235,11 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
     };
   });
 
+  // A copy request for this reference already drafted or sent (and not given up on).
+  const refKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const copyRequests = all<OutreachVersionRow>(db, "SELECT * FROM outreach_versions WHERE workspace_id = ? AND kind = 'request_copy' AND superseded_at IS NULL", ws.id);
+  const copyAsked = (reference: string) => copyRequests.some((v) => refKey(requestOf(v)?.reference ?? "") === refKey(reference));
+
   // Index: per project, from verified locations and read facts.
   const openDispatchDocs = new Set(all<{ document_id: string }>(db, "SELECT document_id FROM dispatches WHERE open = 1").map((r) => r.document_id));
   const index: ProjectIndexView[] = all<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? ORDER BY name", ws.id).map((project) => {
@@ -290,8 +295,12 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
         watch: w ? { id: w.id, state: w.state, checks: w.checks, lastCheckedAt: w.last_checked_at, lastError: w.last_error } : null,
       };
     });
+    const request = current ? requestOf(current) : versions.length ? requestOf(versions[versions.length - 1]!) : null;
+    const who = (current ?? versions[versions.length - 1])?.recipient_name ?? "the contractor";
     return {
       documentId: docId,
+      kind: request ? ("request_copy" as const) : ("ask_final" as const),
+      title: request ? `Ask ${who} for a copy of ${request.docType === "other" ? "document" : request.docType} ${request.reference}` : `Ask about ${docLabel(docsById.get(docId))}`,
       quoteLabel: docLabel(docsById.get(docId)),
       draft: current
         ? {
@@ -420,6 +429,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       evidence: i.evidence,
       // Offer "ask" only where the index would (a quote not already being asked about).
       askDocId: i.askDocId && index.some((p) => p.rows.some((r) => r.docId === i.askDocId && r.canAsk)) ? i.askDocId : null,
+      copy: i.request ? { documentId: i.request.documentId, reference: i.request.reference, issuer: i.request.issuer, asked: copyAsked(i.request.reference) } : null,
     })),
     outreach,
     updates,

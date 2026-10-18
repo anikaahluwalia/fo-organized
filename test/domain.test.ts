@@ -1108,7 +1108,14 @@ describe("kiki.ts deriveKiki", () => {
     watch: null,
   });
 
-  const outreach = (d: DispatchView): OutreachView => ({ documentId: "doc-q", quoteLabel: "Oakline Flooring Co. Q-1042", draft: null, dispatches: [d] });
+  const outreach = (d: DispatchView): OutreachView => ({
+    documentId: "doc-q",
+    kind: "ask_final",
+    title: "Ask about Oakline Flooring Co. Q-1042",
+    quoteLabel: "Oakline Flooring Co. Q-1042",
+    draft: null,
+    dispatches: [d],
+  });
 
   const update = (status: UpdateView["status"], candidates = 0): UpdateView => ({
     id: `update-${status}`,

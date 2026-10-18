@@ -11,6 +11,7 @@ import type { Ctx } from "./services/context.ts";
 import { executePlan } from "./services/executor.ts";
 import {
   approveAndSend,
+  createCopyRequestDraft,
   createOutreachDraft,
   discardOutreach,
   dispatchHandler,
@@ -28,7 +29,7 @@ import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
 import { dismissAttention } from "./services/attention.ts";
 import { proposeMarkCurrent } from "./services/current.ts";
-import { dismissOutcome, followUp, pasteReply, pickUpArrivals, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
+import { dismissOutcome, followUp, pasteReply, pickUpArrivals, pickUpCopies, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
 import { activeWorkspace, createDemoWorkspace, requireWorkspace, runInventory, runReading, selectWorkspace, stageRevisedQuote } from "./services/workspace.ts";
 
 export interface AppDeps {
@@ -64,8 +65,10 @@ export function createApp(deps: AppDeps) {
   jobs.register("read", async (p) => {
     const wsId = String(p.workspaceId);
     await runReading(ctx, wsId);
-    // A revised quote Kiki was waiting for goes to its follow-up first, not into a filing plan.
+    // A revised quote Kiki was waiting for goes to its follow-up first, not into a filing plan;
+    // a copy she asked for closes its request (and is filed like any new document).
     await pickUpArrivals(ctx, wsId);
+    pickUpCopies(ctx, wsId);
     const proposal = autoPropose(ctx);
     if (proposal?.created) autoNotifyProposal(ctx, proposal.plan);
   });
@@ -181,6 +184,9 @@ export function createApp(deps: AppDeps) {
     dismissOutcome: (outcomeId: string) => dismissOutcome(ctx, outcomeId),
     dismissAttention: (key: string) => dismissAttention(ctx, key),
     markCurrent: (documentId: string) => proposeMarkCurrent(ctx, documentId),
+    requestCopy: (documentId: string, input: { reference?: string; contractorName?: string; contractorEmail?: string; consent?: boolean }) => ({
+      versionId: createCopyRequestDraft(ctx, documentId, input),
+    }),
 
     /**
      * After a restart: Drive steps that were mid-call become uncertain (the executor reads the

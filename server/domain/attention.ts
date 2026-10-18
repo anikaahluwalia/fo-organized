@@ -32,6 +32,8 @@ export interface AttentionItem {
   docIds: string[];
   /** A quote the user could ask the contractor about. */
   askDocId: string | null;
+  /** For a missing document: who could send a copy, and which document mentions it. */
+  request?: { documentId: string; docType: DocType; reference: string; issuer: string | null };
 }
 
 const WORD: Record<DocType, string> = {
@@ -110,6 +112,7 @@ export function findAttention(input: { today: string; docs: AttentionDoc[]; busy
     }
   }
   for (const [k, m] of missing) {
+    const from = m.by.find((d) => d.facts.issuer.value) ?? m.by[0]!;
     items.push({
       key: `missing:${k}`,
       kind: "missing",
@@ -119,6 +122,7 @@ export function findAttention(input: { today: string; docs: AttentionDoc[]; busy
       evidence: m.quote,
       docIds: m.by.map((d) => d.docId),
       askDocId: null,
+      request: { documentId: from.docId, docType: m.docType, reference: m.reference, issuer: from.facts.issuer.value },
     });
   }
 

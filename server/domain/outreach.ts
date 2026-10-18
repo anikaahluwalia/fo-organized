@@ -76,6 +76,31 @@ export const STATUS_LINES = {
   needInput: "KIKI-STATUS: NEED-INPUT",
 } as const;
 
+/** Asking for a copy of a document another one refers to: honest about who's asking, nothing attached or promised. */
+export function copyRequestDraft(input: {
+  userName: string;
+  contractorName: string;
+  requested: { docType: string; reference: string };
+  mentionedIn: { docType: string; reference: string | null };
+}): { subject: string; body: string; purpose: string } {
+  const who = input.userName.trim();
+  const what = `${input.requested.docType} ${input.requested.reference}`;
+  const where = input.mentionedIn.reference ? `${input.mentionedIn.docType} ${input.mentionedIn.reference}` : `${input.mentionedIn.docType}`;
+  return {
+    purpose: `Get a copy of ${what}, which the ${where} refers to, so the paperwork is complete.`,
+    subject: `Copy of ${what}`,
+    body: `Hi ${input.contractorName.trim()},
+
+I'm Kiki, an AI assistant helping ${who} keep the renovation paperwork organized. ${who} reviewed this message before it was sent.
+
+Your ${where} mentions ${what}, but we don't have a copy on file. Could you email us a copy of ${what}?
+
+A reply to this email with the document attached is all we need. Thank you!
+
+Kiki, on behalf of ${who}`,
+  };
+}
+
 export function buildDispatchMessage(c: DraftContent, reference: string): string {
   return `Kiki request (ref ${reference}). The user reviewed and approved the exact email below in the Kiki app, and asked it to have you send it.
 

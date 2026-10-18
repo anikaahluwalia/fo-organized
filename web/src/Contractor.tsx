@@ -9,8 +9,12 @@ export interface Act {
 }
 
 /** From a quote in the index: who to ask, with explicit consent. Nothing is sent from here. */
-export function AskContractor({ row, view, act, onDone }: { row: IndexRowView; view: AppView; act: Act; onDone: () => void }) {
-  const [name, setName] = useState("");
+type ContractorInput = { contractorName: string; contractorEmail: string; consent: boolean };
+
+/** Who to write to, and their consent. The message itself is drafted next, for you to approve. */
+function ContractorForm(props: { id: string; initialName?: string; submitLabel: string; send: (c: ContractorInput) => Promise<unknown>; view: AppView; act: Act; onDone: () => void }) {
+  const { id, view, act, onDone } = props;
+  const [name, setName] = useState(props.initialName ?? "");
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
   const [userName, setUserName] = useState(view.settings.userName ?? "");
@@ -20,26 +24,26 @@ export function AskContractor({ row, view, act, onDone }: { row: IndexRowView; v
       style={{ marginTop: 10 }}
       onSubmit={(e) => {
         e.preventDefault();
-        void act.run(`ask-${row.docId}`, async () => {
+        void act.run(`ask-${id}`, async () => {
           if (!view.settings.userName) await post("/api/settings", { userName });
-          await post(`/api/documents/${row.docId}/outreach`, { contractorName: name, contractorEmail: email, consent });
+          await props.send({ contractorName: name, contractorEmail: email, consent });
           onDone();
         });
       }}
     >
       {!view.settings.userName && (
         <div>
-          <label htmlFor={`me-${row.docId}`}>Your first name</label>
-          <input id={`me-${row.docId}`} type="text" value={userName} onChange={(e) => setUserName(e.target.value)} />
+          <label htmlFor={`me-${id}`}>Your first name</label>
+          <input id={`me-${id}`} type="text" value={userName} onChange={(e) => setUserName(e.target.value)} />
         </div>
       )}
       <div>
-        <label htmlFor={`cn-${row.docId}`}>Contractor's name</label>
-        <input id={`cn-${row.docId}`} type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dana" />
+        <label htmlFor={`cn-${id}`}>Contractor's name</label>
+        <input id={`cn-${id}`} type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dana" />
       </div>
       <div>
-        <label htmlFor={`ce-${row.docId}`}>Their email</label>
-        <input id={`ce-${row.docId}`} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="dana@example.com" />
+        <label htmlFor={`ce-${id}`}>Their email</label>
+        <input id={`ce-${id}`} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="dana@example.com" />
       </div>
       <label className="check">
         <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
@@ -47,13 +51,32 @@ export function AskContractor({ row, view, act, onDone }: { row: IndexRowView; v
       </label>
       <div className="row">
         <button className="btn btn--primary" disabled={!name.trim() || !email.trim() || !consent || (!view.settings.userName && !userName.trim()) || act.busy !== null}>
-          Draft the question
+          {props.submitLabel}
         </button>
         <button type="button" className="btn btn--quiet" onClick={onDone}>
           Cancel
         </button>
       </div>
     </form>
+  );
+}
+
+export function AskContractor({ row, view, act, onDone }: { row: IndexRowView; view: AppView; act: Act; onDone: () => void }) {
+  return <ContractorForm id={row.docId} submitLabel="Draft the question" send={(c) => post(`/api/documents/${row.docId}/outreach`, c)} view={view} act={act} onDone={onDone} />;
+}
+
+/** Ask whoever mentioned a missing document for a copy of it. */
+export function AskForCopy({ copy, view, act, onDone }: { copy: { documentId: string; reference: string; issuer: string | null }; view: AppView; act: Act; onDone: () => void }) {
+  return (
+    <ContractorForm
+      id={`copy-${copy.documentId}`}
+      initialName={copy.issuer ?? ""}
+      submitLabel="Draft the request"
+      send={(c) => post(`/api/documents/${copy.documentId}/request-copy`, { ...c, reference: copy.reference })}
+      view={view}
+      act={act}
+      onDone={onDone}
+    />
   );
 }
 
@@ -225,8 +248,8 @@ export function OutreachCard({ o, view, act }: { o: OutreachView; view: AppView;
   const awaitingApproval = draft && !o.dispatches.some((d) => d.version === draft.version && !["failed", "not_sent", "retired"].includes(d.state));
 
   return (
-    <section className="card decision" aria-label={`Question about ${o.quoteLabel}`}>
-      <h2>Ask about {o.quoteLabel}</h2>
+    <section className="card decision" aria-label={o.title}>
+      <h2>{o.title}</h2>
       {draft && awaitingApproval && !open && !editing && (
         <div className="stack">
           <dl className="facts">

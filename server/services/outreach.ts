@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  all,
   isUniqueViolation,
   kvGet,
   kvSet,
@@ -23,6 +24,7 @@ import {
   classifyDispatchReply,
   contentHash,
   contractorDraft,
+  copyRequestDraft,
   newReference,
   stripStatusLines,
   validateDraft,
@@ -66,12 +68,21 @@ function contentOf(v: OutreachVersionRow): DraftContent {
   return { recipientName: v.recipient_name, recipientEmail: v.recipient_email, subject: v.subject, body: v.body };
 }
 
-function insertVersion(db: Db, doc: DocumentRow, version: number, c: DraftContent, purpose: string, consent: boolean): string {
+function insertVersion(
+  db: Db,
+  doc: DocumentRow,
+  version: number,
+  c: DraftContent,
+  purpose: string,
+  consent: boolean,
+  kind: OutreachVersionRow["kind"] = "ask_final",
+  requestJson: string | null = null,
+): string {
   const id = randomUUID();
   run(
     db,
-    `INSERT INTO outreach_versions (id, workspace_id, document_id, version, recipient_name, recipient_email, consent_confirmed, purpose, subject, body, content_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO outreach_versions (id, workspace_id, document_id, version, recipient_name, recipient_email, consent_confirmed, purpose, subject, body, content_hash, created_at, kind, request_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     doc.workspace_id,
     doc.id,
@@ -84,8 +95,65 @@ function insertVersion(db: Db, doc: DocumentRow, version: number, c: DraftConten
     c.body,
     contentHash(c),
     now(),
+    kind,
+    requestJson,
   );
   return id;
+}
+
+/** What a copy request asks for, if this outreach is one. */
+export function requestOf(v: Pick<OutreachVersionRow, "kind" | "request_json">): { docType: string; reference: string } | null {
+  return v.kind === "request_copy" && v.request_json ? (JSON.parse(v.request_json) as { docType: string; reference: string }) : null;
+}
+
+const refKey = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/[^A-Z0-9]/g, "") : "");
+
+/** Whether a read document in the workspace carries this reference (or replaces it). */
+export function referenceOnFile(db: Db, wsId: string, reference: string): DocumentRow | undefined {
+  const k = refKey(reference);
+  return all<DocumentRow>(db, "SELECT d.* FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id WHERE d.workspace_id = ? AND d.read_status = 'read' AND f.present = 1", wsId).find((d) => {
+    const f = docFacts(d);
+    return Boolean(f) && (refKey(f!.reference.value) === k || refKey(f!.revision.revisesReference) === k);
+  });
+}
+
+/**
+ * Drafts a request for a copy of a document that another one refers to but that isn't in the
+ * folder (say, the quote a deposit invoice is for). Like the quote question, it's composed here
+ * and nothing reaches Fo until you approve this exact text.
+ */
+export function createCopyRequestDraft(ctx: Ctx, documentId: string, input: { reference?: string; contractorName?: string; contractorEmail?: string; consent?: boolean }): string {
+  const doc = getDoc(ctx.db, documentId);
+  const facts = docFacts(doc);
+  if (!facts) throw conflict("Kiki needs to read that document first.");
+  const asked = (facts.refersTo ?? []).find((r) => refKey(r.reference) === refKey(input.reference ?? ""));
+  if (!asked) throw badRequest("That document doesn't mention it.");
+  if (referenceOnFile(ctx.db, doc.workspace_id, asked.reference)) throw conflict(`${asked.reference} is already in the folder.`);
+  const existing = currentOutreach(ctx.db, documentId);
+  if (existing) {
+    if (requestOf(existing)?.reference === asked.reference) return existing.id;
+    throw conflict("There's already a message about this document. Finish or discard it first.");
+  }
+  const userName = getUserName(ctx.db);
+  if (!userName) throw badRequest("Add your first name so Kiki can say who she's helping.");
+  const name = (input.contractorName ?? "").trim();
+  if (!name) throw badRequest("Add the contractor's name.");
+  if (input.consent !== true) throw badRequest("Only contact someone who has agreed to hear from your assistant.", "consent_required");
+  const type = (t: string) => (t === "other" || t === "unknown" ? "document" : t);
+  const draft = copyRequestDraft({
+    userName,
+    contractorName: name,
+    requested: { docType: type(asked.docType), reference: asked.reference },
+    mentionedIn: { docType: type(facts.docType), reference: facts.reference.value },
+  });
+  const content: DraftContent = { recipientName: name, recipientEmail: (input.contractorEmail ?? "").trim(), subject: draft.subject, body: draft.body };
+  return tx(ctx.db, () => {
+    const raced = currentOutreach(ctx.db, documentId);
+    if (raced) return raced.id;
+    const id = insertVersion(ctx.db, doc, 1, content, draft.purpose, true, "request_copy", JSON.stringify({ docType: asked.docType, reference: asked.reference }));
+    logEvent(ctx.db, doc.workspace_id, "draft", `Kiki drafted a request to ${name} for a copy of ${asked.reference} (version 1). Nothing has been sent.`);
+    return id;
+  });
 }
 
 /** Drafts the question to the contractor locally. Fo is not involved until this exact text is approved. */
@@ -135,7 +203,7 @@ export function reviseOutreach(ctx: Ctx, versionId: string, input: Partial<Draft
   return tx(ctx.db, () => {
     const n = run(ctx.db, "UPDATE outreach_versions SET superseded_at = ? WHERE id = ? AND superseded_at IS NULL", now(), v.id);
     if (n !== 1) throw conflict("This draft was already changed. Reload to see the latest version.", "stale_draft");
-    const id = insertVersion(ctx.db, doc, v.version + 1, next, v.purpose, recipientChanged ? true : Boolean(v.consent_confirmed));
+    const id = insertVersion(ctx.db, doc, v.version + 1, next, v.purpose, recipientChanged ? true : Boolean(v.consent_confirmed), v.kind, v.request_json);
     logEvent(ctx.db, v.workspace_id, "draft", `You changed the message (now version ${v.version + 1}). It needs a fresh approval.`);
     return id;
   });
