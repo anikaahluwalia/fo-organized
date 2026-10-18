@@ -11,8 +11,9 @@ const STATUS_LABEL: Record<string, string> = {
   proposed: "Proposed",
 };
 
-function csvCell(value: string | number | null | undefined): string {
-  const s = value === null || value === undefined ? "" : String(value);
+export function csvCell(value: string | number | null | undefined): string {
+  const raw = value === null || value === undefined ? "" : String(value);
+  const s = typeof value === "string" && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

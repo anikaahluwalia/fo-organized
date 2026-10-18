@@ -28,6 +28,7 @@ import { indexFiles, planDoc, planFiles, refreshOrganizeProposal, savePlanVersio
 import { docFacts, runInventory, runReading } from "./workspace.ts";
 import { searchEmailedAttachments } from "./attachments.ts";
 import { rejectCandidates, revisionCandidates, versionDocs, waitingForRevision } from "./holds.ts";
+import { issuerKey } from "../domain/safety.ts";
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -215,8 +216,17 @@ export async function reconcileOutcome(ctx: Ctx, outcomeId: string): Promise<voi
     return;
   }
   const candidates = revisionCandidates(ctx.db, o, docs);
-  if (candidates.length === 1) {
+  // Without a readable issuer on the quote Fo asked about, Kiki can't rule out another
+  // contractor's quote, so even a single match is a question, not a proposal.
+  const askedIssuerKnown = Boolean(issuerKey(docs.find((x) => x.docId === asked.id)!.facts.issuer.value));
+  if (candidates.length === 1 && askedIssuerKnown) {
     proposeVersionUpdate(ctx, outcomeId, candidates[0]!.docId, candidates);
+  } else if (candidates.length === 1) {
+    setOutcome(ctx, outcomeId, {
+      status: "needs_clarification",
+      question: `Is "${candidates[0]!.name}" the revised quote ${v.recipient_name} meant? Kiki can't tell who issued the quote Fo asked about, so she won't assume.`,
+      candidates,
+    });
   } else if (candidates.length === 0) {
     let found: { filename: string }[] = [];
     let gmailProblem: string | null = null;
@@ -257,6 +267,12 @@ export function proposeVersionUpdate(ctx: Ctx, outcomeId: string, chosenDocId: s
   const { ws, asked } = load(ctx, outcomeId);
   const chosen = one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", chosenDocId);
   if (!chosen?.facts_json || !asked.facts_json) throw conflict("Both quotes need to be read first.");
+  // The same answer arriving again after the update was applied: it's already done.
+  if (chosen.version_status === "current" && asked.version_status === "superseded" && chosen.supersedes_id === asked.id) {
+    setOutcome(ctx, outcomeId, { status: "resolved", chosen: chosenDocId, candidates });
+    logEvent(ctx.db, ws.id, "fo_update", "Fo's update points to the quote that's already filed as current. Nothing more to do.");
+    return;
+  }
   const { interp, turn, label, statement } = sourceOf(ctx, outcomeId);
   const oldFacts = docFacts(asked)!;
   const newFacts = docFacts(chosen)!;
@@ -284,7 +300,9 @@ export function proposeVersionUpdate(ctx: Ctx, outcomeId: string, chosenDocId: s
     sourceLabel: label,
     statement,
   });
-  const seriesId = `version:${outcomeId}`;
+  // Keyed by the documents, not the message: the same answer relayed again or pasted in
+  // attaches to the open proposal instead of making an identical second one.
+  const seriesId = `version:${asked.id}:${chosen.id}`;
   savePlanVersion(ctx.db, ws, {
     kind: "version_update",
     seriesId,
@@ -321,7 +339,7 @@ function proposeConfirmCurrent(ctx: Ctx, outcomeId: string, interp: Outcome): vo
     sourceLabel: label,
     statement,
   });
-  const seriesId = `version:${outcomeId}`;
+  const seriesId = `version:${asked.id}:${asked.id}`;
   savePlanVersion(ctx.db, ws, {
     kind: "version_update",
     seriesId,
@@ -417,5 +435,6 @@ export function setWatching(ctx: Ctx, watchId: string, watching: boolean): void 
 export async function watchJob(ctx: Ctx, watchId: string, intervalSeconds: number): Promise<{ rescheduleSeconds?: number } | void> {
   await checkWatch(ctx, watchId);
   const w = one<WatchRow>(ctx.db, "SELECT * FROM watches WHERE id = ?", watchId);
-  return w?.state === "watching" ? { rescheduleSeconds: intervalSeconds } : undefined;
+  // 0 means "no timer" (checks only when asked); rescheduling with no delay would spin.
+  return w?.state === "watching" && intervalSeconds > 0 ? { rescheduleSeconds: intervalSeconds } : undefined;
 }

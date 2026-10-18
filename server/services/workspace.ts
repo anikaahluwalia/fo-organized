@@ -316,7 +316,7 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
           const project = facts.project.value ? ensureProject(ctx.db, wsId, facts.project.value) : null;
           run(
             ctx.db,
-            `UPDATE documents SET doc_type = ?, facts_json = ?, project_id = ?, read_status = 'read', read_mode = ?, read_error = NULL,
+            `UPDATE documents SET doc_type = ?, facts_json = ?, project_id = COALESCE(?, project_id), read_status = 'read', read_mode = ?, read_error = NULL,
                read_file_version = ?, version_status = CASE WHEN ? = 'quote' THEN COALESCE(version_status, 'unresolved') ELSE NULL END, updated_at = ?
              WHERE id = ?`,
             facts.docType,

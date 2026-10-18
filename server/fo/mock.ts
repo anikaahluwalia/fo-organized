@@ -80,7 +80,7 @@ export class MockFoClient implements FoClient {
       convo.pending = { progress: ["Sending you the note (mock)…"], final: `${MOCK_NOTE}\nI would have sent you Kiki's note. In mock mode nothing leaves this computer.\nKIKI-STATUS: SENT` };
     } else if (/-----BEGIN APPROVED BODY-----/.test(args.message)) {
       const to = /^To: (.+?) </m.exec(args.message)?.[1] ?? null;
-      convo.contractor = to;
+      convo.contractor = to ?? "The contractor";
       convo.pending = {
         progress: ["Preparing the approved email (mock)…"],
         final: `${MOCK_NOTE}\nI would have sent the approved email to ${to ?? "the contractor"}. I'll let you know here if they reply.\nKIKI-STATUS: SENT`,
@@ -109,7 +109,8 @@ export class MockFoClient implements FoClient {
       const final = convo.pending.final;
       convo.pending = null;
       convo.turns.push({ role: "assistant", text: final, at: new Date().toISOString() });
-      if (/KIKI-STATUS: SENT/.test(final)) convo.sentAt = Date.now();
+      // Only an email to a contractor gets a (simulated) answer; a text to you doesn't answer itself.
+      if (/KIKI-STATUS: SENT/.test(final) && convo.contractor !== null) convo.sentAt = Date.now();
       return { status: "complete", conversationId: convo.id, response: final };
     }
     const last = [...convo.turns].reverse().find((t) => t.role === "assistant");

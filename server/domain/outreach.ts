@@ -32,6 +32,8 @@ export function validateDraft(c: DraftContent): string[] {
   if (c.subject.length > 200) problems.push("The subject is too long.");
   if (c.body.length > 4000) problems.push("The message is too long.");
   if (RESERVED.test(c.subject + c.body)) problems.push("The message contains text Kiki reserves for talking to Fo.");
+  // One line each: a line break here would read as a separate instruction in Kiki's request to Fo.
+  if (/[\r\n]/.test(c.subject) || /[\r\n]/.test(c.recipientName) || /[\r\n]/.test(c.recipientEmail)) problems.push("The subject, name and email address must each be one line.");
   return problems;
 }
 
@@ -130,7 +132,7 @@ export type DispatchClassification = "sent" | "not_sent" | "need_input" | "uncle
  */
 export function classifyDispatchReply(reply: string): DispatchClassification {
   const found = new Set<string>();
-  for (const m of reply.matchAll(/KIKI-STATUS:\s*(SENT|NOT-SENT|NEED-INPUT)\b/gi)) found.add(m[1]!.toUpperCase());
+  for (const m of reply.matchAll(/^[ \t>*_`-]*KIKI-STATUS:[ \t]*(SENT|NOT-SENT|NEED-INPUT)[ \t*_`.\r]*$/gim)) found.add(m[1]!.toUpperCase());
   if (found.size === 1) {
     const value = [...found][0];
     return value === "SENT" ? "sent" : value === "NOT-SENT" ? "not_sent" : "need_input";

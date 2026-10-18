@@ -330,7 +330,9 @@ export function OutreachCard({ o, view, act }: { o: OutreachView; view: AppView;
 
 /** What Kiki picked up from Fo's conversation, and what she needs from you. */
 export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act: Act }) {
-  const [choice, setChoice] = useState<string | null>(null);
+  const [picked, setChoice] = useState<string | null>(null);
+  // A single candidate to confirm is preselected: the question is just yes or no.
+  const choice = picked ?? (u.candidates.length === 1 ? u.candidates[0]!.docId : null);
   const foLabel = view.integrations.fo.mode === "mock" ? "Mock Fo" : "Fo";
   const tone = u.status === "needs_clarification" ? "notice--warn" : u.status === "failed" ? "notice--bad" : u.status === "proposed" || u.status === "resolved" ? "notice--ok" : "notice--info";
   const statusLine: Record<UpdateView["status"], string> = {
@@ -355,7 +357,7 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
       {u.status === "needs_clarification" && (
         <div className="stack" style={{ marginTop: 8 }}>
           {u.question && <p>{u.question}</p>}
-          {u.candidates.length > 1 && (
+          {u.candidates.length >= 1 && (
             <>
               {u.candidates.map((c) => (
                 <label key={c.docId} className="check">
@@ -370,15 +372,15 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
               ))}
               <div className="row">
                 <button className="btn btn--primary" disabled={!choice || act.busy !== null} onClick={() => act.run("resolve", () => post(`/api/updates/${u.id}/resolve`, { documentId: choice }))}>
-                  This one
+                  {u.candidates.length === 1 ? "Yes, that's it" : "This one"}
                 </button>
                 <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run("none", () => post(`/api/updates/${u.id}/resolve`, { documentId: null }))}>
-                  None of these
+                  {u.candidates.length === 1 ? "No" : "None of these"}
                 </button>
               </div>
             </>
           )}
-          {u.candidates.length <= 1 && u.emailAttachments.length > 0 && (
+          {u.candidates.length === 0 && u.emailAttachments.length > 0 && (
             <div className="stack">
               {u.emailAttachments.map((a) => (
                 <div key={a.index} className="item">
@@ -400,7 +402,7 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
               ))}
             </div>
           )}
-          {u.candidates.length <= 1 && (
+          {u.candidates.length === 0 && (
             <div className="row">
               {(view.integrations.drive.gmail === "connected" || view.integrations.drive.gmail === "mock") && u.emailAttachments.length === 0 && (
                 <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("gmail-search", () => post(`/api/updates/${u.id}/gmail/search`))}>

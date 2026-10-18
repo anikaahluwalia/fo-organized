@@ -209,6 +209,10 @@ export function refreshOrganizeProposal(ctx: Ctx): void {
 
 function saveOrganize(db: Db, ws: WorkspaceRow, draft: PlanDraft): { plan: PlanRow; created: boolean } {
   const seriesId = `organize:${ws.id}`;
+  // You edited the proposal and nothing in the folder changed since: keep your version.
+  const open = one<PlanRow>(db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", seriesId);
+  const revisedFrom = open?.details_json ? (JSON.parse(open.details_json) as { revisedFrom?: string } | null)?.revisedFrom : undefined;
+  if (open && revisedFrom && revisedFrom === hashWithExclusions(draft.ops, new Set())) return { plan: open, created: false };
   const before = one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM plans WHERE series_id = ? AND status = 'applied'", seriesId)!.n;
   const folders = countBy(draft.ops, "create_folder");
   const copies = draft.ops.filter((o) => o.kind === "move_rename" && o.newPath !== null && inDuplicatesFolder(o.newPath)).length;
@@ -268,6 +272,18 @@ export function autoPropose(ctx: Ctx): { plan: PlanRow; created: boolean } | nul
   const hash = hashWithExclusions(draft.ops, new Set());
   // Don't re-propose something the user set aside, or that already failed: they choose to retry.
   if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('discarded', 'failed', 'partial', 'stale') AND content_hash = ?", seriesId, hash)) return null;
+  // Nor redo what the user just undid.
+  if (
+    one<PlanRow>(
+      ctx.db,
+      `SELECT p.* FROM plans p WHERE p.series_id = ? AND p.status = 'applied' AND p.content_hash = ?
+         AND EXISTS (SELECT 1 FROM plans u WHERE u.kind = 'undo' AND u.status = 'applied' AND json_extract(u.source_json, '$.undoOf') = p.id)`,
+      seriesId,
+      hash,
+    )
+  ) {
+    return null;
+  }
   return saveOrganize(ctx.db, ws, draft);
 }
 
@@ -293,13 +309,31 @@ export function revisePlan(ctx: Ctx, planId: string, edits: { seq: number; newNa
       op.reason = `${op.reason} You chose this name.`;
     }
   }
-  // Excluding a folder excludes everything that depends on it.
+  // Excluding a folder excludes everything that depends on it. The index only waits for the
+  // moves (it lists what's verified), so it goes only with the folder it's written in.
+  const structural = (o: PlannedOp) => (o.kind === "write_index" ? o.dependsOn.filter((d) => o.parentRef !== null && "op" in o.parentRef && o.parentRef.op === d) : o.dependsOn);
   let grew = true;
   while (grew) {
     grew = false;
-    for (const o of ops) if (!excluded.has(o.seq) && o.dependsOn.some((d) => excluded.has(d))) (excluded.add(o.seq), (grew = true));
+    for (const o of ops) if (!excluded.has(o.seq) && structural(o).some((d) => excluded.has(d))) (excluded.add(o.seq), (grew = true));
   }
-  const details = plan.details_json ? JSON.parse(plan.details_json) : null;
+  // A name you typed can't land on a name already used in that folder.
+  const edited = new Set(edits.filter((e) => e.newName !== undefined).map((e) => e.seq));
+  if (edited.size) {
+    const moves = ops.filter((o) => o.kind === "move_rename" && !excluded.has(o.seq));
+    const moving = new Set(moves.map((o) => o.fileId));
+    const key = (path: string | null, name: string | null) => `${path ?? ""}/${(name ?? "").toLowerCase()}`;
+    const staying = new Set(planFiles(ctx.db, ws.id).filter((f) => !moving.has(f.fileId)).map((f) => key(f.path, f.name)));
+    for (const op of moves.filter((o) => edited.has(o.seq))) {
+      const k = key(op.newPath, op.newName);
+      if (staying.has(k) || moves.some((o) => o !== op && key(o.newPath, o.newName) === k)) {
+        throw badRequest(`"${op.newName}" is already used in ${op.newPath || "the top level"}. Choose another name.`);
+      }
+    }
+  }
+  const prior = plan.details_json ? JSON.parse(plan.details_json) : null;
+  // Remember which of Kiki's drafts this edit started from, so her next look doesn't undo it.
+  const details = plan.kind === "organize" ? { ...(prior ?? {}), revisedFrom: prior?.revisedFrom ?? plan.content_hash } : prior;
   const { plan: next } = savePlanVersion(ctx.db, ws, {
     kind: plan.kind,
     seriesId: plan.series_id,
@@ -363,6 +397,8 @@ export function resumePlan(ctx: Ctx, planId: string): void {
   if (!retryable) throw conflict("Nothing left to retry in this plan.");
   tx(ctx.db, () => {
     run(ctx.db, "UPDATE plan_ops SET state = 'pending', error = NULL WHERE plan_id = ? AND state IN ('failed', 'skipped')", planId);
+    // The index was written with what had worked; write it again after the retried steps.
+    run(ctx.db, "UPDATE plan_ops SET state = 'pending', error = NULL WHERE plan_id = ? AND kind = 'write_index' AND state = 'verified'", planId);
     run(ctx.db, "UPDATE plans SET status = 'approved', finished_at = NULL WHERE id = ?", planId);
     logEvent(ctx.db, plan.workspace_id, "plan", `You asked Kiki to retry the unfinished steps of "${plan.title}". Finished steps won't run again.`);
   });

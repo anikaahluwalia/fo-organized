@@ -310,6 +310,14 @@ export function buildOrganizePlan(input: {
     moves.push({ file, doc, targetPath, name, reason: why.join(" ") });
   }
 
+  // Shortcuts have no document of their own; say why they stay where they are.
+  const withDoc = new Set(docs.map((d) => d.fileId));
+  for (const f of input.files) {
+    if (f.isShortcut && !withDoc.has(f.fileId)) {
+      notes.push({ fileId: f.fileId, name: f.name, path: f.path, status: "left_in_place", reason: "It's a shortcut. Kiki doesn't move shortcuts because they can point outside this workspace." });
+    }
+  }
+
   for (const doc of setAside) {
     const file = fileById.get(doc.fileId)!;
     const keeperId = copyOf.get(doc.docId)!;
@@ -450,7 +458,8 @@ export function buildVersionUpdatePlan(input: VersionUpdateInput): PlanDraft {
       targetSupersedesId: null,
       reason: "Keep the earlier quote, but move it to Superseded so nobody mistakes it for the current one. Nothing is deleted.",
       evidence: null,
-      dependsOn: folders.dependencies(parentRef),
+      // Only once the new quote is actually filed: otherwise nothing would be current.
+      dependsOn: [...folders.dependencies(parentRef), ...(newSeq ? [newSeq] : [])],
     });
     oldSeq = ops.length;
   }
@@ -488,7 +497,8 @@ export function buildVersionUpdatePlan(input: VersionUpdateInput): PlanDraft {
     targetSupersedesId: null,
     reason: "Mark the earlier quote as superseded by the new one.",
     evidence: input.evidence,
-    dependsOn: oldSeq ? [oldSeq] : [],
+    // Superseded only by a quote that did become current.
+    dependsOn: [...(oldSeq ? [oldSeq] : []), currentSeq],
   });
   indexOp(ops, folders, input.project, input.indexFile, [currentSeq, ops.length]);
   return { ops, notes };

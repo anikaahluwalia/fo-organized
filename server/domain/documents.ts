@@ -163,8 +163,11 @@ export function toFacts(read: ReadResult, text: string | null): DocFacts {
     total: { ...fact(typeof read.total.amount === "number" && Number.isFinite(read.total.amount) ? read.total.amount : null, read.total.quote), currency: read.total.currency },
     project: projectFact,
     scope: read.scope_summary,
-    lineItems: read.line_items.slice(0, 15),
-    revision: { isRevision: read.revision.is_revision, label: read.revision.label, revisesReference: read.revision.revises_reference, quote: read.revision.quote },
+    lineItems: read.line_items.filter((i) => check(i.quote) !== false).slice(0, 15),
+    revision:
+      check(read.revision.quote) === false
+        ? { isRevision: false, label: null, revisesReference: null, quote: read.revision.quote }
+        : { isRevision: read.revision.is_revision, label: read.revision.label, revisesReference: read.revision.revises_reference, quote: read.revision.quote },
     aiDirectedText: text ? aiDirectedLines(text) : [],
     textAvailable: text !== null,
     refersTo,

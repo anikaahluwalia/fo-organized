@@ -129,7 +129,9 @@ export function anchorMatcher(text: string, reference: string | null): (t: FoTur
 
 /** Reads the user's answer from the turns that follow Kiki's text, if there is one yet. */
 export function findReply(turns: FoTurn[], isAnchor: (t: FoTurn) => boolean, sentAtMs: number): { verdict: "approved" | "declined"; text: string; source: "text_reply" | "relayed_by_fo" } | null {
-  const idx = turns.findIndex(isAnchor);
+  // Only what follows the most recent matching text: an answer to an earlier text with the same
+  // wording isn't an answer to this one.
+  const idx = turns.findLastIndex(isAnchor);
   if (idx === -1) return null;
   for (const t of turns.slice(idx + 1)) {
     if (t.at && Date.parse(t.at) < sentAtMs - 120_000) continue;
@@ -139,10 +141,14 @@ export function findReply(turns: FoTurn[], isAnchor: (t: FoTurn) => boolean, sen
       if (OURS.test(t.text) || t.text.length > 300) continue;
       said = t.text.trim();
     } else {
-      // Fo relaying it in our conversation, e.g. `You replied "go ahead".`
-      const m = /\b(replied|responded|wrote back|texted back|said)\b[^"“\n]{0,40}["“]([^"”\n]{1,200})["”]/i.exec(t.text);
+      // Fo's own send turn (it carries the status line) can't contain the user's answer, even if
+      // it restates the instruction ('if you reply "go ahead"...').
+      if (/^[ \t>*_`-]*KIKI-STATUS:/im.test(t.text)) continue;
+      // Fo relaying it: only a plain report that you answered, quote right after the verb, like
+      // `You replied "go ahead".` Not "you may reply", "you haven't replied", "Dana said".
+      const m = /\byou\s+(?:just\s+)?(?:replied|responded|wrote back|texted back|texted|said)(?:\s+(?:with|back))?[:,]?\s*["“]([^"”\n]{1,200})["”]/i.exec(t.text);
       if (!m) continue;
-      said = m[2]!.trim();
+      said = m[1]!.trim();
       source = "relayed_by_fo";
     }
     if (DECLINE.test(said)) return { verdict: "declined", text: said, source };
@@ -176,8 +182,15 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   const reference = doc?.facts_json ? ((JSON.parse(doc.facts_json) as DocFacts).reference.value ?? null) : null;
   const isAnchor = anchorMatcher(text, reference);
   const candidates: { id: string; channel: string }[] = [state.conversationId, task.conversation_id].filter((c): c is string => Boolean(c)).map((id) => ({ id, channel: "known" }));
+  // Kiki's conversations about other texts carry the same kind of message (and Fo's report of
+  // the answer to that one): never read them as an answer to this text.
+  const otherTexts = new Set(
+    all<{ conversation_id: string }>(ctx.db, "SELECT conversation_id FROM fo_tasks WHERE kind = 'notify' AND id <> ? AND conversation_id IS NOT NULL", taskId).map((r) => r.conversation_id),
+  );
   try {
-    for (const c of (await ctx.fo.listConversations()).slice(0, 4)) if (!candidates.some((x) => x.id === c.conversationId)) candidates.push({ id: c.conversationId, channel: c.channel });
+    for (const c of (await ctx.fo.listConversations()).slice(0, 4)) {
+      if (!candidates.some((x) => x.id === c.conversationId) && !otherTexts.has(c.conversationId)) candidates.push({ id: c.conversationId, channel: c.channel });
+    }
   } catch {
     // Listing is a convenience; the known conversations are still checked.
   }

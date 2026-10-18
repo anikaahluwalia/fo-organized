@@ -157,7 +157,15 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
 
   function serveStatic(url: URL, res: http.ServerResponse): void {
     const root = path.resolve(staticDir);
-    let file = path.resolve(root, `.${decodeURIComponent(url.pathname)}`);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch {
+      res.writeHead(400, { ...SECURITY_HEADERS, "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Bad request.");
+      return;
+    }
+    let file = path.resolve(root, `.${decoded}`);
     if (!file.startsWith(root + path.sep) && file !== root) {
       res.writeHead(404, { ...SECURITY_HEADERS, "Content-Type": "text/plain; charset=utf-8" });
       res.end("Not found.");

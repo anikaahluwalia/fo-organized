@@ -4,7 +4,7 @@ import { changeToken, DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } f
 import type { Ctx } from "./context.ts";
 import { buildIndexCsv } from "./indexfile.ts";
 import { planOps } from "./plans.ts";
-import { recordFile } from "./workspace.ts";
+import { ensureProject, recordFile } from "./workspace.ts";
 
 /** Thrown when a file changed since preview: the plan stops and the proposal needs a refresh. */
 class StopPlan extends Error {}
@@ -92,7 +92,9 @@ class Execution {
       const dep = one<PlanOpRow>(this.ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND seq = ?", op.plan_id, seq);
       const folderId = dep?.state === "verified" && dep.result_json ? (JSON.parse(dep.result_json) as { folderId?: string }).folderId : undefined;
       if (!folderId) throw new Error(`The folder from step ${seq} isn't there.`);
-      this.inside.add(folderId);
+      // Made by this run: already known to be inside. Made by an earlier run (a resume or a
+      // restart): someone may have moved it out of the workspace since, so walk up to the root.
+      await this.assertInside(folderId);
       return folderId;
     }
     const id = ref.startsWith("file:") ? ref.slice(5) : ref;
@@ -105,11 +107,18 @@ class Execution {
       const op = this.op(row.id);
       if (DONE.has(op.state)) continue;
       const deps = JSON.parse(op.depends_on ?? "[]") as number[];
-      const blocked = deps
-        .map((seq) => one<PlanOpRow>(this.ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND seq = ?", op.plan_id, seq))
-        .find((d) => d && d.state !== "verified");
+      const depRows = deps.map((seq) => one<PlanOpRow>(this.ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND seq = ?", op.plan_id, seq)).filter((d): d is PlanOpRow => Boolean(d));
+      // The index is built from verified state, so one failed move doesn't hold it back (the CSV
+      // shows the moves that did happen); it needs its folder, and at least one change to show.
+      const blocks = (d: PlanOpRow) => op.kind !== "write_index" || d.kind === "create_folder";
+      const blocked = depRows.find((d) => d.state !== "verified" && blocks(d));
       if (blocked) {
         this.set(op, "skipped", { error: `Didn't run because step ${blocked.seq} didn't complete.` });
+        continue;
+      }
+      const changes = depRows.filter((d) => d.kind !== "create_folder");
+      if (op.kind === "write_index" && changes.length > 0 && !changes.some((d) => d.state === "verified")) {
+        this.set(op, "skipped", { error: "Nothing in this plan changed, so the index didn't need rewriting." });
         continue;
       }
       try {
@@ -242,6 +251,9 @@ class Execution {
     }
     tx(this.ctx.db, () => {
       this.set(op, "verified", { result: { name: after.name, parentId: destId, version: changeToken(after) } });
+      // Confirmed by reading Drive back: an earlier "didn't answer in time" is no longer an error.
+      run(this.ctx.db, "UPDATE plan_ops SET error = NULL WHERE id = ?", op.id);
+      this.recordProject(op);
       run(
         this.ctx.db,
         `INSERT OR IGNORE INTO change_log (workspace_id, plan_op_id, file_id, kind, before_name, before_parent_id, after_name, after_parent_id, after_version, applied_at)
@@ -268,6 +280,21 @@ class Execution {
         );
       }
     });
+  }
+
+  /**
+   * A document filed into a project folder belongs to that project, even when the project came
+   * from what Kiki knows about its supplier rather than from the document itself, so the index
+   * lists it. Moved back out by an undo, it only keeps a project its own text names.
+   */
+  private recordProject(op: PlanOpRow): void {
+    if (!op.doc_id) return;
+    const [category, project] = (op.new_path ?? "").split("/");
+    if (this.plan.kind !== "undo" && category === CATEGORY && project) {
+      run(this.ctx.db, "UPDATE documents SET project_id = ?, updated_at = ? WHERE id = ? AND project_id IS NULL", ensureProject(this.ctx.db, this.ws.id, project).id, now(), op.doc_id);
+    } else if (this.plan.kind === "undo" && category !== CATEGORY) {
+      run(this.ctx.db, "UPDATE documents SET project_id = NULL, updated_at = ? WHERE id = ? AND json_extract(facts_json, '$.project.value') IS NULL", now(), op.doc_id);
+    }
   }
 
   private setStatus(op: PlanOpRow): void {
@@ -303,7 +330,7 @@ class Execution {
     const csv = buildIndexCsv(this.ctx.db, project, now());
     let file: DriveFile | null = op.file_id ? await this.tryGet(op.file_id) : null;
     if (file) {
-      if (changeToken(file) !== op.pre_version) {
+      if (changeToken(file) !== op.pre_version && changeToken(file) !== project.index_file_version) {
         this.set(op, "failed", { error: "Someone edited the index file since Kiki last wrote it, so she didn't overwrite it." });
         return;
       }
