@@ -68,3 +68,21 @@ test("a question asks for a place, never for a yes", () => {
   assert.match(checkComposed(q, yes).join(" "), /asks for a yes/);
   assert.deepEqual(checkComposed(q, { ...yes, text: "Kiki: where should the DOM weekly timesheet go? Reply with a folder, or tap to pick one:" }), []);
 });
+
+test("\"I have 3 files\" isn't a claim it's done; a mixed plan's text that lists files instead of counts doesn't go out", () => {
+  const three: ComposeFacts = { ...timesheet, items: [1, 2, 3].map((n) => ({ n, kind: "file" as const, name: `scan_${n}.pdf`, about: [], folder: "Flooring" })) };
+  assert.deepEqual(checkComposed(three, { text: "Kiki: I have 3 files to file in Flooring. Reply yes, or tap to change it:", names: [] }), []);
+  assert.match(checkComposed(three, { text: "Kiki: I've filed 3 files in Flooring. Reply yes, or tap to change it:", names: [] }).join(" "), /done before/);
+  const mixed: ComposeFacts = {
+    ...timesheet,
+    items: [
+      { n: 1, kind: "file", name: "ANIKA_AHLUWALIA_RESUME_SWE.pdf", about: ["Résumé"], folder: "Career" },
+      { n: 2, kind: "copy", name: "Screenshot 2026-10-18 at 2.02.22 PM 1.png", about: [] },
+      { n: 3, kind: "unplaced", name: "Screenshot 2026-10-18 at 2.40.02 PM.png", about: [] },
+      { n: 4, kind: "unplaced", name: "kiki.png", about: [] },
+    ],
+  };
+  const listing = "Kiki: File Anika Ahluwalia résumé in Career, and set aside Screenshot 2.02.22 PM, a copy of one already filed? kiki illustration and Screenshot 2.40.02 PM need a folder. Tap to check:";
+  assert.match(checkComposed(mixed, { text: listing, names: [] }).join(" "), /counts belong/);
+  assert.deepEqual(checkComposed(mixed, { text: "Kiki: 1 new file for Career, 1 copy to set aside and 2 need a folder. Tap to check:", names: [] }), []);
+});

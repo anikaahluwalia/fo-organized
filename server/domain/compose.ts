@@ -71,7 +71,9 @@ The text:
 - When files need a folder alongside other changes, ends with "Tap to check:" (a yes alone doesn't say where they go); otherwise ends with how to answer: for answer "reply_or_link", something like "Reply yes, or tap to change it:"; for "link", something like "Tap to answer:" (and never invites a text reply); for "reply_or_app", something like "Reply yes, or answer in the Kiki app." (there's no link). Kiki adds any link right after your text, so never write a link. For done and stopped, nothing to answer.`;
 
 export function composeUserMessage(facts: ComposeFacts): string {
-  return `<facts>\n${JSON.stringify(facts, null, 1)}\n</facts>`;
+  // Spelled out, since it's the rule Claude most often misses: names for one or two files of a sort, counts otherwise.
+  const counts = facts.items.length > 2 || new Set(facts.items.map((i) => i.kind)).size > 1;
+  return `<facts>\n${JSON.stringify(facts, null, 1)}\n</facts>\n${counts && ["new", "revised", "unchanged", "question"].includes(facts.situation) ? "Use counts here, not file names (the link shows each file)." : "Name the files here."}`;
 }
 
 const norm = (s: string) =>
@@ -103,7 +105,7 @@ export function checkComposed(facts: ComposeFacts, c: Composed): string[] {
   if ((text.match(/\n/g) ?? []).length > 2) problems.push("too many lines");
   if (hasMarker(text) || /https?:\/\/|www\./i.test(text)) problems.push("has a link or a protocol line");
   if (/projects\/|version \d|\bindex\b/i.test(text)) problems.push("has a path, a version or the index");
-  if (PROPOSING.includes(facts.situation) && /\b(done|i've|i have|has been|have been|is now|are now|all set)\b/i.test(text)) problems.push("says it's done before you've said yes");
+  if (PROPOSING.includes(facts.situation) && /\b(done|all set|i(?:'ve| have) (?:filed|moved|renamed|set|put|organized)|ha(?:s|ve) been|is now|are now)\b/i.test(text)) problems.push("says it's done before you've said yes");
   if (facts.situation === "auto" && !/\b(own|automatic)/i.test(text)) problems.push("doesn't say Kiki did it on her own");
   if (facts.situation === "question" && !text.includes("?")) problems.push("doesn't ask where it goes");
   if (facts.situation === "question" && /\b(reply|say|answer) (with )?(a )?yes\b/i.test(text)) problems.push("asks for a yes to a question");
@@ -133,6 +135,8 @@ export function checkComposed(facts: ComposeFacts, c: Composed): string[] {
     if (!t.includes(norm(folder))) problems.push(`doesn't name the folder ${folder}`);
   }
   if (!few) {
+    // Counts are a summary: one that lists the files instead is too long for one.
+    if (text.length > 140) problems.push("names files where counts belong");
     const said = (n: number) => t.includes(String(n)) || t.includes(NUMBERS[n] ?? "#") || (n === 1 && /\b(a|an)\b/.test(t));
     for (const sort of sorts) if (!said(facts.items.filter((i) => i.kind === sort).length)) problems.push(`doesn't give the count of ${sort === "file" ? "files to file" : sort === "copy" ? "copies" : "files that need a folder"}`);
   }
