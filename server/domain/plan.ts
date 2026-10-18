@@ -195,8 +195,8 @@ function indexOp(ops: PlannedOp[], folders: Folders, project: string, index: { f
     targetStatus: null,
     targetSupersedesId: null,
     reason: index
-      ? `Update the ${project} index file from the verified results, so nobody has to maintain a tracker by hand.`
-      : `Create a ${project} index file listing every document, kept up to date by Kiki.`,
+      ? `Update the ${project} index.`
+      : `Create a ${project} index listing every document.`,
     evidence: null,
     dependsOn: [...new Set([...folders.dependencies(parentRef), ...dependsOn])].sort((a, b) => a - b),
   });
@@ -256,7 +256,7 @@ export function buildOrganizePlan(input: {
         const project = [...known][0]!;
         const count = input.docs.filter((d) => d.docId !== doc.docId && issuerKey(d.facts?.issuer.value) === issuerKey(facts.issuer.value)).length;
         facts = { ...facts, project: { value: project, quote: null, quoteFound: null } };
-        supplierNote = `It doesn't name a project, but ${facts.issuer.value} is the supplier on ${count} other document${count === 1 ? "" : "s"} filed under ${project}.`;
+        supplierNote = `No project on it, but ${facts.issuer.value}'s other ${count === 1 ? "document is" : `${count} documents are`} in ${project}.`;
       }
     }
     const folder = targetFolder(facts);
@@ -286,9 +286,11 @@ export function buildOrganizePlan(input: {
     }
     const kind = describeFacts(facts);
     const article = /^[aeiou]/i.test(kind) ? "an" : "a";
-    const why = supplierNote ? [`It's ${article} ${kind}.`, supplierNote] : [`It's ${article} ${kind} about ${facts.project.value!.toLowerCase()}, read from the document.`];
-    if (!suggested) why.push("There weren't enough facts to give it a clearer name, so it keeps its name.");
-    if (facts.aiDirectedText.length) why.push("It contains text aimed at AI tools, which Kiki ignored.");
+    void article;
+    const label = `${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
+    const why = supplierNote ? [`${label}.`, supplierNote] : [`${label}, ${facts.project.value!.toLowerCase()}.`];
+    if (!suggested) why.push("Keeps its name (not enough details to rename).");
+    if (facts.aiDirectedText.length) why.push("Contains instructions aimed at AI tools; ignored.");
     moves.push({ file, doc, targetPath, name, reason: why.join(" ") });
   }
 
@@ -315,7 +317,7 @@ export function buildOrganizePlan(input: {
       preStatus: null,
       targetStatus: null,
       targetSupersedesId: null,
-      reason: name !== m.name ? `${m.reason} Another file already has that name there, so this one gets a number.` : m.reason,
+      reason: name !== m.name ? `${m.reason} Name taken, so numbered.` : m.reason,
       evidence: m.doc.facts,
       dependsOn: folders.dependencies(parentRef),
     });

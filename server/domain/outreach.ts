@@ -75,7 +75,7 @@ export const STATUS_LINES = {
 } as const;
 
 export function buildDispatchMessage(c: DraftContent, reference: string): string {
-  return `Fo-rganized request (ref ${reference}). The user reviewed and approved the exact email below in the Fo-rganized app, and asked it to have you send it.
+  return `Kiki request (ref ${reference}). The user reviewed and approved the exact email below in the Kiki app, and asked it to have you send it.
 
 Please send ONE email with exactly these details:
 To: ${c.recipientName.trim()} <${c.recipientEmail.trim()}>
@@ -102,7 +102,7 @@ ${STATUS_LINES.needInput}`;
 }
 
 export function buildReplyMessage(answer: string, c: DraftContent, reference: string): string {
-  return `Answer from the user about Fo-rganized request ${reference}:
+  return `Answer from the user about Kiki request ${reference}:
 
 ${answer.trim()}
 
@@ -110,12 +110,12 @@ Reminder: the approval covers only sending the exact email already given (to ${c
 }
 
 export function buildStopMessage(reference: string): string {
-  return `Please don't send the email for Fo-rganized request ${reference}. The user decided not to send it. If it has already gone out, tell me. End your reply with ${STATUS_LINES.notSent} if nothing was sent, or ${STATUS_LINES.sent} if it was already sent.`;
+  return `Please don't send the email for Kiki request ${reference}. The user decided not to send it. If it has already gone out, tell me. End your reply with ${STATUS_LINES.notSent} if nothing was sent, or ${STATUS_LINES.sent} if it was already sent.`;
 }
 
 /** A follow-up in the mapped conversation. It carries the same limits; it can't widen them. */
 export function buildFollowUpMessage(text: string, reference: string): string {
-  return `About Fo-rganized request ${reference}:
+  return `About Kiki request ${reference}:
 
 ${text.trim()}
 

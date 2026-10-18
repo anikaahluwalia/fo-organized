@@ -37,7 +37,7 @@ export class DbOAuthProvider implements OAuthClientProvider {
 
   get clientMetadata(): OAuthClientMetadata {
     return {
-      client_name: "Paper Chase (local)",
+      client_name: "Kiki (local)",
       redirect_uris: [this.redirect],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],

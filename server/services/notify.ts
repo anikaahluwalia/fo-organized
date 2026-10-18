@@ -27,14 +27,14 @@ export function notifyPreview(ctx: Ctx): { text: string; contentHash: string; pl
     moved.length ? `filed and renamed ${moved.length} document${moved.length === 1 ? "" : "s"} (${invoices} invoice${invoices === 1 ? "" : "s"}, ${quotes} quote${quotes === 1 ? "" : "s"})` : null,
     index ? `updated the project index ("${index.new_name}")` : null,
   ].filter(Boolean);
-  const text = `Hi, it's Kiki. I organized "${ws.name}" in Google Drive: ${parts.join(", ")}. ${ops.length === total ? "Every change was checked in Drive." : `${ops.length} of ${total} steps were checked in Drive; the rest need a look in Fo-rganized.`} Nothing was deleted.`;
+  const text = `Hi, it's Kiki. I organized "${ws.name}" in Google Drive: ${parts.join(", ")}. ${ops.length === total ? "Every change was checked in Drive." : `${ops.length} of ${total} steps were checked in Drive; the rest need a look in Kiki.`} Nothing was deleted.`;
   return { text, contentHash: hash(text), planId: plan.id };
 }
 
 function message(text: string, reference: string, channel: "note" | "text" = "note"): string {
   const how = channel === "text" ? "a text message (SMS)" : "a short note, using the channel you normally use to reach me,";
-  const why = channel === "text" ? "The user turned on \"Fo texts me about new finds\" in the Fo-rganized app; this text is covered by that setting." : "The user reviewed and approved this in the Fo-rganized app.";
-  return `Fo-rganized request (ref ${reference}). ${why}
+  const why = channel === "text" ? "The user turned on \"Fo texts me about new finds\" in the Kiki app; this text is covered by that setting." : "The user reviewed and approved this in the Kiki app.";
+  return `Kiki request (ref ${reference}). ${why}
 
 Please send ME (the account holder, the person you're talking to) ${how} with exactly this text:
 -----BEGIN APPROVED BODY-----
@@ -119,10 +119,9 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
     const op = moves[0]!;
     const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
     const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
-    const supplier = /supplier on \d+ other document/.test(op.reason) ? ` It's from a supplier you already have filed under ${(op.new_path ?? "").split("/")[1] ?? "that project"}.` : "";
-    return `Kiki here: I found ${describeDoc(facts)} in "${ws.name}".${supplier} I'd file it in ${op.new_path} as "${op.new_name}". Approve it in Fo-rganized; nothing moves until you do.`;
+    return `Kiki: ${describeDoc(facts)} just landed in "${ws.name}". I'd file it in ${op.new_path}. Approve in Kiki when you're ready.`;
   }
-  return `Kiki here: I found ${moves.length} documents to file in "${ws.name}" and prepared a plan. Approve it in Fo-rganized; nothing moves until you do.`;
+  return `Kiki: ${moves.length} new documents in "${ws.name}" are ready to file. Approve in Kiki when you're ready.`;
 }
 
 /** Standing permission, texts to the account holder only: one text per new proposal. */

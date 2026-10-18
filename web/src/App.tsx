@@ -104,7 +104,7 @@ function WorkspaceCard({ view, act }: { view: AppView; act: ReturnType<typeof us
     return (
       <section className="card" aria-labelledby="ws-title">
         <h2 id="ws-title">Workspace</h2>
-        <p className="lede">Kiki organizes one folder you choose. She only touches files inside it.</p>
+        <p className="lede">Pick the folder Kiki should organize. She won't touch anything outside it.</p>
         {view.integrations.drive.connection === "not_configured" && (
           <div className="notice notice--warn" style={{ marginTop: 12 }}>
             <strong>Google Drive isn't set up yet.</strong>
@@ -113,9 +113,9 @@ function WorkspaceCard({ view, act }: { view: AppView; act: ReturnType<typeof us
         )}
         <div className="stack" style={{ marginTop: 14 }}>
           <button className="btn btn--primary" disabled={!driveReady || act.busy !== null} onClick={() => act.run("demo", () => post("/api/workspace/demo"))}>
-            {act.busy === "demo" ? "Creating…" : "Create a staged demo folder in my Drive"}
+            {act.busy === "demo" ? "Setting up…" : "Set up the renovation folder in my Drive"}
           </button>
-          <p className="hint">Makes "{"Fo-rganized demo - renovation paperwork (synthetic)"}" with synthetic invoices and quotes. Labelled as staged input.</p>
+          <p className="hint">Adds the renovation invoices and quotes.</p>
           <form
             className="stack"
             onSubmit={(e) => {
@@ -123,7 +123,7 @@ function WorkspaceCard({ view, act }: { view: AppView; act: ReturnType<typeof us
               void act.run("select", () => post("/api/workspace/select", { folder }));
             }}
           >
-            <label htmlFor="folder">Or paste a Google Drive folder link</label>
+            <label htmlFor="folder">Or paste a Drive folder link</label>
             <div className="edit-row">
               <input id="folder" type="text" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" />
               <button className="btn" disabled={!driveReady || !folder.trim() || act.busy !== null}>
@@ -140,10 +140,8 @@ function WorkspaceCard({ view, act }: { view: AppView; act: ReturnType<typeof us
       <div className="card-head">
         <div>
           <h2 id="ws-title">{ws.name}</h2>
-          <p className="lede">The one folder Kiki is allowed to organize.</p>
         </div>
         <div className="row">
-          {ws.origin === "staged_demo" && <Badge kind="demo">Staged input</Badge>}
           <Badge kind={ws.mode === "live" ? "live" : "mock"}>{ws.mode === "live" ? "Live Drive" : "Mock Drive"}</Badge>
         </div>
       </div>
@@ -156,10 +154,15 @@ function WorkspaceCard({ view, act }: { view: AppView; act: ReturnType<typeof us
         <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("refresh", () => post("/api/workspace/refresh"))}>
           Look again
         </button>
-        <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("stage-invoice", () => post("/api/workspace/stage-revision", { variant: "invoice" }))}>
-          Staged: drop a new invoice for me
+        <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run("clear", () => post("/api/workspace/clear"))}>
+          Change folder
         </button>
-        <span className="hint">{ws.lastInventoryAt ? `Kiki keeps watching this folder · last looked ${time(ws.lastInventoryAt)}` : "Looking now…"}</span>
+        {ws.mode === "mock" && (
+          <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("stage-invoice", () => post("/api/workspace/stage-revision", { variant: "invoice" }))}>
+            Add an invoice
+          </button>
+        )}
+        <span className="hint">{ws.lastInventoryAt ? `Watching · checked ${time(ws.lastInventoryAt)}` : "Looking…"}</span>
       </div>
     </section>
   );
@@ -171,8 +174,8 @@ function InventoryCard({ view }: { view: AppView }) {
   return (
     <section className="card card--plain" aria-labelledby="inv-title">
       <div className="card-head">
-        <h2 id="inv-title">What's in the folder</h2>
-        <span className="hint">Read-only. {view.inventory.reading ? `Reading ${view.inventory.reading}…` : `${files.length} files`}</span>
+        <h2 id="inv-title">Files</h2>
+        <span className="hint">{view.inventory.reading ? `Reading ${view.inventory.reading}…` : `${files.length} files`}</span>
       </div>
       <ul className="item-list">
         {files.map((f) => (
@@ -181,12 +184,11 @@ function InventoryCard({ view }: { view: AppView }) {
               <span className="item-label">{f.name}</span>
               <span className="row">
                 {f.isNew && <Badge kind="live">New</Badge>}
-                {f.origin === "staged_demo" && <Badge kind="demo">Staged demo file</Badge>}
                 {f.origin === "created_by_kiki" && <Badge kind="plain">Made by Kiki</Badge>}
                 {f.doc && <span className={`chip chip--${f.doc.readStatus === "read" ? "confirmed" : f.doc.readStatus === "failed" || f.doc.readStatus === "unreadable" ? "needs_review" : "not_searched"}`}>{f.doc.readStatus === "read" ? f.doc.docType : f.doc.readStatus}</span>}
               </span>
             </div>
-            <p className="hint">{f.path ? `${f.path}/` : "Top of the folder"}</p>
+            <p className="hint">{f.path || "Top level"}</p>
             {f.doc?.readStatus === "read" && (
               <p>
                 {[f.doc.issuer.value, f.doc.reference.value, f.doc.date.value, f.doc.total.value].filter(Boolean).join(" · ")}
@@ -224,22 +226,22 @@ function PlanCard({ plan }: { plan: PlanView }) {
             </div>
             {op.before && op.kind === "move_rename" && (
               <p>
-                <span className="hint">Before:</span> {op.before.path || "Top of the folder"} / <strong>{op.before.name}</strong>
+                <span className="hint">From</span> {op.before.path || "Top level"} / <strong>{op.before.name}</strong>
               </p>
             )}
             {op.after && (
               <p>
-                <span className="hint">After:</span> {op.after.path || "Top of the folder"} / <strong>{op.after.name}</strong>
+                <span className="hint">To</span> {op.after.path || "Top level"} / <strong>{op.after.name}</strong>
               </p>
             )}
-            <p className="hint">{op.reason}</p>
+            {op.kind !== "create_folder" && <p className="hint">{op.reason}</p>}
             {op.error && <p className="error-text">{op.error}</p>}
           </li>
         ))}
       </ol>
       {plan.notes.length > 0 && (
         <>
-          <h3>Left alone</h3>
+          <h3>Not moved</h3>
           <ul className="plain-list">
             {plan.notes.map((n) => (
               <li key={n.name} className="hint">
@@ -261,11 +263,11 @@ function IndexCard({ view }: { view: AppView }) {
         <section key={p.name} className="card card--plain" aria-labelledby={`idx-${p.name}`}>
           <div className="card-head">
             <h2 id={`idx-${p.name}`}>
-              {p.category} / {p.name} index
+              {p.name} index
             </h2>
             {p.indexFileLink && (
               <a className="btn btn--small" href={p.indexFileLink} target="_blank" rel="noreferrer">
-                Open the index file
+                Open index file
               </a>
             )}
           </div>
@@ -322,7 +324,6 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
         {latest.progress && latest.state === "working" && <p>{latest.progress}</p>}
         {latest.question && <p>{latest.question}</p>}
         {latest.failureDetail && <p>{latest.failureDetail}</p>}
-        {latest.outcome === "reported_sent" && <p>{fo.mode === "mock" ? "Mock mode: nothing was actually sent." : "Reported by Fo, not independently verified."}</p>}
         {latest.text && <p className="hint">“{latest.text}”</p>}
       </div>
     );
@@ -330,14 +331,14 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
   if (!preview) {
     return (
       <button className="btn btn--primary" disabled={act.busy !== null} onClick={() => act.run("notify-preview", async () => setPreview(await post<{ text: string; contentHash: string }>("/api/notify/preview")))}>
-        Let Fo tell me what Kiki did
+        Text me a summary
       </button>
     );
   }
   return (
     <div className="stack">
       <p className="hint">
-        Channel: {foLabel} will message <strong>you</strong> (the account holder) the way it normally reaches you. Nobody else is contacted.
+        {foLabel} will text this to you. No one else.
       </p>
       <pre className="message-preview">{preview.text}</pre>
       <div className="approve-row">
@@ -351,7 +352,7 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
             })
           }
         >
-          {act.busy === "notify-send" ? "Sending…" : `Approve and ask ${foLabel} to send it`}
+          {act.busy === "notify-send" ? "Sending…" : "Send"}
         </button>
         <div className="secondary-actions">
           <button className="btn btn--quiet" onClick={() => setPreview(null)}>
@@ -384,7 +385,6 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
       {n.text && <p className="hint">“{n.text}”</p>}
       {(n.question || n.failureDetail) && <p>{n.question ?? n.failureDetail}</p>}
       {n.state === "working" && n.progress && <p>{n.progress}</p>}
-      {mock && n.outcome === "reported_sent" && <p>Mock mode: no text was actually sent.</p>}
       {n.state === "needs_user_input" && (
         <form
           className="stack"
@@ -427,10 +427,8 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
             onChange={(e) => act.run("auto-text", () => post("/api/settings", { autoText: e.target.checked }))}
           />
           <span>
-            <strong>Fo texts me when Kiki finds something to file.</strong>
-            <span className="hint" style={{ display: "block" }}>
-              Only you are texted. Nothing moves until you approve here.
-            </span>
+            <strong>Text me when Kiki finds something new</strong>
+            <span className="hint" style={{ display: "block" }}>Sent by Fo, only to you.</span>
           </span>
         </label>
       )}
@@ -438,9 +436,9 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
       {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
       {view.workspace && !proposed && !running && (
         <div className="stack">
-          <p className="lede">{readingDone ? "Kiki has read the folder." : "Kiki is reading the folder…"}</p>
+          {!readingDone && <p className="lede">Reading files…</p>}
           <button className="btn" disabled={!readingDone || act.busy !== null} onClick={() => act.run("propose", () => post("/api/plans/organize"))}>
-            {applied ? "Check again for anything to organize" : "Ask Kiki for an organizing plan"}
+            {applied ? "Check for anything new" : "Propose a plan"}
           </button>
         </div>
       )}
@@ -449,14 +447,14 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
           <p>
             <strong>{proposed.title}</strong> (version {proposed.version})
           </p>
-          <p className="lede">{proposed.summary} Each step is checked against Drive right before it runs, then read back to verify.</p>
+          <p className="lede">{proposed.summary}</p>
           <div className="approve-row">
             <button
               className="btn btn--primary"
               disabled={act.busy !== null}
               onClick={() => act.run("approve", () => post(`/api/plans/${proposed.id}/approve`, { contentHash: proposed.contentHash, clientRequestId: requestId }))}
             >
-              {act.busy === "approve" ? "Approving…" : "Approve this plan"}
+              {act.busy === "approve" ? "Approving…" : "Approve"}
             </button>
             <div className="secondary-actions">
               <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run("discard", () => post(`/api/plans/${proposed.id}/discard`))}>
@@ -470,17 +468,16 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
         <div className="progress">
           <span className="dot" aria-hidden="true" />
           <span>
-            Applying {running.counts.verified} of {running.counts.total - running.counts.excluded} steps, checking each one in Drive…
+            Applying {running.counts.verified} of {running.counts.total - running.counts.excluded}…
           </span>
         </div>
       )}
       {applied && !proposed && !running && (
         <div className="stack" style={{ marginTop: 14 }}>
           <div className={`notice ${applied.status === "applied" ? "notice--ok" : "notice--warn"}`}>
-            <strong>{applied.status === "applied" ? "Applied and verified in Drive." : "Partly applied."}</strong>
-            <p>
-              {applied.counts.verified} of {applied.counts.total - applied.counts.excluded} steps confirmed by reading Drive back.
-            </p>
+            <strong>
+              {applied.status === "applied" ? "Done" : "Partly done"}: {applied.counts.verified} of {applied.counts.total - applied.counts.excluded} changes verified in Drive.
+            </strong>
           </div>
           <NotifyDecision view={view} act={act} />
         </div>
@@ -498,7 +495,7 @@ function Activity({ view }: { view: AppView }) {
   return (
     <section className="card card--plain">
       <details>
-        <summary>Evidence and activity</summary>
+        <summary>Activity</summary>
         <ul className="timeline">
           {view.activity.events.map((e, i) => (
             <li key={i}>
@@ -558,8 +555,8 @@ export function App() {
         <div className="brand">
           <Kiki state={view.kiki.state} size={44} />
           <div>
-            <h1>Fo-rganized</h1>
-            <p>Kiki keeps your workspace organized, and Fo keeps you posted.</p>
+            <h1>Kiki</h1>
+            <p>Keeps your Drive organized. Fo keeps you posted.</p>
           </div>
         </div>
         <Integrations view={view} act={act} />
@@ -598,7 +595,6 @@ export function App() {
           <Decisions view={view} act={act} />
         </aside>
       </div>
-      <p className="footer-note">Kiki never deletes files. Every change is previewed, approved by you, checked against Drive right before it runs, and verified afterwards.</p>
     </div>
   );
 }

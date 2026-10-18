@@ -120,6 +120,9 @@ export function createApp(deps: AppDeps) {
     selectWorkspace: (input: string) => selectWorkspace(ctx, input),
     createDemoWorkspace: () => createDemoWorkspace(ctx),
     stageRevision: (variant: "single" | "ambiguous" | "invoice") => stageRevisedQuote(ctx, variant),
+    clearWorkspace() {
+      run(db, "UPDATE workspaces SET active = 0 WHERE active = 1");
+    },
     refreshInventory() {
       const ws = requireWorkspace(db);
       jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });

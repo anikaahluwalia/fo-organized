@@ -9,7 +9,7 @@ export function makePdf(title: string, lines: string[]): Buffer {
     `<< /Length ${Buffer.byteLength(content, "latin1")} >>\nstream\n${content}\nendstream`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
-    `<< /Title (${esc(title)}) /Producer (Fo-rganized synthetic demo) >>`,
+    `<< /Title (${esc(title)}) /Producer (Kiki) >>`,
   ];
   let out = "%PDF-1.4\n";
   const offsets: number[] = [];

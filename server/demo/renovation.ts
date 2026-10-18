@@ -12,9 +12,9 @@ export interface DemoDoc {
   lines: string[];
 }
 
-const FOOTER = ["", "SYNTHETIC DEMO DOCUMENT - not a real business record."];
+const FOOTER: string[] = [];
 
-export const DEMO_WORKSPACE_NAME = "Fo-rganized demo - renovation paperwork (synthetic)";
+export const DEMO_WORKSPACE_NAME = "Renovation paperwork";
 
 /** The "messy folder": everything dumped in one place with unhelpful names. */
 export const MESSY_FOLDER: DemoDoc[] = [

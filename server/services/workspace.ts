@@ -129,13 +129,14 @@ async function uploadDemoDocs(ctx: Ctx, ws: WorkspaceRow, docs: DemoDoc[]): Prom
  * it is labelled "Staged demo file". Running it again only adds files that are missing.
  */
 export async function createDemoWorkspace(ctx: Ctx): Promise<WorkspaceRow> {
-  let ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE origin = 'staged_demo' AND mode = ? ORDER BY created_at DESC LIMIT 1", ctx.drive.mode);
+  let ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE origin = 'staged_demo' AND mode = ? AND name = ? ORDER BY created_at DESC LIMIT 1", ctx.drive.mode, DEMO_WORKSPACE_NAME);
   if (ws) {
     try {
-      await ctx.drive.getFile(ws.root_file_id);
+      const root = await ctx.drive.getFile(ws.root_file_id);
+      if (root.trashed) ws = undefined; // in the trash: make a new one
     } catch (err) {
       if (!(err instanceof DriveError && err.kind === "not_found")) throw err;
-      ws = undefined; // the demo folder was removed in Drive; make a new one
+      ws = undefined; // the folder was removed in Drive; make a new one
     }
   }
   if (!ws) {
@@ -144,7 +145,7 @@ export async function createDemoWorkspace(ctx: Ctx): Promise<WorkspaceRow> {
       run(ctx.db, "UPDATE workspaces SET active = 0 WHERE active = 1");
       const wsId = randomUUID();
       run(ctx.db, "INSERT INTO workspaces (id, root_file_id, name, drive_id, mode, origin, active, created_at) VALUES (?, ?, ?, ?, ?, 'staged_demo', 1, ?)", wsId, folder.id, folder.name, folder.driveId, ctx.drive.mode, now());
-      logEvent(ctx.db, wsId, "workspace", `Created the staged demo folder "${folder.name}" with synthetic renovation paperwork.`);
+      logEvent(ctx.db, wsId, "workspace", `Set up "${folder.name}" with the renovation paperwork.`);
       return one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", wsId)!;
     });
   } else {
@@ -155,7 +156,7 @@ export async function createDemoWorkspace(ctx: Ctx): Promise<WorkspaceRow> {
     });
   }
   const added = await uploadDemoDocs(ctx, ws, MESSY_FOLDER);
-  if (added.length) logEvent(ctx.db, ws.id, "staged", `Added ${added.length} staged demo file${added.length === 1 ? "" : "s"} to the demo folder.`);
+  if (added.length) logEvent(ctx.db, ws.id, "staged", `Added ${added.length} file${added.length === 1 ? "" : "s"} to the folder.`);
   ctx.jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
   return ws;
 }
@@ -168,7 +169,7 @@ export async function stageRevisedQuote(ctx: Ctx, variant: "single" | "ambiguous
   const ws = requireWorkspace(ctx.db);
   const docs = variant === "invoice" ? [NEW_SUPPLIER_INVOICE] : variant === "ambiguous" ? [REVISED_QUOTE, SECOND_REVISION] : [REVISED_QUOTE];
   const added = await uploadDemoDocs(ctx, ws, docs);
-  if (added.length) logEvent(ctx.db, ws.id, "staged", `Staged demo input: added ${added.map((n) => `"${n}"`).join(" and ")} to the workspace folder.`);
+  if (added.length) logEvent(ctx.db, ws.id, "staged", `Added ${added.map((n) => `"${n}"`).join(" and ")} to the folder.`);
   ctx.jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
   return added;
 }
@@ -206,7 +207,11 @@ export async function runInventory(ctx: Ctx, wsId: string): Promise<{ seen: numb
       }
       run(ctx.db, "UPDATE inventory_runs SET status = 'done', finished_at = ?, files_seen = ?, new_files = ?, changed_files = ? WHERE id = ?", now(), found.size, added, changed, runId);
       run(ctx.db, "UPDATE workspaces SET last_inventory_at = ? WHERE id = ?", now(), wsId);
-      logEvent(ctx.db, wsId, "inventory", `Kiki looked through the workspace (read-only): ${found.size} items${added ? `, ${added} new` : ""}${changed ? `, ${changed} changed` : ""}.`);
+      if (added || changed || before.size === 0) {
+        logEvent(ctx.db, wsId, "inventory", before.size === 0 ? `Kiki found ${found.size} items in the folder.` : `Kiki noticed ${added ? `${added} new` : ""}${added && changed ? " and " : ""}${changed ? `${changed} changed` : ""} item${added + changed === 1 ? "" : "s"}.`);
+      }
+      // Pick up a rename of the workspace folder itself.
+      if (root.name !== ws.name) run(ctx.db, "UPDATE workspaces SET name = ? WHERE id = ?", root.name, wsId);
     });
     ctx.jobs.enqueue("read", `read:${wsId}`, { workspaceId: wsId });
     return { seen: found.size, added, changed };

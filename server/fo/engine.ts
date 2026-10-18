@@ -224,12 +224,12 @@ export class FoEngine {
   recover(): void {
     tx(this.db, () => {
       for (const task of all<FoTaskRow>(this.db, "SELECT * FROM fo_tasks WHERE state = 'pending'")) {
-        this.setState(task.id, "failed", { failure_kind: "not_started", failure_detail: "Paper Chase restarted before this reached Fo. Nothing was sent." });
+        this.setState(task.id, "failed", { failure_kind: "not_started", failure_detail: "Kiki restarted before this reached Fo. Nothing was sent." });
       }
       for (const task of all<FoTaskRow>(this.db, "SELECT * FROM fo_tasks WHERE state = 'asking'")) {
         this.setState(task.id, "uncertain", {
           failure_kind: "interrupted",
-          failure_detail: "Paper Chase stopped while waiting for Fo's response. The request may have reached Fo.",
+          failure_detail: "Kiki stopped while waiting for Fo's response. The request may have reached Fo.",
         });
       }
     });

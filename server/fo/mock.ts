@@ -102,7 +102,7 @@ export class MockFoClient implements FoClient {
   }
 
   async listConversations(): Promise<FoConversationSummary[]> {
-    return [...this.conversations.values()].reverse().slice(0, 50).map((c) => ({ conversationId: c.id, title: "Fo-rganized (mock)", channel: "chat", startedAt: c.startedAt }));
+    return [...this.conversations.values()].reverse().slice(0, 50).map((c) => ({ conversationId: c.id, title: "Kiki (mock)", channel: "chat", startedAt: c.startedAt }));
   }
 
   async getConversation(conversationId: string): Promise<FoTurn[]> {

@@ -69,6 +69,6 @@ export function buildIndexCsv(db: Db, project: ProjectRow, verifiedAt: string): 
         .join(","),
     );
   }
-  lines.push("", csvCell(`Kept by Kiki (Fo-rganized). Last updated from verified Drive state at ${verifiedAt}. Edits here aren't read back; change things in the app.`));
+  lines.push("", csvCell(`Kept by Kiki. Last updated from verified Drive state at ${verifiedAt}. Edits here aren't read back; change things in the app.`));
   return `${lines.join("\r\n")}\r\n`;
 }

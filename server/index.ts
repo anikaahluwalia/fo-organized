@@ -73,7 +73,7 @@ app.start();
 
 const server = createHttpServer(app, config, { google: googleFlow, fo: foFlow }, path.resolve(here, "../web/dist"));
 server.listen(config.port, "127.0.0.1", () => {
-  console.log(`Fo-rganized is running at ${config.appOrigin}`);
+  console.log(`Kiki is running at ${config.appOrigin}`);
   console.log(`  Google Drive: ${config.driveMode === "live" ? (config.google.clientId ? `live (${config.google.scopeLabel} scopes)` : "live, but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET aren't set") : "MOCK (in-memory, nothing touches your Drive)"}`);
   console.log(`  Claude reading: ${config.claudeMode === "live" ? `live (${config.anthropicModel})${credentials ? "" : ", but no ANTHROPIC_API_KEY was found"}` : "MOCK (pattern reader)"}`);
   console.log(`  Fo: ${config.foMode === "live" ? `live (${config.foMcpUrl})` : "MOCK (nothing is sent)"}`);

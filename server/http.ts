@@ -79,6 +79,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   route("POST", "/api/workspace/demo", () => app.createDemoWorkspace().then(() => ({ ok: true })));
   route("POST", "/api/workspace/stage-revision", (_p, b) => app.stageRevision(b.variant === "ambiguous" ? "ambiguous" : b.variant === "invoice" ? "invoice" : "single").then((added) => ({ added })));
   route("POST", "/api/workspace/refresh", () => app.refreshInventory());
+  route("POST", "/api/workspace/clear", () => app.clearWorkspace());
   route("POST", "/api/plans/organize", () => app.proposeOrganize());
   route("POST", "/api/plans/:id/revise", ([id], b) => {
     if (!Array.isArray(b.edits)) throw badRequest("Send the edits.");
