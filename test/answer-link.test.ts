@@ -95,6 +95,16 @@ test("the public address serves only answer pages: not the app, not its API, not
   assert.equal((await request(s.port, { path: "/api/state", host: "evil.example" })).status, 421);
 });
 
+test("a browser posting the page with \"Origin: null\" (strict referrer policy) gets its answer through", async (t) => {
+  const s = await setup(t);
+  const path = new URL(s.link!).pathname;
+  const page = await request(s.port, { path, host: new URL(PUBLIC).host });
+  const res = await request(s.port, { method: "POST", path, host: new URL(PUBLIC).host, body: "answer=Yes%2C+go+ahead", origin: "null" });
+  assert.equal(res.status, 200, res.text);
+  assert.match(res.text, /Sent to Fo/);
+  void page;
+});
+
 test("another site can't post an answer through your link", async (t) => {
   const s = await setup(t);
   const path = new URL(s.link!).pathname;

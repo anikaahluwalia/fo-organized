@@ -228,15 +228,17 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
       const answer = /^\/a\/([A-Za-z0-9_-]{20,64})$/.exec(url.pathname);
       if (answer) {
         const html = (status: number, body: string) => {
-          res.writeHead(status, { ...SECURITY_HEADERS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+          // same-origin, not no-referrer: under no-referrer browsers post the form with "Origin: null".
+          res.writeHead(status, { ...SECURITY_HEADERS, "Referrer-Policy": "same-origin", "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
           res.end(body);
         };
         try {
           if (method === "GET") return html(200, answerPage(app.ctx, answer[1]!));
           if (method !== "POST") return html(405, "Method not allowed.");
-          // The page posts to itself; nothing from another site can.
+          // The page posts to itself; another site can't. The token in the link is what proves it's
+          // yours, so a browser's "null" origin (sent under strict referrer policies) is fine.
           const own = isPublic ? config.publicUrl : config.appOrigin;
-          if (origin && origin !== own) return html(403, "Cross-site requests aren't allowed.");
+          if (origin && origin !== "null" && origin !== own) return html(403, "Cross-site requests aren't allowed.");
           return html(200, await submitAnswer(app.ctx, answer[1]!, await readForm(req)));
         } catch (err) {
           const message = err instanceof AppError ? err.message : "Something went wrong. Ask Fo for the proposal again.";
