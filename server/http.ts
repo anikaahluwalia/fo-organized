@@ -264,6 +264,9 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
           return send(400, { error: "The body isn't valid JSON." });
         }
         receiveFoEvent(app.ctx, delivery.id!, event);
+        // What arrived, never its text.
+        const e = event as { type?: unknown; reply?: { trigger?: unknown; channel?: unknown } };
+        console.log(`Fo webhook: ${String(e?.type)}${e?.reply ? ` (${String(e.reply.trigger)}, ${String(e.reply.channel)})` : ""} at ${new Date().toLocaleTimeString()}`);
         res.writeHead(204, SECURITY_HEADERS);
         return res.end();
       }

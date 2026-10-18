@@ -88,6 +88,8 @@ server.listen(config.port, "127.0.0.1", () => {
   console.log(`  Google Drive: ${config.driveMode === "live" ? (config.google.clientId ? `live (${config.google.scopeLabel} scopes)` : "live, but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET aren't set") : "MOCK (in-memory, nothing touches your Drive)"}`);
   console.log(`  Claude reading: ${config.claudeMode === "live" ? `live (${config.anthropicModel})${credentials ? "" : ", but no ANTHROPIC_API_KEY was found"}` : "MOCK (pattern reader)"}`);
   console.log(`  Fo: ${config.foMode === "live" ? `live (${config.foMcpUrl})` : "MOCK (nothing is sent)"}`);
+  console.log(`  Answer links: ${config.publicUrl ?? "off (KIKI_PUBLIC_URL isn't set)"}`);
+  console.log(`  Fo webhook: ${config.foWebhookSecret && config.publicUrl ? `on, at ${config.publicUrl}/hooks/fo` : "off (FO_WEBHOOK_SECRET isn't set)"}`);
 });
 
 function shutdown(): void {
