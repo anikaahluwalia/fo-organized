@@ -84,6 +84,22 @@ function Integrations({ view, act }: { view: AppView; act: ReturnType<typeof use
           Connect Google Drive
         </button>
       )}
+      {drive.mode === "live" && drive.connection === "connected" && drive.gmail === "connected" && <Badge kind="live">Gmail: read-only</Badge>}
+      {drive.mode === "live" && drive.connection === "connected" && drive.gmail === "not_connected" && (
+        <button
+          className="btn btn--small"
+          title="Kiki only searches for attachments from a contractor she asked. She never sends, changes or deletes mail."
+          disabled={act.busy !== null}
+          onClick={() =>
+            act.run("connect-gmail", async () => {
+              const r = await post<{ authorizationUrl: string }>("/api/google/connect", { gmail: true });
+              window.location.href = r.authorizationUrl;
+            })
+          }
+        >
+          Let Kiki look in Gmail (read-only)
+        </button>
+      )}
       {fo.mode === "mock" ? (
         <Badge kind="mock">Fo: Mock</Badge>
       ) : fo.connection === "connected" ? (
