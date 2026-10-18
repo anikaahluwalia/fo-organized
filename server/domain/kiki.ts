@@ -43,7 +43,8 @@ export function deriveKiki(v: Omit<AppView, "kiki">): KikiView {
 
   const proposed = live.find((p) => p.status === "proposed");
   if (proposed) return { state: "needs_approval", label: "I have a plan. Take a look.", detail: proposed.title };
-  const draft = v.outreach.find((o) => o.draft && !o.dispatches.some((d) => d.open));
+  const unsent = (o: (typeof v.outreach)[number]) => o.draft && !o.dispatches.some((d) => d.version === o.draft!.version && !["failed", "not_sent", "retired"].includes(d.state));
+  const draft = v.outreach.find(unsent);
   if (draft?.draft) return { state: "needs_approval", label: `Review the message before Fo sends it to ${draft.draft.recipientName}.` };
 
   const sending = dispatches.find((d) => d.state === "approved" || d.state === "dispatching" || d.state === "working");

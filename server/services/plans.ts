@@ -174,8 +174,33 @@ function pendingReads(db: Db, wsId: string): number {
 }
 
 function organizeDraft(db: Db, ws: WorkspaceRow): PlanDraft {
-  const docs = all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id).map(planDoc);
+  // Files a pending quote update will move are that plan's business, not this one's.
+  const reserved = new Set(
+    all<{ file_id: string }>(
+      db,
+      "SELECT o.file_id FROM plan_ops o JOIN plans p ON p.id = o.plan_id WHERE p.workspace_id = ? AND p.kind = 'version_update' AND p.status IN ('proposed', 'approved', 'executing') AND o.file_id IS NOT NULL",
+      ws.id,
+    ).map((r) => r.file_id),
+  );
+  const docs = all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id)
+    .filter((d) => !reserved.has(d.file_id))
+    .map(planDoc);
   return buildOrganizePlan({ rootId: ws.root_file_id, files: planFiles(db, ws.id), docs, indexFiles: indexFiles(db, ws.id) });
+}
+
+/** Re-checks an open organizing proposal against the current state: withdraw it if nothing is left to do. */
+export function refreshOrganizeProposal(ctx: Ctx): void {
+  const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE active = 1");
+  if (!ws) return;
+  const open = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", `organize:${ws.id}`);
+  if (!open) return;
+  const draft = organizeDraft(ctx.db, ws);
+  if (!draft.ops.some((o) => o.kind === "move_rename")) {
+    run(ctx.db, "UPDATE plans SET status = 'superseded', finished_at = ? WHERE id = ?", now(), open.id);
+    logEvent(ctx.db, ws.id, "plan", `Kiki withdrew "${open.title}": there's nothing left in it to do.`);
+    return;
+  }
+  saveOrganize(ctx.db, ws, draft);
 }
 
 function saveOrganize(db: Db, ws: WorkspaceRow, draft: PlanDraft): { plan: PlanRow; created: boolean } {
@@ -225,7 +250,10 @@ export function autoPropose(ctx: Ctx): { plan: PlanRow; created: boolean } | nul
   const seriesId = `organize:${ws.id}`;
   if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('approved', 'executing')", seriesId)) return null;
   const draft = organizeDraft(ctx.db, ws);
-  if (!draft.ops.some((o) => o.kind === "move_rename")) return null;
+  if (!draft.ops.some((o) => o.kind === "move_rename")) {
+    refreshOrganizeProposal(ctx);
+    return null;
+  }
   const hash = hashWithExclusions(draft.ops, new Set());
   // Don't re-propose something the user set aside, or that already failed: they choose to retry.
   if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('discarded', 'failed', 'partial', 'stale') AND content_hash = ?", seriesId, hash)) return null;

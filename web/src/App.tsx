@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppView, NotificationView, PlanView } from "../../shared/api.ts";
 import { getState, newId, post, time } from "./api.ts";
 import { Kiki } from "./Kiki.tsx";
+import { AskContractor, OutreachCard, UpdateCard } from "./Contractor.tsx";
 
 const KIKI_STATE_NAMES: Record<string, string> = {
   idle: "Idle",
@@ -202,7 +203,44 @@ function InventoryCard({ view }: { view: AppView }) {
   );
 }
 
-function PlanCard({ plan }: { plan: PlanView }) {
+function OpEditor({ planId, seq, name, act }: { planId: string; seq: number; name: string; act: ReturnType<typeof useAction> }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(name);
+  if (!open) {
+    return (
+      <div className="row">
+        <button className="btn btn--quiet btn--small" onClick={() => setOpen(true)}>
+          Rename
+        </button>
+        <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`skip-${seq}`, () => post(`/api/plans/${planId}/revise`, { edits: [{ seq, exclude: true }] }))}>
+          Skip this
+        </button>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="edit-row"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void act.run(`rename-${seq}`, async () => {
+          await post(`/api/plans/${planId}/revise`, { edits: [{ seq, newName: value }] });
+          setOpen(false);
+        });
+      }}
+    >
+      <input type="text" value={value} onChange={(e) => setValue(e.target.value)} aria-label="New file name" />
+      <button className="btn btn--small" disabled={!value.trim() || act.busy !== null}>
+        Save
+      </button>
+      <button type="button" className="btn btn--quiet btn--small" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+    </form>
+  );
+}
+
+function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAction> }) {
   return (
     <section className="card card--plain" aria-labelledby={`plan-${plan.id}`}>
       <div className="card-head">
@@ -214,6 +252,27 @@ function PlanCard({ plan }: { plan: PlanView }) {
           {PLAN_STATUS[plan.status]} · v{plan.version}
         </span>
       </div>
+      {plan.evidence && (
+        <div className="notice notice--info" style={{ marginBottom: 12 }}>
+          <strong>{plan.evidence.source}</strong>
+          <p className="quote">“{plan.evidence.statement}”</p>
+          {plan.evidence.candidateReasons.length > 0 && <p className="hint">Why this file: {plan.evidence.candidateReasons.join(" ")}</p>}
+        </div>
+      )}
+      {plan.diff && plan.diff.lines.length > 0 && (
+        <div className="notice notice--warn" style={{ marginBottom: 12 }}>
+          <strong>What changed between the quotes</strong>
+          {plan.diff.lines.map((l) => (
+            <p key={l}>{l}</p>
+          ))}
+          <p className="hint">Marking a quote current doesn't accept its price. You do that separately in the index.</p>
+        </div>
+      )}
+      {plan.conflict && (
+        <div className="notice notice--bad" style={{ marginBottom: 12 }}>
+          <strong>{plan.conflict}</strong>
+        </div>
+      )}
       <ol className="item-list">
         {plan.ops.map((op) => (
           <li key={op.seq} className="item">
@@ -235,6 +294,7 @@ function PlanCard({ plan }: { plan: PlanView }) {
             )}
             {op.kind !== "create_folder" && <p className="hint">{op.reason}</p>}
             {op.error && <p className="error-text">{op.error}</p>}
+            {op.editable && op.state === "pending" && op.after && <OpEditor planId={plan.id} seq={op.seq} name={op.after.name} act={act} />}
           </li>
         ))}
       </ol>
@@ -250,20 +310,27 @@ function PlanCard({ plan }: { plan: PlanView }) {
           </ul>
         </>
       )}
+      {plan.canUndo && (
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`undo-${plan.id}`, () => post(`/api/plans/${plan.id}/undo`))}>
+            Undo these changes…
+          </button>
+          <span className="hint">Kiki prepares the reversal for you to approve. Nothing is deleted.</span>
+        </div>
+      )}
     </section>
   );
 }
 
-function IndexCard({ view }: { view: AppView }) {
+function IndexCard({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+  const [asking, setAsking] = useState<string | null>(null);
   if (!view.index.length) return null;
   return (
     <>
       {view.index.map((p) => (
         <section key={p.name} className="card card--plain" aria-labelledby={`idx-${p.name}`}>
           <div className="card-head">
-            <h2 id={`idx-${p.name}`}>
-              {p.name} index
-            </h2>
+            <h2 id={`idx-${p.name}`}>{p.name} index</h2>
             {p.indexFileLink && (
               <a className="btn btn--small" href={p.indexFileLink} target="_blank" rel="noreferrer">
                 Open index file
@@ -282,17 +349,52 @@ function IndexCard({ view }: { view: AppView }) {
                     {r.status === "current" && <span className="chip chip--confirmed">Current</span>}
                     {r.status === "superseded" && <span className="chip chip--needs_review">Superseded</span>}
                     {r.latestReceived && r.docType === "quote" && <span className="chip chip--not_searched">Latest received</span>}
-                    {r.acceptedAt && <span className="chip chip--confirmed">Accepted by you</span>}
+                    {r.acceptedAt && <span className="chip chip--confirmed">Price accepted by you</span>}
                   </span>
                 </div>
                 <p className="hint">
                   {r.date ?? "No date"} · {r.folder} / {r.fileName}
+                  {r.supersedes ? ` · replaces ${r.supersedes}` : ""}
                 </p>
+                {r.docType === "quote" && r.status !== "superseded" && (
+                  <div className="row">
+                    {r.canAsk && asking !== r.docId && (
+                      <button className="btn btn--quiet btn--small" onClick={() => setAsking(r.docId)}>
+                        Ask the contractor if this is final
+                      </button>
+                    )}
+                    <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`accept-${r.docId}`, () => post(`/api/documents/${r.docId}/accept`, { accepted: !r.acceptedAt }))}>
+                      {r.acceptedAt ? "Withdraw price acceptance" : "Mark price accepted"}
+                    </button>
+                  </div>
+                )}
+                {asking === r.docId && <AskContractor row={r} view={view} act={act} onDone={() => setAsking(null)} />}
               </li>
             ))}
           </ul>
         </section>
       ))}
+    </>
+  );
+}
+
+function FoUpdates({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+  const shown = view.updates.filter((u) => u.status !== "dismissed").slice(0, 4);
+  const conversations = view.outreach.filter((o) => o.draft || o.dispatches.length);
+  if (!shown.length && !conversations.length) return null;
+  return (
+    <>
+      {conversations.map((o) => (
+        <OutreachCard key={o.documentId} o={o} view={view} act={act} />
+      ))}
+      {shown.length > 0 && (
+        <section className="card decision" aria-labelledby="fo-updates">
+          <h2 id="fo-updates">From Fo</h2>
+          {shown.map((u) => (
+            <UpdateCard key={u.id} u={u} view={view} act={act} />
+          ))}
+        </section>
+      )}
     </>
   );
 }
@@ -418,9 +520,35 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
   );
 }
 
+function ApproveBlock({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAction> }) {
+  // One request id per plan version: a double click resolves to the same approval on the server.
+  const requestId = useMemo(() => newId(), [plan.id, plan.contentHash]);
+  return (
+    <div className="stack" style={{ marginBottom: 14 }}>
+      <p>
+        <strong>{plan.title}</strong> (version {plan.version})
+      </p>
+      <p className="lede">{plan.summary}</p>
+      <div className="approve-row">
+        <button
+          className="btn btn--primary"
+          disabled={act.busy !== null}
+          onClick={() => act.run(`approve-${plan.id}`, () => post(`/api/plans/${plan.id}/approve`, { contentHash: plan.contentHash, clientRequestId: requestId }))}
+        >
+          {act.busy === `approve-${plan.id}` ? "Approving…" : "Approve"}
+        </button>
+        <div className="secondary-actions">
+          <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`discard-${plan.id}`, () => post(`/api/plans/${plan.id}/discard`))}>
+            Not now
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
   const proposed = view.plans.find((p) => p.status === "proposed");
-  const requestId = useMemo(() => newId(), [proposed?.id]);
   const applied = view.plans.find((p) => p.status === "applied" || p.status === "partial");
   const readingDone = view.workspace && view.inventory.files.length > 0 && view.inventory.reading === 0 && !view.busy.reading;
   const broken = view.plans.find((p) => p.status === "failed" || p.status === "partial" || p.status === "stale");
@@ -470,28 +598,11 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
           </button>
         </div>
       )}
-      {proposed && (
-        <div className="stack">
-          <p>
-            <strong>{proposed.title}</strong> (version {proposed.version})
-          </p>
-          <p className="lede">{proposed.summary}</p>
-          <div className="approve-row">
-            <button
-              className="btn btn--primary"
-              disabled={act.busy !== null}
-              onClick={() => act.run("approve", () => post(`/api/plans/${proposed.id}/approve`, { contentHash: proposed.contentHash, clientRequestId: requestId }))}
-            >
-              {act.busy === "approve" ? "Approving…" : "Approve"}
-            </button>
-            <div className="secondary-actions">
-              <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run("discard", () => post(`/api/plans/${proposed.id}/discard`))}>
-                Not now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {view.plans
+        .filter((p) => p.status === "proposed")
+        .map((p) => (
+          <ApproveBlock key={p.id} plan={p} act={act} />
+        ))}
       {running && (
         <div className="progress">
           <span className="dot" aria-hidden="true" />
@@ -575,7 +686,8 @@ export function App() {
   }, [refresh]);
 
   if (!view) return <div className="page">{loadError ? <p className="error-text">Can't reach the Kiki server: {loadError}</p> : <p>Loading…</p>}</div>;
-  const latestPlan = view.plans.find((p) => p.status !== "superseded" && p.status !== "discarded");
+  const livePlans = view.plans.filter((p) => p.status !== "superseded" && p.status !== "discarded");
+  const shownPlans = [...livePlans.filter((p) => p.status === "proposed" || p.status === "approved" || p.status === "executing"), ...livePlans.filter((p) => !["proposed", "approved", "executing"].includes(p.status)).slice(0, 1)];
 
   return (
     <div className="page">
@@ -607,8 +719,10 @@ export function App() {
         <main className="main">
           <WorkspaceCard view={view} act={act} />
           <InventoryCard view={view} />
-          {latestPlan && <PlanCard plan={latestPlan} />}
-          <IndexCard view={view} />
+          {shownPlans.map((p) => (
+            <PlanCard key={p.id} plan={p} act={act} />
+          ))}
+          <IndexCard view={view} act={act} />
           <Activity view={view} />
         </main>
         <aside className="companion" aria-label="Kiki and decisions">
@@ -621,6 +735,7 @@ export function App() {
             </div>
           </section>
           <Decisions view={view} act={act} />
+          <FoUpdates view={view} act={act} />
         </aside>
       </div>
     </div>

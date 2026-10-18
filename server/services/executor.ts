@@ -382,6 +382,8 @@ function finalize(ctx: Ctx, planId: string): void {
     run(ctx.db, "UPDATE plans SET status = ?, finished_at = ? WHERE id = ?", status, now(), planId);
     if (status === "applied" && plan.kind === "version_update") {
       run(ctx.db, "UPDATE outcomes SET status = 'resolved', updated_at = ? WHERE plan_series_id = ?", now(), plan.series_id);
+      // The question this conversation was for is answered and applied: stop following it.
+      run(ctx.db, "UPDATE watches SET state = 'closed' WHERE id IN (SELECT watch_id FROM outcomes WHERE plan_series_id = ?)", plan.series_id);
     }
     logEvent(ctx.db, plan.workspace_id, status === "applied" ? "verified" : "plan_incomplete", message);
   });

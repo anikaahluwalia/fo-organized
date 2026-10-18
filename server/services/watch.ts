@@ -25,7 +25,7 @@ import { insertTask } from "../fo/engine.ts";
 import { buildFollowUpMessage } from "../domain/outreach.ts";
 import { FoCallError, type FoTurn } from "../fo/types.ts";
 import type { Ctx } from "./context.ts";
-import { indexFiles, planDoc, planFiles, savePlanVersion } from "./plans.ts";
+import { indexFiles, planDoc, planFiles, refreshOrganizeProposal, savePlanVersion } from "./plans.ts";
 import { docFacts, runInventory, runReading } from "./workspace.ts";
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -281,7 +281,7 @@ export function proposeVersionUpdate(ctx: Ctx, outcomeId: string, chosenDocId: s
     kind: "version_update",
     seriesId,
     title: `Update the current ${project.toLowerCase()} quote`,
-    summary: diff.lines.length ? `File ${newFacts.reference.value ?? "the new quote"} as current and keep ${oldFacts.reference.value ?? "the old one"} as superseded. ${diff.lines.join(". ")}.` : "File the new quote as current and keep the old one as superseded.",
+    summary: `File ${newFacts.reference.value ?? "the new quote"} as current and keep ${oldFacts.reference.value ?? "the old one"} as superseded.${diff.total?.delta ? ` The total changes by ${diff.total.delta > 0 ? "+" : ""}${money(diff.total.delta)}.` : ""}`,
     draft,
     details: {
       notes: draft.notes,
@@ -294,6 +294,8 @@ export function proposeVersionUpdate(ctx: Ctx, outcomeId: string, chosenDocId: s
     source: { outcomeId },
   });
   setOutcome(ctx, outcomeId, { status: "proposed", chosen: chosenDocId, series: seriesId, candidates });
+  // The regular organizing pass may have proposed filing the same file; this update now owns it.
+  refreshOrganizeProposal(ctx);
 }
 
 function proposeConfirmCurrent(ctx: Ctx, outcomeId: string, interp: Outcome): void {
