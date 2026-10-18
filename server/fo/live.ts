@@ -77,19 +77,25 @@ export class LiveFoClient implements FoClient {
   readonly mode = "live" as const;
   private readonly serverUrl: string;
   private readonly provider: DbOAuthProvider;
+  /** A Wajo API key (wak_…), sent as a bearer token in place of the sign-in. Server-side only. */
+  private readonly apiKey: string | null;
   private client: Client | null = null;
   private connecting: Promise<Client> | null = null;
   private lastCheck: { at: number; value: FoConnection } | null = null;
 
-  constructor(serverUrl: string, provider: DbOAuthProvider) {
+  constructor(serverUrl: string, provider: DbOAuthProvider, apiKey: string | null = null) {
     this.serverUrl = serverUrl;
     this.provider = provider;
+    this.apiKey = apiKey;
   }
 
   private async getClient(): Promise<Client> {
     if (this.client) return this.client;
     this.connecting ??= (async () => {
-      const transport = new StreamableHTTPClientTransport(new URL(this.serverUrl), { authProvider: this.provider });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(this.serverUrl),
+        this.apiKey ? { requestInit: { headers: { Authorization: `Bearer ${this.apiKey}` } } } : { authProvider: this.provider },
+      );
       const client = new Client({ name: "paper-chase", version: "0.1.0" });
       client.onclose = () => {
         if (this.client === client) this.client = null;
@@ -164,7 +170,7 @@ export class LiveFoClient implements FoClient {
 
   /** Verifies the sign-in with a read-only call. Cached briefly so status polling stays cheap. */
   async connection(): Promise<FoConnection> {
-    if (!this.provider.hasTokens()) return { state: "needs_auth" };
+    if (!this.apiKey && !this.provider.hasTokens()) return { state: "needs_auth" };
     if (this.lastCheck && Date.now() - this.lastCheck.at < 5 * 60_000) return this.lastCheck.value;
     let value: FoConnection;
     try {
@@ -179,6 +185,7 @@ export class LiveFoClient implements FoClient {
   }
 
   async beginAuth(): Promise<{ authorizationUrl: string } | { alreadyAuthorized: true }> {
+    if (this.apiKey) return { alreadyAuthorized: true };
     this.provider.pendingAuthorizationUrl = null;
     const result = await auth(this.provider, { serverUrl: this.serverUrl, scope: "mcp" });
     if (result === "AUTHORIZED") {

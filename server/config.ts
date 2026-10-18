@@ -35,6 +35,8 @@ export interface Config {
   anthropicModel: string;
   foMode: IntegrationMode;
   foMcpUrl: string;
+  /** A Wajo API key for Fo (wak_…), in place of signing in. Never logged or sent to the browser. */
+  foApiKey: string | null;
   driveMode: IntegrationMode;
   google: { clientId: string | null; clientSecret: string | null; scopes: string[]; scopeLabel: "narrow" | "full" };
   /** Seconds between checks of a watched Fo conversation. */
@@ -67,6 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     anthropicModel: env.ANTHROPIC_MODEL ?? "claude-opus-5-5",
     foMode: mode(env.FO_MODE, base),
     foMcpUrl: env.FO_MCP_URL ?? "https://mcp.api.wajo.ai/fo",
+    foApiKey: /^wak_\S+$/.test(env.FO_API_KEY ?? "") ? env.FO_API_KEY! : null,
     driveMode,
     google: {
       clientId: env.GOOGLE_CLIENT_ID || null,
