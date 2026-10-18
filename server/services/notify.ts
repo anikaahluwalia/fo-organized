@@ -75,7 +75,7 @@ I may text back "go ahead". If I do, please don't move or change any files yours
 ${text}
 -----END APPROVED BODY-----
 
-This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${reply}
+This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${/\nAnswer here: \S+$/.test(text) ? " Keep the link exactly as written. Don't invite me to reply by text: the link is how I answer." : ""}${reply}
 
 End your reply with exactly one of these lines:
 ${STATUS_LINES.sent}
@@ -430,10 +430,17 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
   return `${findSummary(ctx, plan)}\n\nProposed changes (version ${plan.version}):\n${proposalLines(ctx, plan)}\nNothing is deleted. You can answer Fo naturally, ask a question, ask for changes, or decline.`;
 }
 
-/** A text with its answer link: the link is where you answer, so the text points to it. */
+/** Said in a text with a link: a text reply lands in a separate Fo conversation Kiki can't tie to the request. */
+export const LINK_ONLY = "Please tap the link to approve or ask for changes: text replies can't be processed.";
+
+/** A text with its answer link: the link is the one way to answer, so the text says so and invites no text reply. */
 function withLink(text: string, link: string | null): string {
   if (!link) return text;
-  return `${text.replace(/Reply to this text, or answer in Kiki:/g, "Answer at the link below:")}\n\nAnswer here: ${link}`;
+  const body = text
+    .replace(/ ?Reply to this text, or answer in Kiki: yes, a change, or no\./g, "")
+    .replace(/Reply to this text, or answer in Kiki:/g, "At the link,")
+    .replace(/You can answer Fo naturally, ask a question, ask for changes, or decline\./, LINK_ONLY);
+  return `${body}${body.includes(LINK_ONLY) ? "" : `\n\n${LINK_ONLY}`}\n\nAnswer here: ${link}`;
 }
 
 /** The request that has Fo text you a proposal (and only you), with the binding for your answer. */

@@ -5,11 +5,12 @@
  * can't read texts directly, but Fo can: she asks Fo, in her own conversation for that request,
  * to read it and report your decision there, bound to that exact proposal and quoting your words.
  * From there it's the same as an answer in Kiki: only a plain yes approves, changes make a new
- * version, and anything unclear approves nothing.
+ * version, and anything unclear approves nothing. A text that came with an answer link asks you to
+ * answer there instead, so for those Kiki doesn't watch.
  */
 import { approvalInstructions } from "../domain/approval.ts";
 import { inert } from "../domain/inert.ts";
-import { all, logEvent, one, run, type PlanRow } from "../db.ts";
+import { all, kvGet, logEvent, one, run, type PlanRow } from "../db.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { replyState, replyWindowMs, saveReply } from "./notify.ts";
@@ -23,6 +24,8 @@ export async function watchTextReplies(ctx: Ctx, taskId: string): Promise<{ resc
   const state = replyState(ctx, taskId);
   const task = getTask(ctx.db, taskId);
   if (!state?.requestId || state.status !== "waiting" || !state.requestedAt || !task?.conversation_id) return;
+  // A text with an answer link says text replies aren't processed, so none is.
+  if (kvGet(ctx.db, `answer.linked.${taskId}`)) return;
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId);
   if (!plan || plan.status !== "proposed" || plan.content_hash !== state.contentHash) return;
   if (Date.now() - Date.parse(state.requestedAt) > replyWindowMs(ctx, taskId)) return;

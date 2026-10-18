@@ -4,7 +4,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { loadConfig } from "../server/config.ts";
-import { one } from "../server/db.ts";
+import { one, run } from "../server/db.ts";
 import { createHttpServer } from "../server/http.ts";
 import { replyState } from "../server/services/notify.ts";
 import { FakeFo, makeRig, organized, reply } from "./helpers.ts";
@@ -111,4 +111,25 @@ test("another site can't post an answer through your link", async (t) => {
   const res = await request(s.port, { method: "POST", path, host: new URL(PUBLIC).host, body: "answer=Yes%2C+go+ahead", origin: "https://evil.example" });
   assert.equal(res.status, 403);
   assert.equal(s.fo.asks.some((a) => a.conversationId), false, "nothing was sent to Fo");
+});
+
+test("a text with a link says to answer there, and asks Fo not to invite a text reply", async (t) => {
+  const s = await setup(t);
+  assert.match(s.note.text ?? "", /Please tap the link to approve or ask for changes: text replies can't be processed\./);
+  assert.doesNotMatch(s.note.text ?? "", /Reply to this text|answer Fo naturally/);
+  const sent = s.fo.asks.find((a) => a.message.startsWith("Please text me"))!.message;
+  assert.match(sent, /Don't invite me to reply by text/);
+  const page = await request(s.port, { path: new URL(s.link!).pathname, host: new URL(PUBLIC).host });
+  assert.doesNotMatch(page.text, /text replies can't be processed/, "the page itself doesn't repeat it");
+});
+
+test("a text reply to a linked proposal isn't taken as an answer", async (t) => {
+  const s = await setup(t);
+  s.fo.conversations = [{ conversationId: "sms-1", title: "go ahead", channel: "sms", startedAt: new Date(Date.now() + 1000).toISOString() }];
+  for (let i = 0; i < 3; i++) {
+    run(s.rig.db, "UPDATE jobs SET run_after = ? WHERE state = 'queued'", new Date(0).toISOString());
+    await s.rig.app.settle();
+  }
+  assert.equal(s.fo.asks.some((a) => a.message.includes("answered this by text")), false, "Kiki didn't have Fo read it");
+  assert.equal(replyState(s.rig.app.ctx, s.note.taskId)?.status, "waiting");
 });
