@@ -26,7 +26,7 @@ import {
 import { approvePlan, autoPropose, discardPlan, placeFile, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
 import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
 import { refreshPlan } from "./services/refresh.ts";
-import { watchTextReplies } from "./services/textreply.ts";
+import { textFromWebhook, watchTextReplies } from "./services/textreply.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
@@ -47,6 +47,7 @@ export interface AppDeps {
   engineOptions?: EngineOptions;
   watchIntervalSeconds?: number;
   publicUrl?: string | null;
+  foWebhook?: boolean;
   /** Seconds between read-only looks at the workspace; 0 turns watching off (tests). */
   workspacePollSeconds?: number;
 }
@@ -55,7 +56,7 @@ export interface AppDeps {
 export function createApp(deps: AppDeps) {
   const { db, drive, reader, fo } = deps;
   const jobs = new JobQueue(db);
-  const ctx = { db, drive, gmail: deps.gmail ?? null, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30, publicUrl: deps.publicUrl ?? null } as Ctx;
+  const ctx = { db, drive, gmail: deps.gmail ?? null, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30, publicUrl: deps.publicUrl ?? null, foWebhook: deps.foWebhook ?? false } as Ctx;
   ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler(ctx) }, deps.engineOptions);
 
   const pollSeconds = deps.workspacePollSeconds ?? 10;
@@ -85,6 +86,8 @@ export function createApp(deps: AppDeps) {
   // You asked Fo for changes to a proposal: Kiki makes the new version and sends it back to Fo.
   // A text you send Fo while a proposal waits: Kiki has Fo read it and report your decision.
   jobs.register("text_watch", async (p) => watchTextReplies(ctx, String(p.taskId)));
+  // Fo's webhook said Fo answered a text of yours: if a proposal waits on you, Fo reads it for Kiki.
+  jobs.register("text_hook", async (p) => textFromWebhook(ctx, { conversationId: String(p.conversationId), channel: String(p.channel), at: String(p.at), key: String(p.key) }));
   jobs.register("adjust", async (p) => handleChangeRequest(ctx, String(p.taskId), { quiet: p.quiet === true }));
   jobs.register("watch", async (p) => watchJob(ctx, String(p.watchId), ctx.watchIntervalSeconds));
   jobs.register("outcome", async (p) => runOutcome(ctx, String(p.outcomeId)));

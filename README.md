@@ -53,7 +53,17 @@ cloudflared tunnel --url http://localhost:8787   # prints https://<random>.trycl
 # in .env:  KIKI_PUBLIC_URL=https://<random>.trycloudflare.com   then restart Kiki
 ```
 
-The public address serves only the answer pages: each link is an unguessable, one-request token, and the app and its API stay reachable only from this machine. A quick tunnel's address changes every time it starts; update `.env` when it does.
+The public address serves only the answer pages and Fo's webhook: each link is an unguessable, one-request token, and the app and its API stay reachable only from this machine. A quick tunnel's address changes every time it starts; update `.env` (and the webhook below) when it does.
+
+### Replying to Fo's text directly (Fo's webhook)
+
+With a Fo webhook, a plain text reply works too, in any thread you have with Fo. Wajo posts a signed event to Kiki the moment Fo answers a text of yours; if a proposal is waiting on you, Kiki has Fo read your text in her own conversation and report your decision there, bound to that exact proposal.
+
+1. In Wajo: Settings, Fo MCP, Webhooks, "Add webhook", with the URL `<KIKI_PUBLIC_URL>/hooks/fo`.
+2. Wajo shows the signing secret once. Put it in `.env` as `FO_WEBHOOK_SECRET=whsec_…` and restart Kiki.
+3. Send the test event from Wajo; its delivery should show as succeeded.
+
+Only deliveries signed with that secret, sent within the last five minutes, count; a retry of one is handled once. Without the secret, Kiki's texts say to answer at the link.
 
 ## Demo script (about 5 minutes)
 

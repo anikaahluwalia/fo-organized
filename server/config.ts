@@ -28,6 +28,8 @@ export interface Config {
    * your phone. Only the answer pages are served there. Null: texts carry no link.
    */
   publicUrl: string | null;
+  /** The signing secret of Kiki's Fo webhook (registered in Wajo, pointing at <publicUrl>/hooks/fo). */
+  foWebhookSecret: string | null;
   dataDir: string;
   claudeMode: IntegrationMode;
   anthropicModel: string;
@@ -59,6 +61,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     appOrigin: env.APP_ORIGIN ?? `http://localhost:${port}`,
     devOrigins: ["http://localhost:5173", "http://127.0.0.1:5173"],
     publicUrl: /^https:\/\/[a-z0-9.-]+(:\d+)?\/?$/i.test(env.KIKI_PUBLIC_URL ?? "") ? env.KIKI_PUBLIC_URL!.replace(/\/$/, "") : null,
+    foWebhookSecret: env.FO_WEBHOOK_SECRET || null,
     dataDir: path.resolve(env.DATA_DIR ?? ".data"),
     claudeMode: mode(env.CLAUDE_MODE, base),
     anthropicModel: env.ANTHROPIC_MODEL ?? "claude-opus-5-5",

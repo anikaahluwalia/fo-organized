@@ -12,7 +12,7 @@ import { kvGet, kvSet, one, type PlanRow } from "../db.ts";
 import { notFound } from "../errors.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
-import { LINK_ONLY, notifyText, replyState, replyWindowMs } from "./notify.ts";
+import { LINK_ONLY, LINK_OR_TEXT, notifyText, replyState, replyWindowMs } from "./notify.ts";
 import { replyToTask } from "./outreach.ts";
 
 const key = (token: string) => `answer.link.${createHash("sha256").update(token).digest("hex")}`;
@@ -53,7 +53,7 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   const taskId = requestFor(ctx, token);
   const task = getTask(ctx.db, taskId);
   // The text as Fo sent it, without its own link (you're on that page).
-  const proposal = (notifyText(ctx, taskId) ?? "").replace(/\s*Answer here: \S+\s*$/, "").replace(LINK_ONLY, "").trim();
+  const proposal = (notifyText(ctx, taskId) ?? "").replace(/\s*Answer here: \S+\s*$/, "").replace(LINK_ONLY, "").replace(LINK_OR_TEXT, "").trim();
   const done = settled(ctx, taskId);
   const question = task?.state === "needs_user_input" && task.question ? task.question.replace(/^\W*KIKI-(DECISION|STATUS)\s*:.*$/gim, "").trim() : null;
   const form = done

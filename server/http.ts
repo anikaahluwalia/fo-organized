@@ -6,6 +6,7 @@ import type { Config } from "./config.ts";
 import { AppError, badRequest, notFound } from "./errors.ts";
 import { createPairingCode, extensionStatus, pairExtension, unpairAll, verifyExtensionToken } from "./extension.ts";
 import { answerPage, submitAnswer } from "./services/answerlink.ts";
+import { receiveFoEvent, verifyFoWebhook } from "./services/fowebhook.ts";
 
 export interface OAuthFlow {
   begin(opts?: { gmail?: boolean }): Promise<string>; // returns the URL to send the browser to
@@ -44,8 +45,7 @@ function str(body: Body, key: string): string | undefined {
   return v;
 }
 
-/** A form posted from the answer page (urlencoded). */
-async function readForm(req: http.IncomingMessage): Promise<Record<string, string>> {
+async function readRaw(req: http.IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -53,7 +53,12 @@ async function readForm(req: http.IncomingMessage): Promise<Record<string, strin
     if (size > MAX_BODY) throw new AppError(413, "That's too much data.");
     chunks.push(chunk as Buffer);
   }
-  return Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString("utf8")));
+  return Buffer.concat(chunks);
+}
+
+/** A form posted from the answer page (urlencoded). */
+async function readForm(req: http.IncomingMessage): Promise<Record<string, string>> {
+  return Object.fromEntries(new URLSearchParams((await readRaw(req)).toString("utf8")));
 }
 
 async function readJson(req: http.IncomingMessage): Promise<Body> {
@@ -77,7 +82,7 @@ async function readJson(req: http.IncomingMessage): Promise<Body> {
 export function createHttpServer(app: App, config: Config, oauth: { google: OAuthFlow | null; fo: OAuthFlow | null }, staticDir: string): http.Server {
   const allowedOrigins = new Set([config.appOrigin, ...config.devOrigins]);
   const allowedHosts = new Set([...allowedOrigins].map((o) => new URL(o).host));
-  // Kiki's public address (a tunnel), if any: it serves the answer pages and nothing else.
+  // Kiki's public address (a tunnel), if any: it serves the answer pages and Fo's webhook, nothing else.
   const publicHost = config.publicUrl ? new URL(config.publicUrl).host : null;
   let returnTo = config.appOrigin;
 
@@ -244,6 +249,23 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
           const message = err instanceof AppError ? err.message : "Something went wrong. Ask Fo for the proposal again.";
           return html(err instanceof AppError ? err.status : 500, `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kiki</title><p style="font:16px system-ui;padding:20px">${message.replace(/[&<>"']/g, "")}</p>`);
         }
+      }
+      // Fo's webhook: Wajo posts here when a Fo conversation turn closes. Only a signed delivery counts.
+      if (url.pathname === "/hooks/fo" && config.foWebhookSecret) {
+        if (method !== "POST") return send(405, { error: "Method not allowed." });
+        const body = await readRaw(req);
+        const header = (name: string) => (typeof req.headers[name] === "string" ? (req.headers[name] as string) : undefined);
+        const delivery = { id: header("webhook-id"), timestamp: header("webhook-timestamp"), signature: header("webhook-signature") };
+        if (!verifyFoWebhook(config.foWebhookSecret, delivery, body)) return send(401, { error: "The signature didn't verify." });
+        let event: unknown;
+        try {
+          event = JSON.parse(body.toString("utf8"));
+        } catch {
+          return send(400, { error: "The body isn't valid JSON." });
+        }
+        receiveFoEvent(app.ctx, delivery.id!, event);
+        res.writeHead(204, SECURITY_HEADERS);
+        return res.end();
       }
       if (isPublic) {
         res.writeHead(404, { ...SECURITY_HEADERS, "Content-Type": "text/plain; charset=utf-8" });

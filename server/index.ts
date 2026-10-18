@@ -76,6 +76,7 @@ const app = createApp({
   google: { scopes: config.google.scopeLabel, missingScopes: () => googleAuth?.missingScopes() ?? [] },
   watchIntervalSeconds: config.watchIntervalSeconds,
   publicUrl: config.publicUrl,
+  foWebhook: Boolean(config.foWebhookSecret && config.publicUrl),
   workspacePollSeconds: config.workspacePollSeconds,
 });
 app.recover();

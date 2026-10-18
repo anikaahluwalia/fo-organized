@@ -75,7 +75,7 @@ I may text back "go ahead". If I do, please don't move or change any files yours
 ${text}
 -----END APPROVED BODY-----
 
-This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${/\nAnswer here: \S+$/.test(text) ? " Keep the link exactly as written. Don't invite me to reply by text: the link is how I answer." : ""}${reply}
+This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${/\nAnswer here: \S+$/.test(text) ? ` Keep the link exactly as written.${text.includes(LINK_ONLY) ? " Don't invite me to reply by text: the link is how I answer." : ""}` : ""}${reply}
 
 End your reply with exactly one of these lines:
 ${STATUS_LINES.sent}
@@ -430,23 +430,28 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
   return `${findSummary(ctx, plan)}\n\nProposed changes (version ${plan.version}):\n${proposalLines(ctx, plan)}\nNothing is deleted. You can answer Fo naturally, ask a question, ask for changes, or decline.`;
 }
 
-/** Said in a text with a link: a text reply lands in a separate Fo conversation Kiki can't tie to the request. */
+/**
+ * Said in a text with a link. Without Fo's webhook a text reply lands in a separate Fo conversation
+ * Kiki can't tie to the request, so the link is the one way to answer; with it, a reply works too.
+ */
 export const LINK_ONLY = "Please tap the link to approve or ask for changes: text replies can't be processed.";
+export const LINK_OR_TEXT = "Tap the link to approve or ask for changes, or just reply to this text.";
 
-/** A text with its answer link: the link is the one way to answer, so the text says so and invites no text reply. */
-function withLink(text: string, link: string | null): string {
+/** A text with its answer link, saying how to answer. */
+function withLink(ctx: Ctx, text: string, link: string | null): string {
   if (!link) return text;
+  const how = ctx.foWebhook ? LINK_OR_TEXT : LINK_ONLY;
   const body = text
     .replace(/ ?Reply to this text, or answer in Kiki: yes, a change, or no\./g, "")
     .replace(/Reply to this text, or answer in Kiki:/g, "At the link,")
-    .replace(/You can answer Fo naturally, ask a question, ask for changes, or decline\./, LINK_ONLY);
-  return `${body}${body.includes(LINK_ONLY) ? "" : `\n\n${LINK_ONLY}`}\n\nAnswer here: ${link}`;
+    .replace(/You can answer Fo naturally, ask a question, ask for changes, or decline\./, how);
+  return `${body}${body.includes(how) ? "" : `\n\n${how}`}\n\nAnswer here: ${link}`;
 }
 
 /** The request that has Fo text you a proposal (and only you), with the binding for your answer. */
 export function textedProposal(ctx: Ctx, plan: PlanRow, binding: ApprovalBinding, lead?: string, taskId?: string): { body: string; request: string } {
   const link = taskId ? answerLink(ctx, taskId) : null;
-  const body = withLink(`${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`, link);
+  const body = withLink(ctx, `${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`, link);
   return { body, request: message(body, newReference(), "text") + "\n\n" + approvalInstructions(binding) };
 }
 
@@ -464,7 +469,7 @@ export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   // The link to answer it: your answer there stays tied to this exact proposal.
   const link = answerLink(ctx, taskId);
-  const text = withLink(newFindText(ctx, plan), link);
+  const text = withLink(ctx, newFindText(ctx, plan), link);
   kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
   kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "find");
