@@ -3,7 +3,8 @@
  * numbered so an answer can refer to them ("skip number 3"), and the files she couldn't place.
  * File names, folder names and reasons come from documents, so each is one inert line.
  */
-import { itemLine, oneLine, type ProposalItem } from "../domain/adjust.ts";
+import { itemLine, type ProposalItem } from "../domain/adjust.ts";
+import { inert } from "../domain/inert.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
 import type { PlanNote } from "../domain/plan.ts";
 import { all, one, type PlanOpRow, type PlanRow } from "../db.ts";
@@ -41,13 +42,13 @@ export function proposalLines(ctx: Ctx, plan: PlanRow, items = proposalItems(ctx
   const lines = ops.map((op) => {
     if (op.kind === "move_rename") {
       const n = op.file_id ? numbered.get(op.file_id) : undefined;
-      return `${n ? `${n}.` : "-"} Move "${oneLine(op.pre_name)}" from "${oneLine(op.pre_path) || "workspace folder"}" to "${oneLine(op.new_path)}/${oneLine(op.new_name)}". ${oneLine(op.reason)}`.trim();
+      return `${n ? `${n}.` : "-"} Move "${inert(op.pre_name)}" from "${inert(op.pre_path) || "workspace folder"}" to "${inert(op.new_path)}/${inert(op.new_name)}". ${inert(op.reason)}`.trim();
     }
-    if (op.kind === "create_folder") return `- Create folder "${oneLine(op.folder_path)}".`;
-    if (op.kind === "write_index") return `- Update index "${oneLine(op.folder_path)}/${oneLine(op.new_name)}".`;
+    if (op.kind === "create_folder") return `- Create folder "${inert(op.folder_path)}".`;
+    if (op.kind === "write_index") return `- Update index "${inert(op.folder_path)}/${inert(op.new_name)}".`;
     const doc = op.doc_id ? one<{ file_id: string }>(ctx.db, "SELECT file_id FROM documents WHERE id = ?", op.doc_id) : undefined;
     const file = doc ? one<{ name: string }>(ctx.db, "SELECT name FROM files WHERE workspace_id = ? AND file_id = ?", plan.workspace_id, doc.file_id) : undefined;
-    return `- Mark "${oneLine(file?.name ?? "document")}" as ${op.target_status}. ${oneLine(op.reason)}`.trim();
+    return `- Mark "${inert(file?.name ?? "document")}" as ${op.target_status}. ${inert(op.reason)}`.trim();
   });
   const unplaced = items.filter((i) => i.kind === "unplaced");
   if (unplaced.length) lines.push("Not moved:", ...unplaced.map(itemLine));

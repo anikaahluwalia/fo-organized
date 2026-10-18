@@ -5,7 +5,8 @@
  * conversation, where it needs its own decision.
  */
 import { randomUUID } from "node:crypto";
-import { oneLine, validateChanges } from "../domain/adjust.ts";
+import { validateChanges } from "../domain/adjust.ts";
+import { inert } from "../domain/inert.ts";
 import { approvalInstructions, type ApprovalBinding } from "../domain/approval.ts";
 import { kvGet, kvSet, logEvent, now, one, tx, type PlanRow, type WorkspaceRow } from "../db.ts";
 import { conflict } from "../errors.ts";
@@ -18,7 +19,7 @@ import { proposalItems, proposalLines } from "./proposal.ts";
 function decideMessage(ctx: Ctx, ws: WorkspaceRow, plan: PlanRow, binding: ApprovalBinding, lead: string): string {
   return `${lead} Please explain it to me here in plain words and ask me what I'd like to do. Don't message anyone else, and don't change any files yourself: Kiki does that after I decide.
 
-Kiki's proposal for my Drive folder "${oneLine(ws.name)}" (version ${plan.version}): ${oneLine(plan.summary)}
+Kiki's proposal for my Drive folder "${inert(ws.name)}" (version ${plan.version}): ${inert(plan.summary)}
 ${proposalLines(ctx, plan)}
 Nothing is deleted.
 
@@ -95,14 +96,14 @@ export async function handleChangeRequest(ctx: Ctx, taskId: string): Promise<voi
         if (adjusted.changed) next = getPlan(ctx.db, adjusted.planId);
         else notes.push("Those changes are already in the proposal.");
       } else {
-        notes.push(request.kind === "question" ? `That sounds like a question about the proposal ("${oneLine(request.question ?? state.text, 200)}").` : "Kiki couldn't find a change to make in that answer.");
+        notes.push(request.kind === "question" ? `That sounds like a question about the proposal ("${inert(request.question ?? state.text, 200)}").` : "Kiki couldn't find a change to make in that answer.");
       }
       notes.push(...problems);
-      if (request.unsupported.length) notes.push(`Kiki can't do this from a proposal: ${request.unsupported.map((u) => `"${oneLine(u, 120)}"`).join(", ")}.`);
+      if (request.unsupported.length) notes.push(`Kiki can't do this from a proposal: ${request.unsupported.map((u) => `"${inert(u, 120)}"`).join(", ")}.`);
     }
     const note = notes.join(" ") || null;
     const target = next ?? plan;
-    const said = `"${oneLine(state.text, 300)}"`;
+    const said = `"${inert(state.text, 300)}"`;
     const lead = next
       ? `I asked for changes (${said}), and Kiki made version ${next.version} of the proposal.${note ? ` ${note}` : ""}`
       : `I answered ${said}, but Kiki didn't change the proposal. ${note ?? ""}`.trim();

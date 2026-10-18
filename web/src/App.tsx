@@ -361,9 +361,10 @@ function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAct
  * about a plan that's gone shouldn't read as being about the plan on screen now.
  */
 function textIsCurrent(n: NotificationView, proposedId: string | null, runningId: string | null): boolean {
+  // A text or request about a proposal shows only while that proposal is open or running.
+  if (n.purpose === "find" || n.purpose === "decide") return Boolean(n.planId && (n.planId === proposedId || n.planId === runningId));
   if (n.state !== "complete") return true;
-  if (n.planId && (n.planId === proposedId || n.planId === runningId)) return true;
-  return n.purpose !== "find" && Date.now() - Date.parse(n.createdAt) < 30 * 60_000;
+  return Date.now() - Date.parse(n.createdAt) < 30 * 60_000;
 }
 
 const ATTENTION_CHIP: Record<AttentionItemView["kind"], { label: string; tone: string }> = {
@@ -533,14 +534,24 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
               ? "The note wasn't sent."
               : latest.state === "uncertain"
                 ? "Not sure the note went out."
-                : `Waiting on ${foLabel}…`;
+                : latest.state === "working" && latest.pollPaused
+                  ? `Kiki lost touch with ${foLabel} while it was sending your note.`
+                  : latest.state === "complete"
+                    ? `${foLabel} didn't say whether it sent the note.`
+                    : `Waiting on ${foLabel}…`;
     return (
       <div className={`notice ${latest.outcome === "reported_sent" ? "notice--ok" : latest.state === "failed" || latest.state === "uncertain" ? "notice--bad" : "notice--info"}`}>
         <strong>{label}</strong>
         {latest.progress && latest.state === "working" && <p>{latest.progress}</p>}
         {latest.question && <p>{latest.question}</p>}
         {latest.failureDetail && <p>{latest.failureDetail}</p>}
+        {latest.state === "working" && latest.pollPaused && latest.pollError && <p>{latest.pollError}</p>}
         {latest.text && <p className="hint">“{latest.text}”</p>}
+        {(latest.outcome === "not_sent" || latest.state === "failed" || (latest.state === "complete" && latest.outcome === "unclear")) && (
+          <button className="btn btn--small" style={{ marginTop: 8 }} disabled={act.busy !== null} onClick={() => act.run("notify-preview", async () => setPreview(await post<{ text: string; contentHash: string }>("/api/notify/preview")))}>
+            Try again
+          </button>
+        )}
       </div>
     );
   }
@@ -554,7 +565,7 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
   return (
     <div className="stack">
       <p className="hint">
-        {foLabel} will text this to you. No one else.
+        {foLabel} will send you this note. No one else.
       </p>
       <pre className="message-preview">{preview.text}</pre>
       <div className="approve-row">
@@ -593,6 +604,8 @@ function decideLabel(n: NotificationView, fo: string): string {
   if (n.state === "failed") return `${fo} couldn't take the proposal.`;
   if (n.state === "uncertain") return `Not sure ${fo} got the proposal.`;
   if (n.state === "needs_user_input") return `${fo} is asking you about this proposal.`;
+  if (n.state === "working" && n.pollPaused) return `Kiki lost touch with ${fo} while it was reading the proposal.`;
+  if (n.state === "complete") return `${fo} hasn't asked you anything yet.`;
   return `${fo} is reading the proposal…`;
 }
 
@@ -623,12 +636,17 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
             ? `${fo} has a question.`
             : n.outcome === "not_sent"
               ? `${fo} says it didn't send the text.`
-              : `${fo} is texting you…`;
+              : n.state === "working" && n.pollPaused
+                ? `Kiki lost touch with ${fo} while it was texting you.`
+                : n.state === "complete"
+                  ? `${fo} didn't say whether it texted you.`
+                  : `${fo} is texting you…`;
   return (
     <div className={`notice ${n.outcome === "reported_sent" || r?.status === "approved" ? "notice--ok" : n.state === "failed" || n.state === "uncertain" ? "notice--bad" : "notice--info"}`} style={{ marginBottom: 14 }}>
       <strong>{label}</strong>
       {n.text && !decide && <p className="hint">“{n.text}”</p>}
       {(n.question || n.failureDetail) && <p className="message-preview">{n.question ?? n.failureDetail}</p>}
+      {n.state === "working" && n.pollPaused && n.pollError && <p>{n.pollError}</p>}
       {r?.clarification && <p>{fo} needs clarification: “{r.clarification}”</p>}
       {n.state === "working" && n.progress && <p>{n.progress}</p>}
       {(n.state === "needs_user_input" || (n.state === "complete" && r?.status === "waiting")) && r?.status !== "adjusting" && (r === null || r.status === "waiting") && (
@@ -708,11 +726,11 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
           />
           <span>
             <strong>Text me when Kiki finds something new</strong>
-            <span className="hint" style={{ display: "block" }}>Reply "go ahead" to Fo and Kiki files it.</span>
+            <span className="hint" style={{ display: "block" }}>Fo texts you, and you answer here in Kiki.</span>
           </span>
         </label>
       )}
-      {view.notifications[0] && textIsCurrent(view.notifications[0], proposed?.id ?? null, running?.id ?? null) && (
+      {view.notifications[0] && view.notifications[0].purpose !== "summary" && textIsCurrent(view.notifications[0], proposed?.id ?? null, running?.id ?? null) && (
         <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} act={act} />
       )}
       {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
@@ -885,7 +903,7 @@ export function App() {
           <Decisions view={view} act={act} />
           <FoUpdates view={view} act={act} />
           <div className="companion-extra">
-            <ExtensionPairing paired={view.extension?.paired} />
+            <ExtensionPairing paired={view.extension?.paired} pairedAt={view.extension?.pairedAt ?? null} />
           </div>
         </aside>
       </div>

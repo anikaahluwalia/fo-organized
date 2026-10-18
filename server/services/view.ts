@@ -402,6 +402,8 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
     question: t.question,
     failureDetail: t.failure_detail,
     finalResponse: t.final_response,
+    pollPaused: Boolean(t.poll_paused),
+    pollError: t.poll_error,
     createdAt: t.created_at,
   }));
   const base: Omit<AppView, "kiki"> = {

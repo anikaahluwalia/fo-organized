@@ -141,6 +141,12 @@ export function foText(n, now = new Date()) {
   } else if (n.outcome === "not_sent") {
     label = `${fo} says it didn't send the ${thing}.`;
     tone = "warn";
+  } else if (n.state === "working" && n.pollPaused) {
+    label = `Kiki lost touch with ${fo} while it was ${thing === "note" ? "sending your note" : "texting you"}.`;
+    tone = "warn";
+  } else if (n.state === "complete") {
+    label = `${fo} didn't say whether it ${thing === "note" ? "sent the note" : "texted you"}.`;
+    tone = "warn";
   } else {
     label = thing === "note" ? `${fo} is sending you the note…` : `${fo} is texting you…`;
   }
@@ -149,7 +155,7 @@ export function foText(n, now = new Date()) {
     label,
     tone,
     text: n.text || null,
-    more: n.question || n.failureDetail || null,
+    more: n.question || n.failureDetail || (n.pollPaused ? n.pollError : null) || null,
     progress: n.state === "working" ? n.progress || null : null,
     purpose: PURPOSE[n.purpose] ?? null,
     time: formatTime(n.createdAt, now),

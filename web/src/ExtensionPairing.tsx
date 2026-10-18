@@ -12,13 +12,20 @@ async function postJson<T>(path: string): Promise<T> {
   return body as T;
 }
 
-/** Whether any side panel is paired, from GET /api/state (null when it can't tell). */
-async function fetchPaired(): Promise<boolean | null> {
+interface PairedState {
+  paired: boolean;
+  /** When the newest side panel paired: a newer time means the code on screen was used. */
+  pairedAt: string | null;
+}
+
+/** Whether any side panel is paired, and since when, from GET /api/state (null when it can't tell). */
+async function fetchPaired(): Promise<PairedState | null> {
   try {
     const res = await fetch("/api/state", { cache: "no-store" });
     if (!res.ok) return null;
-    const body = (await res.json()) as { extension?: { paired?: unknown } };
-    return typeof body.extension?.paired === "boolean" ? body.extension.paired : null;
+    const body = (await res.json()) as { extension?: { paired?: unknown; pairedAt?: unknown } };
+    if (typeof body.extension?.paired !== "boolean") return null;
+    return { paired: body.extension.paired, pairedAt: typeof body.extension.pairedAt === "string" ? body.extension.pairedAt : null };
   } catch {
     return null;
   }
@@ -32,9 +39,11 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "num
  * `paired` (GET /api/state's `extension.paired`) if the page already polls it; otherwise the
  * component asks the server itself.
  */
-export function ExtensionPairing({ paired: pairedProp }: { paired?: boolean } = {}) {
-  const [pairing, setPairing] = useState<(PairingCode & { pairedBefore: boolean | null }) | null>(null);
-  const [checked, setChecked] = useState<boolean | null>(null);
+export function ExtensionPairing({ paired: pairedProp, pairedAt: pairedAtProp }: { paired?: boolean; pairedAt?: string | null } = {}) {
+  const [pairing, setPairing] = useState<(PairingCode & { pairedBefore: boolean | null; pairedAtBefore: string | null }) | null>(null);
+  const [checkedState, setChecked] = useState<PairedState | null>(null);
+  const checked = checkedState?.paired ?? null;
+  const pairedAt = pairedAtProp !== undefined ? pairedAtProp : (checkedState?.pairedAt ?? null);
   const [busy, setBusy] = useState<"code" | "unpair" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -72,13 +81,13 @@ export function ExtensionPairing({ paired: pairedProp }: { paired?: boolean } = 
     };
   }, [pairing, pairedProp]);
 
-  // The code works once. If no panel was paired when it was made and one is now, it was used.
+  // The code works once. A panel paired since it was made (a newer pairing time, or the first panel) used it.
   useEffect(() => {
-    if (pairing && pairing.pairedBefore === false && paired === true) {
+    if (pairing && ((pairing.pairedBefore === false && paired === true) || (pairedAt !== null && pairedAt !== pairing.pairedAtBefore))) {
       setPairing(null);
       setNote("Side panel paired.");
     }
-  }, [pairing, paired]);
+  }, [pairing, paired, pairedAt]);
 
   async function makeCode() {
     setBusy("code");
@@ -86,7 +95,7 @@ export function ExtensionPairing({ paired: pairedProp }: { paired?: boolean } = 
     setNote(null);
     try {
       const code = await postJson<PairingCode>("/api/extension/pairing-code");
-      setPairing({ ...code, pairedBefore: paired });
+      setPairing({ ...code, pairedBefore: paired, pairedAtBefore: pairedAt });
       setNow(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -102,7 +111,7 @@ export function ExtensionPairing({ paired: pairedProp }: { paired?: boolean } = 
     try {
       await postJson("/api/extension/unpair");
       setPairing(null); // unpairing also cancels a code that hasn't been used
-      setChecked(false);
+      setChecked({ paired: false, pairedAt: null });
       setNote("Unpaired. The side panel will ask for a new code.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

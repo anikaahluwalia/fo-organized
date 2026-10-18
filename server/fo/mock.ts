@@ -94,6 +94,8 @@ export class MockFoClient implements FoClient {
     } else if (/don't send the email/.test(args.message)) {
       convo.pending = { progress: [], final: `${MOCK_NOTE}\nOkay, I won't send it.\nKIKI-STATUS: NOT-SENT` };
     } else if (/^Please text me/.test(args.message)) {
+      // A proposal texted to you: your answer, in Kiki, comes back on this conversation.
+      if (handoff) convo.decision = JSON.parse(handoff[1]!) as MockConversation["decision"];
       const body = /-----BEGIN APPROVED BODY-----\n([\s\S]*?)\n-----END APPROVED BODY-----/.exec(args.message)?.[1] ?? "";
       const sms: MockConversation = { id: `mock-sms-${randomUUID()}`, startedAt: new Date().toISOString(), turns: [{ role: "assistant", text: body, at: new Date().toISOString() }], pending: null, turnStartedAt: Date.now(), contractor: null, sentAt: null, replyPosted: true, decision: null };
       this.conversations.set(sms.id, sms);

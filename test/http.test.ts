@@ -13,7 +13,7 @@ import { makeRig, organized, type TestRig } from "./helpers.ts";
 const EXTENSION = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 const OTHER_EXTENSION = "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba";
 
-type StateBody = AppView & { extension: { paired: boolean } };
+type StateBody = AppView & { extension: { paired: boolean; pairedAt: string | null; codePending: boolean } };
 
 interface Reply {
   status: number;
@@ -275,7 +275,7 @@ test("/api/state never contains OAuth tokens or the side panel's token", async (
   for (const res of [await s.request({ path: "/api/state" }), await s.fromExtension({ path: "/api/state", token })]) {
     assert.equal(res.status, 200);
     for (const secret of [...secrets, token]) assert.ok(!res.text.includes(secret), `the state leaks ${secret.slice(0, 12)}…`);
-    assert.deepEqual((res.json as unknown as StateBody).extension, { paired: true });
+    assert.equal((res.json as unknown as StateBody).extension.paired, true);
   }
 });
 
@@ -376,5 +376,5 @@ test("unpairing in the web app revokes the side panel's token", async (t) => {
   const res = await s.fromExtension({ path: "/api/state", token });
   assert.equal(res.status, 401);
   assert.equal(res.json?.code, "not_paired");
-  assert.deepEqual(((await s.request({ path: "/api/state" })).json as unknown as StateBody).extension, { paired: false });
+  assert.deepEqual(((await s.request({ path: "/api/state" })).json as unknown as StateBody).extension, { paired: false, pairedAt: null, codePending: false });
 });

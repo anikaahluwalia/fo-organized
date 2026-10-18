@@ -312,6 +312,8 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
     FACTS_VERSION,
   );
   let readCount = 0;
+  // What this run read, for the activity line (not everything in the workspace).
+  const readTypes = new Map<string, number>();
   let upgraded = 0;
   const queue = [...pending];
   const worker = async () => {
@@ -350,6 +352,7 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
           );
         });
         readCount++;
+        readTypes.set(facts.docType, (readTypes.get(facts.docType) ?? 0) + 1);
       } catch (err) {
         if (err instanceof ReadError && !err.retryable) {
           run(ctx.db, "UPDATE documents SET read_status = 'failed', read_error = ?, updated_at = ? WHERE id = ?", err.message, now(), doc.id);
@@ -369,8 +372,8 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
   await Promise.all([worker(), worker(), worker()]);
   if (upgraded) logEvent(ctx.db, wsId, "read", `Kiki took another look at ${upgraded} document${upgraded === 1 ? "" : "s"} for additional document facts. Existing classifications and filing decisions are preserved.`);
   if (readCount) {
-    const types = all<{ doc_type: string; n: number }>(ctx.db, "SELECT doc_type, COUNT(*) AS n FROM documents WHERE workspace_id = ? AND read_status = 'read' GROUP BY doc_type", wsId);
-    logEvent(ctx.db, wsId, "read", `${ctx.reader.mode === "mock" ? "Mock reading" : "Claude"} read ${readCount} document${readCount === 1 ? "" : "s"} (${types.map((t) => `${t.n} ${t.doc_type}`).join(", ")}).`);
+    const types = [...readTypes].sort(([a], [b]) => a.localeCompare(b)).map(([type, n]) => `${n} ${type}`);
+    logEvent(ctx.db, wsId, "read", `${ctx.reader.mode === "mock" ? "Mock reading" : "Claude"} read ${readCount} document${readCount === 1 ? "" : "s"} (${types.join(", ")}).`);
   }
   return readCount;
 }

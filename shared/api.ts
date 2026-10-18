@@ -294,6 +294,9 @@ export interface NotificationView {
   question: string | null;
   failureDetail: string | null;
   finalResponse: string | null;
+  /** Kiki stopped checking on Fo (Fo's connection broke, or it's been working too long), and why. */
+  pollPaused: boolean;
+  pollError: string | null;
   createdAt: string;
 }
 
@@ -326,5 +329,5 @@ export interface AppView {
   busy: { inventory: boolean; reading: boolean; executing: boolean; interpreting: boolean };
   kiki: KikiView;
   /** Added by the HTTP layer: whether a Chrome side panel is paired with this app. */
-  extension?: { paired: boolean };
+  extension?: { paired: boolean; pairedAt?: string | null; codePending?: boolean };
 }

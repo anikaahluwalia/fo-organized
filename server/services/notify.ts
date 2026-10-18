@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { oneLine } from "../domain/adjust.ts";
+import { inert } from "../domain/inert.ts";
 import { approvalInstructions, parseApprovalReport, type ApprovalBinding } from "../domain/approval.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
 import { all, kvGet, kvSet, logEvent, one, tx, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
@@ -15,24 +15,49 @@ import { requireWorkspace } from "./workspace.ts";
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** "a, b and c" */
+const listed = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
+
+/** What a plan did, from its verified steps only, in the words of the kind of plan it was. */
+function verifiedWork(ctx: Ctx, plan: PlanRow, ops: PlanOpRow[]): string[] {
+  const moved = ops.filter((o) => o.kind === "move_rename");
+  const copies = moved.filter((o) => o.new_path && inDuplicatesFolder(o.new_path)).length;
+  const superseded = moved.filter((o) => (o.new_path ?? "").split("/").includes("Superseded")).length;
+  const filed = moved.length - copies - superseded;
+  const folders = ops.filter((o) => o.kind === "create_folder").length;
+  const indexes = [...new Set(ops.filter((o) => o.kind === "write_index").map((o) => inert((o.folder_path ?? "").split("/")[1] ?? o.new_name, 60)))];
+  const index = indexes.length ? `${plan.kind === "undo" ? "restored" : "updated"} the ${listed(indexes)} index${indexes.length === 1 ? "" : "es"}` : null;
+  if (plan.kind === "undo") return [moved.length ? `put ${plural(moved.length, "document")} back where ${moved.length === 1 ? "it was" : "they were"}` : null, index].filter((p): p is string => Boolean(p));
+  const statuses = ops
+    .filter((o) => o.kind === "set_status")
+    .map((o) => {
+      const doc = o.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", o.doc_id) : undefined;
+      const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
+      const what = facts?.reference.value ? `${facts.docType === "quote" ? "quote" : "document"} ${inert(facts.reference.value, 40)}` : "a quote";
+      return `recorded ${what} as ${o.target_status === "current" ? "the current one" : inert(o.target_status, 20)}`;
+    });
+  return [
+    folders ? `created ${plural(folders, "folder")}` : null,
+    filed ? `filed and renamed ${plural(filed, "document")}` : null,
+    superseded ? `moved ${plural(superseded, "earlier version")} to Superseded` : null,
+    copies ? `set aside ${plural(copies, "exact copy", "exact copies")}` : null,
+    ...statuses,
+    index,
+  ].filter((p): p is string => Boolean(p));
+}
+
 /** The note Kiki would ask Fo to send you, built only from verified results. */
 export function notifyPreview(ctx: Ctx): { text: string; contentHash: string; planId: string } | null {
   const ws = requireWorkspace(ctx.db);
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE workspace_id = ? AND status IN ('applied', 'partial') ORDER BY finished_at DESC LIMIT 1", ws.id);
   if (!plan) return null;
   const ops = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state = 'verified'", plan.id);
-  const folders = ops.filter((o) => o.kind === "create_folder").length;
-  const moved = ops.filter((o) => o.kind === "move_rename");
-  const invoices = moved.filter((o) => (o.new_path ?? "").endsWith("Invoices")).length;
-  const quotes = moved.filter((o) => (o.new_path ?? "").includes("Quotes")).length;
-  const index = ops.find((o) => o.kind === "write_index");
+  const work = verifiedWork(ctx, plan, ops);
+  if (!work.length) return null;
   const total = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id).length;
-  const parts = [
-    folders ? `created ${folders} folder${folders === 1 ? "" : "s"}` : null,
-    moved.length ? `filed and renamed ${moved.length} document${moved.length === 1 ? "" : "s"} (${invoices} invoice${invoices === 1 ? "" : "s"}, ${quotes} quote${quotes === 1 ? "" : "s"})` : null,
-    index ? `updated the project index ("${index.new_name}")` : null,
-  ].filter(Boolean);
-  const text = `Hi, it's Kiki. I organized "${ws.name}" in Google Drive: ${parts.join(", ")}. ${ops.length === total ? "Every change was checked in Drive." : `${ops.length} of ${total} steps were checked in Drive; the rest need a look in Kiki.`} Nothing was deleted.`;
+  const lead = plan.kind === "organize" ? `I organized "${inert(ws.name)}" in Google Drive: ` : `In "${inert(ws.name)}" in Google Drive, I `;
+  const text = `Hi, it's Kiki. ${lead}${listed(work)}. ${ops.length === total ? "Every change was checked in Drive." : `${ops.length} of ${total} steps were checked in Drive; the rest need a look in Kiki.`} Nothing was deleted.`;
   return { text, contentHash: hash(text), planId: plan.id };
 }
 
@@ -66,15 +91,14 @@ export function notifySend(ctx: Ctx, input: { contentHash?: string; clientReques
   const preview = notifyPreview(ctx);
   if (!preview) throw conflict("There's nothing verified to report yet.");
   if (input.contentHash !== preview.contentHash) throw conflict("The note changed after you reviewed it. Review it again.", "hash_mismatch");
-  const sentFor = kvGet(ctx.db, `notify.plan.${preview.planId}`);
-  if (sentFor) {
-    const prior = getTask(ctx.db, sentFor);
-    if (prior && !["failed"].includes(prior.state)) return { taskId: sentFor, created: false };
-  }
+  // A summary on its way isn't sent twice; once Fo has finished with it (sent or not), you can ask again.
+  const sentFor = kvGet(ctx.db, `notify.summary.${preview.planId}`);
+  const prior = sentFor ? getTask(ctx.db, sentFor) : undefined;
+  if (sentFor && prior && ["pending", "asking", "working", "needs_user_input"].includes(prior.state)) return { taskId: sentFor, created: false };
   const reference = newReference();
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   kvSet(ctx.db, `notify.request.${clientRequestId}`, taskId);
-  kvSet(ctx.db, `notify.plan.${preview.planId}`, taskId);
+  kvSet(ctx.db, `notify.summary.${preview.planId}`, taskId);
   kvSet(ctx.db, `notify.text.${taskId}`, preview.text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "summary");
   logEvent(ctx.db, requireWorkspace(ctx.db).id, "approved", `You approved a note for ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to send you.`);
@@ -125,8 +149,8 @@ export function replyState(ctx: Ctx, taskId: string): ReplyState | null {
 export function notifyPlanId(ctx: Ctx, taskId: string): string | null {
   const r = replyState(ctx, taskId);
   if (r?.planId) return r.planId;
-  const row = one<{ key: string }>(ctx.db, "SELECT key FROM kv WHERE (key LIKE 'notify.done.%' OR key LIKE 'notify.plan.%') AND value = ?", taskId);
-  return row ? row.key.replace(/^notify\.(done|plan)\./, "") : null;
+  const row = one<{ key: string }>(ctx.db, "SELECT key FROM kv WHERE (key LIKE 'notify.done.%' OR key LIKE 'notify.plan.%' OR key LIKE 'notify.summary.%') AND value = ?", taskId);
+  return row ? row.key.replace(/^notify\.(done|plan|summary)\./, "") : null;
 }
 
 export function saveReply(ctx: Ctx, taskId: string, state: ReplyState): void {
@@ -218,7 +242,7 @@ export function sendDoneText(ctx: Ctx, planId: string): void {
   const text = plan.status !== "applied"
     ? `Kiki: the approved plan stopped (${plan.status}). ${all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state = 'verified'", planId).length} steps were verified in Drive. The remaining changes need review; I have not marked the plan done.`
     : moves.length === 1
-      ? `Kiki: done. It's filed in ${moves[0]!.new_path} as "${moves[0]!.new_name}".`
+      ? `Kiki: done. It's filed in ${inert(moves[0]!.new_path)} as "${inert(moves[0]!.new_name)}".`
       : `Kiki: done. I filed ${moves.length} documents and updated the index.`;
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   kvSet(ctx.db, `notify.done.${planId}`, taskId);
@@ -235,7 +259,9 @@ export function notifyHandler(ctx: Ctx): TaskHandler {
       const report = state?.requestId ? parseApprovalReport(response, { requestId: state.requestId, planId: state.planId, contentHash: state.contentHash }) : null;
       if (report) {
         ctx.jobs.enqueue("text_reply", `text_reply:${task.id}`, { taskId: task.id });
-        return { question: report.decision === "clarification" ? "Fo needs clarification: " + report.userReply : null };
+        // Fo's own words back to you (its answer, its question), without the protocol lines.
+        const said = response.split(/\r?\n/).filter((l) => !/^\W*KIKI-(DECISION|STATUS)\s*:/i.test(l)).join("\n").trim();
+        return { question: report.decision === "clarification" ? said || "Fo needs you to clarify your answer." : null };
       }
       const c = classifyDispatchReply(response);
       if (c === "sent") {
@@ -270,7 +296,7 @@ export function autoTextEnabled(ctx: Ctx): boolean {
 export function setAutoText(ctx: Ctx, on: boolean): void {
   kvSet(ctx.db, AUTO_TEXT, on ? "1" : undefined);
   const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE active = 1");
-  logEvent(ctx.db, ws?.id ?? null, "settings", on ? "You turned on texts from Fo when Kiki finds something new. Reply \"go ahead\" to approve." : "You turned off Fo's texts about new finds.");
+  logEvent(ctx.db, ws?.id ?? null, "settings", on ? "You turned on texts from Fo when Kiki finds something new. You answer them here in Kiki." : "You turned off Fo's texts about new finds.");
 }
 
 function describeDoc(f: DocFacts | null): string {
@@ -305,9 +331,9 @@ function findSummary(ctx: Ctx, plan: PlanRow): string {
     const op = fresh[0]!;
     const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
     const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
-    return `Kiki: ${oneLine(describeDoc(facts))} just landed in "${oneLine(ws.name)}". Want me to file it in ${oneLine(op.new_path)}?${also} Reply "go ahead" and I'll do it.`;
+    return `Kiki: ${inert(describeDoc(facts))} just landed in "${inert(ws.name)}". Want me to file it in ${inert(op.new_path)}?${also} Answer in Kiki to say yes, ask for a change, or say no.`;
   }
-  return `Kiki: ${fresh.length} new documents in "${oneLine(ws.name)}" are ready to file.${also} Reply "go ahead" and I'll file them.`;
+  return `Kiki: ${fresh.length} new documents in "${inert(ws.name)}" are ready to file.${also} Answer in Kiki to say yes, ask for a change, or say no.`;
 }
 
 /** Complete scope is supplied to Fo and the account holder, including renames and version changes. */

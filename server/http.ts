@@ -4,7 +4,7 @@ import path from "node:path";
 import type { App } from "./app.ts";
 import type { Config } from "./config.ts";
 import { AppError, badRequest, notFound } from "./errors.ts";
-import { createPairingCode, extensionPaired, pairExtension, unpairAll, verifyExtensionToken } from "./extension.ts";
+import { createPairingCode, extensionStatus, pairExtension, unpairAll, verifyExtensionToken } from "./extension.ts";
 
 export interface OAuthFlow {
   begin(opts?: { gmail?: boolean }): Promise<string>; // returns the URL to send the browser to
@@ -72,7 +72,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
 
   route("GET", "/api/state", async () => {
     const view = await app.view();
-    return { ...view, settings: { ...view.settings, autoText: app.autoTextEnabled() }, extension: { paired: extensionPaired(app.db) } };
+    return { ...view, settings: { ...view.settings, autoText: app.autoTextEnabled() }, extension: extensionStatus(app.db) };
   });
   route("POST", "/api/settings", (_p, b) => app.updateSettings({ userName: str(b, "userName"), autoText: typeof b.autoText === "boolean" ? b.autoText : undefined }));
   route("POST", "/api/workspace/select", (_p, b) => app.selectWorkspace(str(b, "folder") ?? "").then(() => ({ ok: true })));

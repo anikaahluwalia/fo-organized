@@ -69,6 +69,13 @@ export function unpairAll(db: Db): void {
   kvSet(db, CODE_KEY, undefined);
 }
 
-export function extensionPaired(db: Db): boolean {
-  return tokens(db).length > 0;
+/**
+ * For the web app: whether a side panel is paired, when the newest one paired (so a code shown
+ * while one was already paired can be seen to have been used), and whether a code is still waiting.
+ */
+export function extensionStatus(db: Db): { paired: boolean; pairedAt: string | null; codePending: boolean } {
+  const all = tokens(db);
+  const raw = kvGet(db, CODE_KEY);
+  const pending = raw ? (JSON.parse(raw) as PairingCode) : null;
+  return { paired: all.length > 0, pairedAt: all.map((t) => t.createdAt).sort().at(-1) ?? null, codePending: Boolean(pending && pending.expiresAt > Date.now()) };
 }

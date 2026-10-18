@@ -6,6 +6,7 @@
  * decision.
  */
 import { z } from "zod";
+import { inert } from "./inert.ts";
 import { sanitizeName } from "./naming.ts";
 
 /** One numbered line of a proposal, as Fo shows it to the account holder. */
@@ -52,15 +53,10 @@ Report:
 - question: their question, when kind is "question"; otherwise null.
 - unsupported: anything they asked for that isn't one of these changes (deleting files, sharing them, emailing or paying someone), in their words. Kiki can't do those from a proposal.`;
 
-/** Untrusted text as one plain line: no line breaks or control characters, bounded length. */
-export function oneLine(s: string | null | undefined, max = 300): string {
-  return (s ?? "").replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
 export function itemLine(i: ProposalItem): string {
-  if (i.kind === "unplaced") return `${i.n}. "${oneLine(i.name)}" stays where it is: ${oneLine(i.why)}`;
+  if (i.kind === "unplaced") return `${i.n}. "${inert(i.name)}" stays where it is: ${inert(i.why)}`;
   const what = i.kind === "copy" ? "Set aside the exact copy" : "Move";
-  return `${i.n}. ${what} "${oneLine(i.name)}" to "${oneLine(i.to)}"${i.why ? ` (${oneLine(i.why)})` : ""}`;
+  return `${i.n}. ${what} "${inert(i.name)}" to "${inert(i.to)}"${i.why ? ` (${inert(i.why)})` : ""}`;
 }
 
 export function adjustUserMessage(items: ProposalItem[], reply: string): string {
@@ -90,7 +86,7 @@ export function validateChanges(items: ProposalItem[], request: ChangeRequest): 
     }
     const change = changes[item.fileId] ?? {};
     if (e.action === "move") {
-      const place = oneLine(e.place, 150).replace(/^\/+|\/+$/g, "");
+      const place = inert(e.place, 150).replace(/^\/+|\/+$/g, "");
       if (!place || place.split("/").some((s) => /^\s*\.+\s*$/.test(s))) {
         problems.push(`Kiki couldn't tell where "${item.name}" should go.`);
         continue;
@@ -108,7 +104,7 @@ export function validateChanges(items: ProposalItem[], request: ChangeRequest): 
     } else if (e.action === "keep_name") {
       change.keepName = true;
     } else {
-      const name = sanitizeName(oneLine(e.new_name, 150));
+      const name = sanitizeName(inert(e.new_name, 150));
       if (!name) {
         problems.push(`Kiki couldn't tell what to call "${item.name}".`);
         continue;

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { hasLineBreak, hasMarker } from "./inert.ts";
 
 export interface DraftContent {
   recipientName: string;
@@ -21,7 +22,7 @@ export function newReference(prefix = "KIKI"): string {
   return `${prefix}-${randomBytes(4).toString("hex").toUpperCase()}`;
 }
 
-const RESERVED = /-----(BEGIN|END) APPROVED BODY-----|KIKI-STATUS/i;
+
 
 export function validateDraft(c: DraftContent): string[] {
   const problems: string[] = [];
@@ -31,9 +32,9 @@ export function validateDraft(c: DraftContent): string[] {
   if (!c.body.trim()) problems.push("The message is empty.");
   if (c.subject.length > 200) problems.push("The subject is too long.");
   if (c.body.length > 4000) problems.push("The message is too long.");
-  if (RESERVED.test(c.subject + c.body)) problems.push("The message contains text Kiki reserves for talking to Fo.");
+  if (hasMarker(`${c.recipientName}\n${c.subject}\n${c.body}`)) problems.push("The message contains text Kiki reserves for talking to Fo.");
   // One line each: a line break here would read as a separate instruction in Kiki's request to Fo.
-  if (/[\r\n]/.test(c.subject) || /[\r\n]/.test(c.recipientName) || /[\r\n]/.test(c.recipientEmail)) problems.push("The subject, name and email address must each be one line.");
+  if ([c.subject, c.recipientName, c.recipientEmail].some(hasLineBreak)) problems.push("The subject, name and email address must each be one line.");
   return problems;
 }
 
