@@ -86,10 +86,28 @@ function extension(originalName: string, mimeType: string): string {
  * A readable filename built only from verified facts: "2026-09-28 Quote - Oakline Flooring Co. - Q-1042.pdf".
  * Missing facts are left out, never invented. Returns null when there's too little to go on.
  */
+/** Words that only say what kind of document it is. A heading made of nothing else isn't a title. */
+const GENERIC_TITLE_WORDS = new Set(
+  "quote quotation estimate invoice bill receipt permit building licence license business contract agreement service notes note meeting minutes report research assignment presentation deck slides spreadsheet sheet correspondence letter memo itinerary trip travel document statement revised revision final copy draft original tax the a an of and for".split(" "),
+);
+
+/**
+ * A stated title worth naming a file after. A heading that only repeats the document's type
+ * ("QUOTE", "ESTIMATE / QUOTE", "BUSINESS LICENCE") isn't one; anything specific is ("Induction
+ * and invariants", "Assignment 4").
+ */
+export function meaningfulTitle(title: string | null | undefined): string | null {
+  const t = title?.trim();
+  if (!t) return null;
+  if (/\d/.test(t)) return t;
+  const words = t.toLowerCase().match(/[a-z]+/g) ?? [];
+  return words.length > 0 && words.every((w) => GENERIC_TITLE_WORDS.has(w)) ? null : t;
+}
+
 export function proposedName(facts: DocFacts, originalName: string, mimeType: string): string | null {
   const date = facts.date.value;
   const issuer = facts.issuer.value;
-  const title = facts.title?.value;
+  const title = meaningfulTitle(facts.title?.value);
   if (!date && !issuer && !title) return null;
   const label = facts.docType === "quote" && facts.revision.isRevision ? "Revised quote" : TYPE_LABELS[facts.docType];
   const parts = [title || label, issuer, facts.reference.value].filter((p): p is string => Boolean(p));

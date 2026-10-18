@@ -250,7 +250,8 @@ async function upgradeFacts(ctx: Ctx, doc: DocumentRow): Promise<boolean> {
     run(
       ctx.db,
       "UPDATE documents SET facts_json = ?, updated_at = ? WHERE id = ?",
-      JSON.stringify({ ...prior, title: prior.title ?? fresh.title, refersTo: fresh.refersTo ?? [], validUntil: fresh.validUntil ?? null, version: FACTS_VERSION } satisfies DocFacts),
+      // Only facts that don't decide names or folders: a background re-read never renames a filed document.
+      JSON.stringify({ ...prior, title: prior.title, refersTo: fresh.refersTo ?? [], validUntil: fresh.validUntil ?? null, version: FACTS_VERSION } satisfies DocFacts),
       now(),
       doc.id,
     );

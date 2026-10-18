@@ -261,23 +261,32 @@ function describeDoc(f: DocFacts | null): string {
 
 /** What Fo texts: what Kiki found, where she'd put it, and how to say yes. */
 /** Moves that file a document, as opposed to setting an exact copy aside. */
-function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; copies: number } {
-  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' ORDER BY seq", planId);
+/** Already inside the folders Kiki files into (Projects, or the earlier Renovations). */
+const alreadyFiled = (path: string | null) => /^(Projects|Renovations)(\/|$)/.test(path ?? "");
+
+/** New documents to file, documents already filed that would be renamed or moved, and exact copies set aside. */
+function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; fresh: PlanOpRow[]; refiled: number; copies: number } {
+  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state <> 'excluded' ORDER BY seq", planId);
   const filing = moves.filter((o) => !(o.new_path && inDuplicatesFolder(o.new_path)));
-  return { filing, copies: moves.length - filing.length };
+  const fresh = filing.filter((o) => !alreadyFiled(o.pre_path));
+  return { filing, fresh, refiled: filing.length - fresh.length, copies: moves.length - filing.length };
 }
 
 function findSummary(ctx: Ctx, plan: PlanRow): string {
   const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
-  const { filing, copies } = filingMoves(ctx, plan.id);
-  const also = copies ? ` (Kiki would also set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}; nothing is deleted.)` : "";
-  if (filing.length === 1) {
-    const op = filing[0]!;
+  const { fresh, refiled, copies } = filingMoves(ctx, plan.id);
+  const extras = [
+    refiled ? `rename or move ${refiled} document${refiled === 1 ? "" : "s"} already filed` : null,
+    copies ? `set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}` : null,
+  ].filter(Boolean);
+  const also = extras.length ? ` (Kiki would also ${extras.join(" and ")}; nothing is deleted.)` : "";
+  if (fresh.length === 1) {
+    const op = fresh[0]!;
     const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
     const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
     return `Kiki: ${describeDoc(facts)} just landed in "${ws.name}". Want me to file it in ${op.new_path}?${also} Reply "go ahead" and I'll do it.`;
   }
-  return `Kiki: ${filing.length} new documents in "${ws.name}" are ready to file.${also} Reply "go ahead" and I'll file them.`;
+  return `Kiki: ${fresh.length} new documents in "${ws.name}" are ready to file.${also} Reply "go ahead" and I'll file them.`;
 }
 
 /** Complete scope is supplied to Fo and the account holder, including renames and version changes. */
@@ -297,8 +306,9 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
 /** Standing permission, texts to the account holder only: one text per new proposal. */
 export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   if (!autoTextEnabled(ctx)) return;
-  // Setting copies aside is housekeeping, not news: it waits in the app, no text.
-  if (filingMoves(ctx, plan.id).filing.length === 0 && !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND kind = 'set_status' AND state <> 'excluded'", plan.id)) return;
+  // Renaming what's already filed, or setting copies aside, is housekeeping, not something new:
+  // it waits in the app, no text.
+  if (filingMoves(ctx, plan.id).fresh.length === 0 && !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND kind = 'set_status' AND state <> 'excluded'", plan.id)) return;
   // One text per distinct proposal, even if it gets re-saved as a new version.
   if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
   kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);
