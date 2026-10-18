@@ -5,6 +5,7 @@ export const FoReplySchema = z.object({
   status: z.enum(["complete", "working", "failed"]),
   conversationId: z.string().min(1),
   response: z.string().optional(),
+  awaitingUser: z.boolean().optional(),
   progress: z.string().optional(),
   elapsedSeconds: z.number().int().optional(),
 });

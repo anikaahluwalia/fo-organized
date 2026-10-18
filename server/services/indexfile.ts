@@ -1,5 +1,5 @@
 import { all, type Db, type DocumentRow, type FileRow, type ProjectRow } from "../db.ts";
-import type { DocFacts } from "../domain/documents.ts";
+import { DOC_TYPES, type DocFacts } from "../domain/documents.ts";
 import { join } from "../domain/plan.ts";
 import { money } from "../domain/reconcile.ts";
 import { copyMap } from "../domain/duplicates.ts";
@@ -46,13 +46,13 @@ export function projectIndexRows(db: Db, project: ProjectRow): IndexRow[] {
     if (!prev || stamp(row) > stamp(prev)) newest.set(key, row);
   }
   for (const row of newest.values()) row.latestReceived = true;
-  const order = ["quote", "invoice", "receipt", "contract", "permit", "licence", "other", "unknown"];
+  const order: string[] = [...DOC_TYPES, "unknown"];
   return out.sort((a, b) => order.indexOf(a.facts.docType) - order.indexOf(b.facts.docType) || (a.facts.date.value ?? "").localeCompare(b.facts.date.value ?? ""));
 }
 
 /** The index file Kiki keeps in Drive: one row per document, from verified facts and locations. */
 export function buildIndexCsv(db: Db, project: ProjectRow, verifiedAt: string): string {
-  const header = ["Type", "Status", "Contractor or supplier", "Reference", "Date", "Total", "Accepted by you", "File name", "Folder", "Notes"];
+  const header = ["Type", "Status", "Issuer or author", "Reference", "Date", "Total", "Accepted by you", "File name", "Folder", "Notes"];
   const lines = [header.map(csvCell).join(",")];
   // References anywhere in the folder, so a row can say when a document it names is missing.
   const key = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/[^A-Z0-9]/g, "") : "");

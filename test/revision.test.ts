@@ -72,7 +72,7 @@ test("the revised quote was emailed: Kiki finds it in Gmail, saves it after appr
   assert.equal(index.find((r) => r.reference === "Q-1042-R1")?.status, "current");
   assert.equal(index.find((r) => r.reference === "Q-1042")?.status, "superseded");
   const saved = rig.drive.files.get(first.fileId)!;
-  assert.match(rig.drive.pathOf(saved.id), /^Renovation paperwork\/Renovations\/Flooring\/Quotes\/[^/]+Q-1042-R1\.pdf$/);
+  assert.match(rig.drive.pathOf(saved.id), /^Renovation paperwork\/Projects\/Flooring\/Quotes\/[^/]+Q-1042-R1\.pdf$/);
   assert.equal([...rig.drive.files.values()].filter((f) => f.name.includes("Q-1042-R1")).length, 1, "one copy");
   rig.app.close();
 });

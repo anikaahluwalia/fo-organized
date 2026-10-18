@@ -194,9 +194,9 @@ describe("naming.ts", () => {
   });
 
   test("a document goes to its project's folder for its type, or nowhere when either is unknown", () => {
-    assert.equal(targetFolder(facts({ docType: "invoice" })), "Renovations/Flooring/Invoices");
-    assert.equal(targetFolder(facts({ docType: "quote" })), "Renovations/Flooring/Quotes");
-    assert.equal(targetFolder(facts({ docType: "licence", project: "Kitchen" })), "Renovations/Kitchen/Permits and licences");
+    assert.equal(targetFolder(facts({ docType: "invoice" })), "Projects/Flooring/Invoices");
+    assert.equal(targetFolder(facts({ docType: "quote" })), "Projects/Flooring/Quotes");
+    assert.equal(targetFolder(facts({ docType: "licence", project: "Kitchen" })), "Projects/Kitchen/Permits and licences");
     assert.equal(targetFolder(facts({ docType: "invoice", project: null })), null);
     assert.equal(targetFolder(facts({ docType: "unknown" })), null);
   });
@@ -309,7 +309,7 @@ describe("documents.ts", () => {
     const f = toFacts(read, text);
     assert.deepEqual(f.issuer, { value: "Oakline Flooring Co.", quote: "Oakline   Flooring Co.", quoteFound: true });
     assert.deepEqual(f.reference, { value: "Q-1042", quote: 'Quote No: "Q-1042"', quoteFound: true });
-    assert.deepEqual([f.project.value, f.project.quoteFound], ["Flooring", true]);
+    assert.deepEqual([f.project.value, f.project.quoteFound], ["flooring", true]);
   });
 
   test("toFacts keeps values it can't check when there's no text, and says they weren't checked", () => {
@@ -353,21 +353,14 @@ describe("documents.ts", () => {
     },
   );
 
-  test("normalizeProject maps a project hint to a renovation area", () => {
-    const cases: [string, string][] = [
-      ["Flooring - main floor, 12 Cedar Lane", "Flooring"],
-      ["Flooring materials", "Flooring"],
-      ["hardwood stairs", "Flooring"],
-      ["Kitchen cabinets", "Kitchen"],
-      ["Main bathroom vanity", "Bathroom"],
-      ["Roof repair", "Roofing"],
-      ["Exterior painting", "Painting"],
-    ];
-    for (const [hint, project] of cases) assert.equal(normalizeProject(hint), project, hint);
+  test("normalizeProject preserves project identity across domains", () => {
+    for (const name of ["Flooring - 12 Cedar Lane", "Flooring - 20 Birch Lane", "CS 245", "Launch 2027", "Japan trip", "general contracting"]) {
+      assert.equal(normalizeProject(name), name);
+    }
+    assert.equal(normalizeProject("  CS   245  "), "CS 245");
   });
-
-  test("normalizeProject returns null for anything that isn't a renovation area", () => {
-    for (const hint of [null, undefined, "", "12 Cedar Lane", "general contracting"]) assert.equal(normalizeProject(hint), null, String(hint));
+  test("normalizeProject rejects empty and unsafe folder segments", () => {
+    for (const name of [null, undefined, "", "..", ".", "a/b", "a\\b", "a".repeat(151)]) assert.equal(normalizeProject(name), null);
   });
 });
 
@@ -433,15 +426,15 @@ describe("plan.ts buildOrganizePlan", () => {
     assert.deepEqual(
       ops.map((o) => [o.kind, o.kind === "create_folder" ? o.folderPath : o.kind === "move_rename" ? `${o.pre!.name} -> ${o.newPath}/${o.newName}` : `${o.newPath}/${o.newName}`]),
       [
-        ["create_folder", "Renovations"],
-        ["create_folder", "Renovations/Flooring"],
-        ["create_folder", "Renovations/Flooring/Invoices"],
-        ["create_folder", "Renovations/Flooring/Quotes"],
-        ["move_rename", "Oakline invoice deposit.pdf -> Renovations/Flooring/Invoices/2026-10-01 Invoice - Oakline Flooring Co. - INV-3307.pdf"],
-        ["move_rename", "invoice final FINAL.pdf -> Renovations/Flooring/Invoices/2026-10-03 Invoice - Northside Building Supply - N-5581.pdf"],
-        ["move_rename", "IMG_2041.pdf -> Renovations/Flooring/Quotes/2026-09-20 Quote - Bright Floors Ltd. - BF-77.pdf"],
-        ["move_rename", "scan_0012.pdf -> Renovations/Flooring/Quotes/2026-09-28 Quote - Oakline Flooring Co. - Q-1042.pdf"],
-        ["write_index", "Renovations/Flooring/Flooring - document index (kept by Kiki).csv"],
+        ["create_folder", "Projects"],
+        ["create_folder", "Projects/Flooring"],
+        ["create_folder", "Projects/Flooring/Invoices"],
+        ["create_folder", "Projects/Flooring/Quotes"],
+        ["move_rename", "Oakline invoice deposit.pdf -> Projects/Flooring/Invoices/2026-10-01 Invoice - Oakline Flooring Co. - INV-3307.pdf"],
+        ["move_rename", "invoice final FINAL.pdf -> Projects/Flooring/Invoices/2026-10-03 Invoice - Northside Building Supply - N-5581.pdf"],
+        ["move_rename", "IMG_2041.pdf -> Projects/Flooring/Quotes/2026-09-20 Quote - Bright Floors Ltd. - BF-77.pdf"],
+        ["move_rename", "scan_0012.pdf -> Projects/Flooring/Quotes/2026-09-28 Quote - Oakline Flooring Co. - Q-1042.pdf"],
+        ["write_index", "Projects/Flooring/Flooring - document index (kept by Kiki).csv"],
       ],
     );
     for (const op of ops) assert.ok(op.reason.trim().length > 0, `step ${op.seq} has a reason`);
@@ -458,19 +451,19 @@ describe("plan.ts buildOrganizePlan", () => {
       assert.ok(op.dependsOn.includes(parent.seq), `step ${op.seq} waits for its folder`);
       assert.equal(op.newPath, parent.folderPath, `step ${op.seq} goes inside the folder it references`);
     }
-    const top = ops.find((o) => o.kind === "create_folder" && o.folderPath === "Renovations")!;
+    const top = ops.find((o) => o.kind === "create_folder" && o.folderPath === "Projects")!;
     assert.deepEqual(top.parentRef, { file: ROOT });
   });
 
   test("folders that already exist are reused, not created again", () => {
-    const flooring = folderAt("fold-flooring", "Flooring", "Renovations", "fold-renovations");
+    const flooring = folderAt("fold-flooring", "Flooring", "Projects", "fold-renovations");
     const input = messyFolder();
-    input.files.push(folderAt("fold-renovations", "Renovations", "", ROOT), flooring);
+    input.files.push(folderAt("fold-renovations", "Projects", "", ROOT), flooring);
     const { ops } = buildOrganizePlan(input);
     const created = ops.filter((o) => o.kind === "create_folder");
     assert.deepEqual(
       created.map((o) => o.folderPath),
-      ["Renovations/Flooring/Invoices", "Renovations/Flooring/Quotes"],
+      ["Projects/Flooring/Invoices", "Projects/Flooring/Quotes"],
     );
     for (const op of created) assert.deepEqual(op.parentRef, { file: flooring.fileId });
     assert.deepEqual(ops.find((o) => o.kind === "write_index")!.parentRef, { file: flooring.fileId });
@@ -479,11 +472,11 @@ describe("plan.ts buildOrganizePlan", () => {
   test("a name already taken in the destination folder gets a number instead of clashing", () => {
     const input = messyFolder();
     input.files.push(
-      folderAt("fold-renovations", "Renovations", "", ROOT),
-      folderAt("fold-flooring", "Flooring", "Renovations", "fold-renovations"),
-      folderAt("fold-invoices", "Invoices", "Renovations/Flooring", "fold-flooring"),
+      folderAt("fold-renovations", "Projects", "", ROOT),
+      folderAt("fold-flooring", "Flooring", "Projects", "fold-renovations"),
+      folderAt("fold-invoices", "Invoices", "Projects/Flooring", "fold-flooring"),
       // Someone filed a copy by hand earlier, in capitals.
-      fileAt("id-by-hand", "2026-10-03 INVOICE - NORTHSIDE BUILDING SUPPLY - N-5581.PDF", "Renovations/Flooring/Invoices", "fold-invoices"),
+      fileAt("id-by-hand", "2026-10-03 INVOICE - NORTHSIDE BUILDING SUPPLY - N-5581.PDF", "Projects/Flooring/Invoices", "fold-invoices"),
     );
     const move = buildOrganizePlan(input).ops.find((o) => o.fileId === "id-northside-invoice")!;
     assert.equal(move.newName, "2026-10-03 Invoice - Northside Building Supply - N-5581 (2).pdf");
@@ -561,7 +554,7 @@ describe("plan.ts buildOrganizePlan", () => {
     assert.equal(note("mystery.pdf")?.status, "needs_review");
     assert.equal(note("mystery.pdf")?.reason, "Kiki couldn't tell what kind of document this is.");
     assert.equal(note("Business licence 2026.pdf")?.status, "left_in_place");
-    assert.match(note("Business licence 2026.pdf")!.reason, /isn't about a renovation project/);
+    assert.match(note("Business licence 2026.pdf")!.reason, /needs clarification/);
     assert.equal(note("Quote (shortcut)")?.status, "left_in_place");
     assert.match(note("Quote (shortcut)")!.reason, /shortcut/);
     assert.equal(note("new scan.pdf")?.status, "waiting");
@@ -582,7 +575,7 @@ describe("plan.ts buildOrganizePlan", () => {
     const newInvoice = fileAt("id-northside-invoice-2", NEW_SUPPLIER_INVOICE.fileName);
     const plan = buildOrganizePlan({ ...state, files: [...state.files, newInvoice], docs: [...state.docs, docFor(newInvoice, readDemo(NEW_SUPPLIER_INVOICE).facts)] });
     const move = plan.ops.find((o) => o.fileId === newInvoice.fileId)!;
-    assert.equal(move.newPath, "Renovations/Flooring/Invoices");
+    assert.equal(move.newPath, "Projects/Flooring/Invoices");
     assert.equal(move.newName, "2026-10-17 Invoice - Northside Building Supply - N-5602.pdf");
     assert.match(move.reason, /Northside Building Supply's other document is in Flooring\./);
   });
@@ -675,15 +668,15 @@ describe("plan.ts buildVersionUpdatePlan", () => {
 
     assert.equal(fileNew!.fileId, newDoc.fileId);
     assert.deepEqual(fileNew!.parentRef, { file: quotes.fileId });
-    assert.equal(fileNew!.newPath, "Renovations/Flooring/Quotes");
+    assert.equal(fileNew!.newPath, "Projects/Flooring/Quotes");
     assert.equal(fileNew!.newName, "2026-10-17 Revised quote - Oakline Flooring Co. - Q-1042-R1.pdf");
     assert.ok(fileNew!.reason.includes(`${SOURCE}: "${SAID}"`), "the move cites its source");
 
-    assert.equal(superseded!.folderPath, "Renovations/Flooring/Quotes/Superseded");
+    assert.equal(superseded!.folderPath, "Projects/Flooring/Quotes/Superseded");
     assert.deepEqual(superseded!.parentRef, { file: quotes.fileId });
 
     assert.equal(keepOld!.fileId, oldDoc.fileId);
-    assert.equal(keepOld!.newPath, "Renovations/Flooring/Quotes/Superseded");
+    assert.equal(keepOld!.newPath, "Projects/Flooring/Quotes/Superseded");
     assert.equal(keepOld!.newName, "2026-09-28 Quote - Oakline Flooring Co. - Q-1042.pdf", "the old quote keeps its name");
     assert.deepEqual(keepOld!.parentRef, { op: superseded!.seq });
     // Moved to Superseded only once the new quote is filed.
@@ -702,7 +695,7 @@ describe("plan.ts buildVersionUpdatePlan", () => {
   });
 
   test("a revised quote that's already filed isn't moved again", () => {
-    const { draft, newDoc } = revisedQuoteArrives({ path: "Renovations/Flooring/Quotes", parentId: "folder:Renovations/Flooring/Quotes", name: "2026-10-17 Revised quote - Oakline Flooring Co. - Q-1042-R1.pdf" });
+    const { draft, newDoc } = revisedQuoteArrives({ path: "Projects/Flooring/Quotes", parentId: "folder:Projects/Flooring/Quotes", name: "2026-10-17 Revised quote - Oakline Flooring Co. - Q-1042-R1.pdf" });
     assert.ok(!draft.ops.some((o) => o.kind === "move_rename" && o.fileId === newDoc.fileId));
     assert.deepEqual(draft.notes.map((n) => [n.fileId, n.status]), [[newDoc.fileId, "already_organized"]]);
     const markCurrent = draft.ops.find((o) => o.kind === "set_status" && o.targetStatus === "current")!;
@@ -712,9 +705,9 @@ describe("plan.ts buildVersionUpdatePlan", () => {
 
 describe("plan.ts buildUndoPlan", () => {
   const folders = [
-    folderAt("fold-renovations", "Renovations", "", ROOT),
-    folderAt("fold-flooring", "Flooring", "Renovations", "fold-renovations"),
-    folderAt("fold-invoices", "Invoices", "Renovations/Flooring", "fold-flooring"),
+    folderAt("fold-renovations", "Projects", "", ROOT),
+    folderAt("fold-flooring", "Flooring", "Projects", "fold-renovations"),
+    folderAt("fold-invoices", "Invoices", "Projects/Flooring", "fold-flooring"),
   ];
   const move = (opSeq: number, fileId: string, before: string, after: string, beforeParentId: string | null = ROOT): UndoSource => ({
     opSeq,
@@ -727,7 +720,7 @@ describe("plan.ts buildUndoPlan", () => {
     afterName: after,
     afterParentId: "fold-invoices",
     afterVersion: `v-${fileId}`,
-    afterPath: "Renovations/Flooring/Invoices",
+    afterPath: "Projects/Flooring/Invoices",
     statusBefore: null,
     supersedesBefore: null,
     statusAfter: null,
@@ -775,7 +768,7 @@ describe("plan.ts buildUndoPlan", () => {
     assert.deepEqual(putBack!.parentRef, { file: ROOT });
     assert.equal(putBack!.newName, "invoice final FINAL.pdf");
     assert.equal(putBack!.newPath, "");
-    assert.deepEqual(putBack!.pre, { name: "2026-10-03 Invoice - Northside Building Supply - N-5581.pdf", parentId: "fold-invoices", version: "v-id-northside", path: "Renovations/Flooring/Invoices" });
+    assert.deepEqual(putBack!.pre, { name: "2026-10-03 Invoice - Northside Building Supply - N-5581.pdf", parentId: "fold-invoices", version: "v-id-northside", path: "Projects/Flooring/Invoices" });
     assert.deepEqual(draft.ops[3]!.dependsOn, [1, 2, 3]);
     assert.ok(!draft.ops.some((o) => o.kind === "create_folder"), "folders Kiki created stay; nothing is created or deleted");
   });

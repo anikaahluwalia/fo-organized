@@ -592,9 +592,9 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
         : n.purpose === "done" && n.outcome === "reported_sent"
           ? `${fo} texted you that it's done.`
           : r?.status === "waiting" && n.outcome === "reported_sent"
-            ? `${fo} texted you. Reply "go ahead" to file it, or approve here.`
+            ? `${fo} reports it texted you. Waiting for Fo to relay your decision about this proposal.`
             : r?.status === "expired"
-              ? "No reply yet. You can approve here."
+              ? "No linked decision arrived before this request expired. Review the proposal again."
               : n.outcome === "reported_sent"
                 ? `${fo} reports it texted you.`
       : n.state === "failed"
@@ -612,7 +612,7 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
       {n.text && <p className="hint">“{n.text}”</p>}
       {(n.question || n.failureDetail) && <p>{n.question ?? n.failureDetail}</p>}
       {n.state === "working" && n.progress && <p>{n.progress}</p>}
-      {n.state === "needs_user_input" && (
+      {(n.state === "needs_user_input" || (n.state === "complete" && r?.status === "waiting")) && (
         <form
           className="stack"
           style={{ marginTop: 8 }}
@@ -624,7 +624,7 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
             });
           }}
         >
-          <label htmlFor={`ans-${n.taskId}`}>Answer {fo}</label>
+          <label htmlFor={`ans-${n.taskId}`}>Answer {fo} about this proposal</label>
           <textarea id={`ans-${n.taskId}`} style={{ minHeight: 70 }} value={answer} onChange={(e) => setAnswer(e.target.value)} />
           <button className="btn btn--primary" disabled={!answer.trim() || act.busy !== null}>
             Send answer to {fo}

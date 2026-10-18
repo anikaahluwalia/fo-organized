@@ -123,9 +123,9 @@ export function foText(n, now = new Date()) {
     label = `${fo} reports it texted you that it's done.`;
     tone = "ok";
   } else if (r?.status === "waiting" && n.outcome === "reported_sent") {
-    label = `${fo} reports it texted you. Reply "go ahead" to file it, or approve here.`;
+    label = `${fo} reports it texted you. Waiting for Fo to relay your decision about this proposal.`;
   } else if (r?.status === "expired") {
-    label = "No reply yet. You can approve here.";
+    label = "No linked decision arrived before this request expired. Review the proposal again.";
   } else if (n.outcome === "reported_sent") {
     label = thing === "note" ? `${fo} reports it sent you the note.` : `${fo} reports it texted you.`;
     tone = "ok";

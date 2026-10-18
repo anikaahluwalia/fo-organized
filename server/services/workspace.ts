@@ -250,7 +250,7 @@ async function upgradeFacts(ctx: Ctx, doc: DocumentRow): Promise<boolean> {
     run(
       ctx.db,
       "UPDATE documents SET facts_json = ?, updated_at = ? WHERE id = ?",
-      JSON.stringify({ ...prior, refersTo: fresh.refersTo ?? [], validUntil: fresh.validUntil ?? null, version: FACTS_VERSION } satisfies DocFacts),
+      JSON.stringify({ ...prior, title: prior.title ?? fresh.title, refersTo: fresh.refersTo ?? [], validUntil: fresh.validUntil ?? null, version: FACTS_VERSION } satisfies DocFacts),
       now(),
       doc.id,
     );
@@ -266,6 +266,8 @@ async function upgradeFacts(ctx: Ctx, doc: DocumentRow): Promise<boolean> {
 }
 
 export function ensureProject(db: Db, wsId: string, name: string): ProjectRow {
+  const existing = one<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? AND name = ? ORDER BY created_at, id LIMIT 1", wsId, name);
+  if (existing) return existing;
   run(db, "INSERT OR IGNORE INTO projects (id, workspace_id, category, name, created_at) VALUES (?, ?, ?, ?, ?)", randomUUID(), wsId, CATEGORY, name, now());
   return one<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? AND category = ? AND name = ?", wsId, CATEGORY, name)!;
 }
@@ -347,7 +349,7 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
     }
   };
   await Promise.all([worker(), worker(), worker()]);
-  if (upgraded) logEvent(ctx.db, wsId, "read", `Kiki took another look at ${upgraded} document${upgraded === 1 ? "" : "s"} for validity dates and references to other documents. Names and folders are unchanged.`);
+  if (upgraded) logEvent(ctx.db, wsId, "read", `Kiki took another look at ${upgraded} document${upgraded === 1 ? "" : "s"} for additional document facts. Existing classifications and filing decisions are preserved.`);
   if (readCount) {
     const types = all<{ doc_type: string; n: number }>(ctx.db, "SELECT doc_type, COUNT(*) AS n FROM documents WHERE workspace_id = ? AND read_status = 'read' GROUP BY doc_type", wsId);
     logEvent(ctx.db, wsId, "read", `${ctx.reader.mode === "mock" ? "Mock reading" : "Claude"} read ${readCount} document${readCount === 1 ? "" : "s"} (${types.map((t) => `${t.n} ${t.doc_type}`).join(", ")}).`);

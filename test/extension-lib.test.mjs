@@ -91,12 +91,12 @@ test("plural and formatTime", () => {
 const note = (over) => ({ taskId: "t", purpose: "find", reply: null, mode: "live", state: "complete", outcome: null, text: "Kiki: a new invoice…", progress: null, question: null, failureDetail: null, finalResponse: null, createdAt: new Date().toISOString(), ...over });
 
 test("foText keeps Fo's reports labelled as reports, and names Mock Fo", () => {
-  assert.equal(foText(note({ outcome: "reported_sent", reply: { status: "waiting", text: null, source: null } })).label, 'Fo reports it texted you. Reply "go ahead" to file it, or approve here.');
+  assert.equal(foText(note({ outcome: "reported_sent", reply: { status: "waiting", text: null, source: null } })).label, "Fo reports it texted you. Waiting for Fo to relay your decision about this proposal.");
   assert.equal(foText(note({ outcome: "reported_sent", reply: { status: "approved", text: "go ahead", source: "text_reply" } })).label, 'You replied "go ahead". Kiki is filing it.');
   assert.equal(foText(note({ outcome: "reported_sent", reply: { status: "declined", text: "not now", source: "text_reply" } })).label, 'You replied "not now". Not filing it.');
   assert.equal(foText(note({ purpose: "done", outcome: "reported_sent" })).label, "Fo reports it texted you that it's done.");
   assert.equal(foText(note({ purpose: "summary", outcome: "reported_sent" })).label, "Fo reports it sent you the note.");
-  assert.equal(foText(note({ outcome: "reported_sent", reply: { status: "expired", text: null, source: null } })).label, "No reply yet. You can approve here.");
+  assert.equal(foText(note({ outcome: "reported_sent", reply: { status: "expired", text: null, source: null } })).label, "No linked decision arrived before this request expired. Review the proposal again.");
   assert.equal(foText(note({ state: "failed", failureDetail: "Fo is offline" })).label, "The text wasn't sent.");
   assert.equal(foText(note({ state: "failed", failureDetail: "Fo is offline" })).more, "Fo is offline");
   assert.equal(foText(note({ state: "uncertain" })).label, "Not sure the text went out.");

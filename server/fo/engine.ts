@@ -148,7 +148,9 @@ export class FoEngine {
       }
       if (!task.conversation_id) run(this.db, "UPDATE fo_tasks SET conversation_id = ? WHERE id = ?", reply.conversationId, taskId);
 
-      if (reply.status === "working") {
+      if (reply.awaitingUser === true && reply.status !== "failed") {
+        this.setState(taskId, "needs_user_input", { question: reply.response ?? reply.progress ?? "Fo is waiting for your answer.", final_response: reply.response ?? null, progress: null });
+      } else if (reply.status === "working") {
         if (isWaitingForUser(reply.progress, reply.response)) {
           this.setState(taskId, "needs_user_input", { question: reply.progress ?? reply.response ?? "Fo is waiting for your answer.", progress: reply.progress ?? null });
         } else {

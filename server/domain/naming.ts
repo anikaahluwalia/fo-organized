@@ -1,6 +1,6 @@
-import type { DocFacts, DocType } from "./documents.ts";
+import { normalizeProject, type DocFacts, type DocType } from "./documents.ts";
 
-export const CATEGORY = "Renovations";
+export const CATEGORY = "Projects";
 export const SUPERSEDED_FOLDER = "Superseded";
 
 const TYPE_FOLDERS: Record<DocType, string | null> = {
@@ -10,6 +10,14 @@ const TYPE_FOLDERS: Record<DocType, string | null> = {
   permit: "Permits and licences",
   licence: "Permits and licences",
   contract: "Contracts",
+  notes: "Notes",
+  report: "Reports",
+  research: "Research",
+  assignment: "Assignments",
+  presentation: "Presentations",
+  spreadsheet: "Spreadsheets",
+  correspondence: "Correspondence",
+  itinerary: "Itineraries",
   other: "Other documents",
   unknown: null,
 };
@@ -21,6 +29,14 @@ const TYPE_LABELS: Record<DocType, string> = {
   permit: "Permit",
   licence: "Licence",
   contract: "Contract",
+  notes: "Notes",
+  report: "Report",
+  research: "Research",
+  assignment: "Assignment",
+  presentation: "Presentation",
+  spreadsheet: "Spreadsheet",
+  correspondence: "Correspondence",
+  itinerary: "Itinerary",
   other: "Document",
   unknown: "Document",
 };
@@ -35,16 +51,21 @@ const EXTENSIONS: Record<string, string> = {
   "text/csv": ".csv",
 };
 
-export function projectFolderPath(project: string): string {
-  return `${CATEGORY}/${project}`;
+export function projectFolderPath(project: string, files: { name: string; path: string; isFolder: boolean; isShortcut: boolean }[] = []): string {
+  const safe = normalizeProject(project);
+  if (!safe) throw new Error("Project name must be a safe, nonempty folder name.");
+  // Reuse an existing legacy project folder; upgrading Kiki must not propose relocating it.
+  const legacy = files.some((f) => f.isFolder && !f.isShortcut && f.path === "Renovations" && f.name === safe);
+  const current = files.some((f) => f.isFolder && !f.isShortcut && f.path === CATEGORY && f.name === safe);
+  return `${legacy && !current ? "Renovations" : CATEGORY}/${safe}`;
 }
 
 /** Where a document belongs, or null when Kiki can't tell (unknown type or no project). */
-export function targetFolder(facts: DocFacts): string | null {
-  const project = facts.project.value;
+export function targetFolder(facts: DocFacts, files: Parameters<typeof projectFolderPath>[1] = []): string | null {
+  const project = normalizeProject(facts.project.value);
   const typeFolder = TYPE_FOLDERS[facts.docType];
   if (!project || !typeFolder) return null;
-  return `${projectFolderPath(project)}/${typeFolder}`;
+  return `${projectFolderPath(project, files)}/${typeFolder}`;
 }
 
 export function sanitizeName(name: string): string {
@@ -68,9 +89,10 @@ function extension(originalName: string, mimeType: string): string {
 export function proposedName(facts: DocFacts, originalName: string, mimeType: string): string | null {
   const date = facts.date.value;
   const issuer = facts.issuer.value;
-  if (!date && !issuer) return null;
+  const title = facts.title?.value;
+  if (!date && !issuer && !title) return null;
   const label = facts.docType === "quote" && facts.revision.isRevision ? "Revised quote" : TYPE_LABELS[facts.docType];
-  const parts = [label, issuer, facts.reference.value].filter((p): p is string => Boolean(p));
+  const parts = [title || label, issuer, facts.reference.value].filter((p): p is string => Boolean(p));
   const base = `${date ? `${date} ` : ""}${parts.join(" - ")}`;
   return sanitizeName(base) + extension(originalName, mimeType);
 }

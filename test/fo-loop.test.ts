@@ -5,7 +5,7 @@ import { sourceLabel, verifyOutcome, type Outcome } from "../server/domain/outco
 import { FoCallError, type FoReply, type FoTurn } from "../server/fo/types.ts";
 import type { FakeDrive } from "../server/google/fake.ts";
 import { DriveError } from "../server/google/types.ts";
-import { anchorMatcher, checkTextReply, findReply, sendDoneText } from "../server/services/notify.ts";
+import { checkTextReply, newFindText, replyState, sendDoneText } from "../server/services/notify.ts";
 import { checkWatch } from "../server/services/watch.ts";
 import { FakeFo, makeRig, organized, reply, sleep, tempDbPath, type TestRig } from "./helpers.ts";
 
@@ -18,8 +18,8 @@ const SENT = "I emailed Dana the approved message exactly as written.\nKIKI-STAT
 const DANA_NO = 'Dana replied: "No, use the revised quote I emailed today."';
 const DANA = { contractorName: "Dana", contractorEmail: "dana@oakline.example", consent: true };
 const ROOT = "Renovation paperwork";
-const QUOTES = "Renovations/Flooring/Quotes";
-const SUPERSEDED = "Renovations/Flooring/Quotes/Superseded";
+const QUOTES = "Projects/Flooring/Quotes";
+const SUPERSEDED = "Projects/Flooring/Quotes/Superseded";
 const OLD_NAME = "2026-09-28 Quote - Oakline Flooring Co. - Q-1042.pdf";
 const R1_NAME = "Oakline Flooring - revised quote.pdf";
 const R1_FILED = "2026-10-17 Revised quote - Oakline Flooring Co. - Q-1042-R1.pdf";
@@ -210,6 +210,9 @@ function texts(fo: FakeFo): string[] {
 function youTextBack(rig: Texted, answer: string): void {
   rig.fo.conversations = [{ conversationId: "sms-thread", title: "Texts", channel: "sms", startedAt: new Date().toISOString() }];
   rig.fo.transcripts.set("sms-thread", [fromFo(rig.text), fromUser(answer)]);
+  const state = replyState(rig.app.ctx, rig.note.taskId)!;
+  // Simulate Fo actually relaying the decision to the mapped conversation, not Kiki guessing an SMS match.
+  rig.fo.transcripts.set("kiki-1", [fromFo("KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: /no|wait/i.test(answer) ? "declined" : "approved", userReply: answer, actor: "account_holder", presentedExactProposal: true }))]);
 }
 
 async function replyTo(rig: Texted) {
@@ -577,7 +580,7 @@ describe("from Fo's answer to an organized workspace", () => {
     assert.deepEqual([revised.status, revised.folder, revised.supersedes], ["current", QUOTES, "Oakline Flooring Co. Q-1042"]);
     assert.deepEqual([old.status, old.folder], ["superseded", SUPERSEDED]);
     assert.match(indexCsvLine(rig.drive, "Q-1042-R1"), /^quote,Current \(identified\),/);
-    assert.match(indexCsvLine(rig.drive, ",Q-1042,"), /^quote,Superseded,.*,Renovations\/Flooring\/Quotes\/Superseded,/);
+    assert.match(indexCsvLine(rig.drive, ",Q-1042,"), /^quote,Superseded,.*,Projects\/Flooring\/Quotes\/Superseded,/);
     assert.equal((await latestUpdate(rig.app)).status, "resolved");
   });
 
@@ -829,14 +832,14 @@ describe("texts to the account holder through Fo", () => {
     await rig.app.stageRevision("invoice");
     await rig.app.settle();
 
-    assert.deepEqual(texts(rig.fo), [
-      `Kiki: a new invoice from Northside Building Supply ($286.40, N-5602) just landed in "Renovation paperwork". Want me to file it in Renovations/Flooring/Invoices? Reply "go ahead" and I'll do it.`,
-    ]);
+    assert.match(texts(rig.fo)[0]!, /Northside Building Supply/);
+    assert.match(texts(rig.fo)[0]!, /Proposed changes/);
+    assert.match(texts(rig.fo)[0]!, /N-5602.pdf/);
     const ask = rig.fo.asks[0]!;
     assert.equal(ask.newConversation, true);
     assert.match(ask.message, /^Please text me \(an SMS to my phone, nobody else\) this exact message:/);
     assert.match(ask.message, /Don't contact anyone else/);
-    assert.match(ask.message, /please don't move or change any files yourself/);
+    assert.match(ask.message, /Please don't move or change any files yourself/);
     const [note] = (await rig.app.view()).notifications;
     assert.equal(note?.purpose, "find");
     assert.deepEqual(note.reply, { status: "waiting", text: null, source: null });
@@ -901,7 +904,7 @@ describe("texts to the account holder through Fo", () => {
     youTextBack(rig, "Go ahead");
     await checkTextReply(rig.app.ctx, rig.note.taskId);
 
-    assert.deepEqual(await replyTo(rig), { status: "approved", text: "Go ahead", source: "text_reply" });
+    assert.deepEqual(await replyTo(rig), { status: "approved", text: "Go ahead", source: "relayed_by_fo" });
     const view = await rig.app.view();
     assert.deepEqual(
       view.plans.filter((p) => p.status === "approved").map((p) => [p.id, p.contentHash]),
@@ -910,7 +913,7 @@ describe("texts to the account holder through Fo", () => {
     assert.equal(rig.fo.asks.length, 1, "reading your reply only read Fo's conversations");
     await rig.app.settle();
     assert.equal(await planStatus(rig.app, rig.plan.id), "applied");
-    assert.equal(rig.drive.pathOf(fileNamed(rig.drive, INVOICE_FILED).id), `${ROOT}/Renovations/Flooring/Invoices/${INVOICE_FILED}`);
+    assert.equal(rig.drive.pathOf(fileNamed(rig.drive, INVOICE_FILED).id), `${ROOT}/Projects/Flooring/Invoices/${INVOICE_FILED}`);
   });
 
   test("a plan you approved by text gets one 'done' text once it's verified in Drive", async (t) => {
@@ -918,7 +921,7 @@ describe("texts to the account holder through Fo", () => {
     youTextBack(rig, "go ahead");
     await checkTextReply(rig.app.ctx, rig.note.taskId);
     await rig.app.settle();
-    assert.deepEqual(texts(rig.fo).slice(1), [`Kiki: done. It's filed in Renovations/Flooring/Invoices as "${INVOICE_FILED}".`]);
+    assert.deepEqual(texts(rig.fo).slice(1), [`Kiki: done. It's filed in Projects/Flooring/Invoices as "${INVOICE_FILED}".`]);
 
     sendDoneText(rig.app.ctx, rig.plan.id); // e.g. the execute job running again
     await checkTextReply(rig.app.ctx, rig.note.taskId);
@@ -954,7 +957,7 @@ describe("texts to the account holder through Fo", () => {
     const rig = await textedAboutInvoice(t);
     youTextBack(rig, "No, wait");
     await checkTextReply(rig.app.ctx, rig.note.taskId);
-    assert.deepEqual(await replyTo(rig), { status: "declined", text: "No, wait", source: "text_reply" });
+    assert.deepEqual(await replyTo(rig), { status: "declined", text: "No, wait", source: "relayed_by_fo" });
     assert.equal(await planStatus(rig.app, rig.plan.id), "proposed");
 
     rig.fo.transcripts.get("sms-thread")!.push(fromUser("ok go ahead"));
@@ -977,50 +980,4 @@ describe("texts to the account holder through Fo", () => {
     },
   );
 
-  describe("reading your reply to Kiki's text", () => {
-    const TEXT = `Kiki: a new invoice from Northside Building Supply ($286.40, N-5602) just landed in "Renovation paperwork". Want me to file it in Renovations/Flooring/Invoices? Reply "go ahead" and I'll do it.`;
-    const SENT_AT = Date.parse("2026-10-17T15:00:00.000Z");
-    const at = (secondsAfterSend: number) => new Date(SENT_AT + secondsAfterSend * 1000).toISOString();
-    const isAnchor = anchorMatcher(TEXT, "N-5602");
-
-    test("Kiki's text is recognized however the thread renders it; unrelated turns aren't", () => {
-      const rendered = TEXT.toUpperCase().replace(/"/g, "“").replace(/ /g, "  ").replace("JUST  LANDED", "just\nlanded");
-      assert.equal(isAnchor(fromFo(rendered)), true);
-      assert.equal(isAnchor(fromUser(`Please text me this exact message:\n\n-----BEGIN APPROVED BODY-----\n${TEXT}\n-----END APPROVED BODY-----`)), true);
-      assert.equal(isAnchor(fromFo("About N-5602: they said go ahead.")), true);
-      assert.equal(isAnchor(fromFo("Invoice N-5602 is due on Friday.")), false);
-      assert.equal(isAnchor(fromFo("Your table for two is booked for 7pm.")), false);
-    });
-
-    test("a 'go ahead' after Kiki's text is an approval; replies before it or long before it don't count", () => {
-      assert.equal(findReply([fromUser("go ahead", at(5))], isAnchor, SENT_AT), null, "no text, no answer");
-      assert.deepEqual(findReply([fromFo(TEXT, at(0)), fromUser("Go ahead", at(30))], isAnchor, SENT_AT), { verdict: "approved", text: "Go ahead", source: "text_reply" });
-      assert.equal(findReply([fromUser("go ahead", at(-10)), fromFo(TEXT, at(0))], isAnchor, SENT_AT), null, "a reply before the text isn't an answer to it");
-      assert.equal(findReply([fromFo(TEXT, at(-600)), fromUser("go ahead", at(-300))], isAnchor, SENT_AT), null, "a reply from before this text was sent is ignored");
-    });
-
-    test("Kiki's own messages and long messages aren't read as your answer", () => {
-      const turns = [fromFo(TEXT, at(0)), fromUser("Answer from the user: yes", at(10)), fromUser(`${"Lots of detail here. ".repeat(20)}ok`, at(20))];
-      assert.equal(findReply(turns, isAnchor, SENT_AT), null);
-    });
-
-    test("Fo relaying your reply in Kiki's conversation counts, and is labelled as relayed", () => {
-      const turns = [fromUser(`-----BEGIN APPROVED BODY-----\n${TEXT}\n-----END APPROVED BODY-----`, at(-5)), fromFo(TEXTED, at(0)), fromFo('You replied "go ahead".', at(60))];
-      assert.deepEqual(findReply(turns, isAnchor, SENT_AT), { verdict: "approved", text: "go ahead", source: "relayed_by_fo" });
-    });
-
-    test("'no, wait' declines, and a 'no' in the reply wins over a 'yes'", () => {
-      assert.deepEqual(findReply([fromFo(TEXT, at(0)), fromUser("No, wait", at(10))], isAnchor, SENT_AT), { verdict: "declined", text: "No, wait", source: "text_reply" });
-      assert.equal(findReply([fromFo(TEXT, at(0)), fromUser("ok but no, hold off", at(10))], isAnchor, SENT_AT)?.verdict, "declined");
-    });
-
-    test(
-      "a 'go ahead' sent to an earlier text with the same wording doesn't approve the newer one",
-      () => {
-        const batch = `Kiki: 2 new documents in "Renovation paperwork" are ready to file. Reply "go ahead" and I'll file them.`;
-        const turns = [fromFo(batch, at(-60)), fromUser("go ahead", at(-50)), fromFo("Kiki: done. I filed 2 documents and updated the index.", at(-30)), fromFo(batch, at(0))];
-        assert.equal(findReply(turns, anchorMatcher(batch, null), SENT_AT), null);
-      },
-    );
-  });
 });

@@ -66,7 +66,7 @@ test("a missing quote: Fo asks the contractor for a copy, Kiki finds it in Gmail
   assert.equal(view.outreach.find((x) => x.kind === "request_copy")?.dispatches[0]?.watch?.state, "closed", "Kiki stops following the conversation");
   assert.ok(!view.attention.some((a) => a.kind === "missing"), "nothing is missing any more");
   const filing = view.plans.find((p) => p.status === "proposed");
-  assert.ok(filing?.ops.some((o) => o.before?.name === "Q-1042 copy.pdf" && o.after?.path === "Renovations/Flooring/Quotes"), "the copy is filed like any new document");
+  assert.ok(filing?.ops.some((o) => o.before?.name === "Q-1042 copy.pdf" && o.after?.path === "Projects/Flooring/Quotes"), "the copy is filed like any new document");
   rig.app.close();
 });
 

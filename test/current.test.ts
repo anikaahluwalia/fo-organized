@@ -41,7 +41,7 @@ test("you say which quote is current: Kiki proposes the same reviewed update, wi
   assert.equal((await row(rig, "Q-1042-R1")).acceptedAt, null, "current isn't accepted");
   const old = await row(rig, "Q-1042");
   assert.equal(old.status, "superseded");
-  assert.equal(old.folder, "Renovations/Flooring/Quotes/Superseded");
+  assert.equal(old.folder, "Projects/Flooring/Quotes/Superseded");
   assert.ok(!attentionItems(rig.app.ctx, ws, "2026-10-17").some((i) => i.kind === "which_current"));
   assert.throws(() => rig.app.markCurrent(r1.docId), { status: 409 }, "already current");
   assert.throws(() => rig.app.markCurrent(old.docId), { status: 409 }, "a superseded quote isn't made current again this way");

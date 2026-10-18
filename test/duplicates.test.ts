@@ -34,15 +34,15 @@ test("an exact copy dropped into the folder is set aside next to the original, n
   assert.equal(plan.title, "Set aside a duplicate copy");
   const move = plan.ops.find((o) => o.kind === "move_rename")!;
   assert.equal(move.before?.name, "scan_0012 (1).pdf");
-  assert.equal(move.after?.path, "Renovations/Flooring/Quotes/Duplicates");
+  assert.equal(move.after?.path, "Projects/Flooring/Quotes/Duplicates");
   assert.equal(move.after?.name, CLEAN, "same clear name, in its own folder");
   assert.match(move.reason, /exact copy/);
   assert.equal((await rig.app.view()).notifications.length, 0, "housekeeping isn't texted");
 
   rig.app.approvePlan(plan.id, { contentHash: plan.contentHash, clientRequestId: "dup-1" });
   await rig.app.settle();
-  assert.equal(rig.drive.pathOf(copyId), `Renovation paperwork/Renovations/Flooring/Quotes/Duplicates/${CLEAN}`);
-  assert.equal(rig.drive.pathOf(quote.id), `Renovation paperwork/Renovations/Flooring/Quotes/${CLEAN}`, "the original stays put");
+  assert.equal(rig.drive.pathOf(copyId), `Renovation paperwork/Projects/Flooring/Quotes/Duplicates/${CLEAN}`);
+  assert.equal(rig.drive.pathOf(quote.id), `Renovation paperwork/Projects/Flooring/Quotes/${CLEAN}`, "the original stays put");
   assert.equal(rig.drive.files.size, [...rig.drive.files.values()].length);
 
   const view = await rig.app.view();
@@ -60,10 +60,10 @@ test("a numbered copy already filed next to the original (an earlier double uplo
   const plan = await proposal(rig);
   assert.ok(plan);
   const move = plan.ops.find((o) => o.kind === "move_rename")!;
-  assert.equal(move.after?.path, "Renovations/Flooring/Quotes/Duplicates");
+  assert.equal(move.after?.path, "Projects/Flooring/Quotes/Duplicates");
   rig.app.approvePlan(plan.id, { contentHash: plan.contentHash, clientRequestId: "dup-2" });
   await rig.app.settle();
-  assert.equal(rig.drive.pathOf(copyId), `Renovation paperwork/Renovations/Flooring/Quotes/Duplicates/${CLEAN}`);
+  assert.equal(rig.drive.pathOf(copyId), `Renovation paperwork/Projects/Flooring/Quotes/Duplicates/${CLEAN}`);
   rig.app.close();
 });
 
@@ -77,7 +77,7 @@ test("a file that reads the same but isn't identical is pointed out, not moved, 
   const plan = await proposal(rig);
   assert.ok(plan);
   const move = plan.ops.find((o) => o.kind === "move_rename")!;
-  assert.equal(move.after?.path, "Renovations/Flooring/Quotes", "filed normally");
+  assert.equal(move.after?.path, "Projects/Flooring/Quotes", "filed normally");
   assert.equal(move.after?.name, "2026-09-28 Quote - Oakline Flooring Co. - Q-1042 (2).pdf");
   rig.app.approvePlan(plan.id, { contentHash: plan.contentHash, clientRequestId: "dup-3" });
   await rig.app.settle();

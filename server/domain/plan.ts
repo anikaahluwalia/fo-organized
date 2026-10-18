@@ -100,9 +100,11 @@ class Folders {
   private readonly byPath = new Map<string, string>();
   private readonly planned = new Map<string, number>();
   private readonly ops: PlannedOp[];
+  readonly files: PlanFile[];
 
   constructor(rootId: string, files: PlanFile[], ops: PlannedOp[]) {
     this.ops = ops;
+    this.files = files;
     this.byPath.set("", rootId);
     // If Drive holds two folders with the same name in one place, use the oldest one consistently.
     const folders = files.filter((f) => f.isFolder && !f.isShortcut).sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? "") || a.fileId.localeCompare(b.fileId));
@@ -180,7 +182,7 @@ function claimName(taken: Map<string, Set<string>>, path: string, name: string):
 }
 
 function indexOp(ops: PlannedOp[], folders: Folders, project: string, index: { fileId: string; version: string | null } | null, dependsOn: number[]): void {
-  const folderPath = projectFolderPath(project);
+  const folderPath = projectFolderPath(project, folders.files);
   const parentRef = folders.ensure(folderPath);
   ops.push({
     seq: ops.length + 1,
@@ -264,7 +266,7 @@ export function buildOrganizePlan(input: {
     }
     let facts = doc.facts;
     let supplierNote: string | null = null;
-    if (!facts.project.value) {
+    if (!facts.project.value && ["invoice", "quote", "receipt"].includes(facts.docType)) {
       const known = supplierProjects.get(issuerKey(facts.issuer.value) ?? "");
       if (known && known.size === 1) {
         const project = [...known][0]!;
@@ -273,12 +275,12 @@ export function buildOrganizePlan(input: {
         supplierNote = `No project on it, but ${facts.issuer.value}'s other ${count === 1 ? "document is" : `${count} documents are`} in ${project}.`;
       }
     }
-    const folder = targetFolder(facts);
+    const folder = targetFolder(facts, input.files);
     if (!folder) {
       notes.push({
         ...at,
         status: facts.docType === "unknown" ? "needs_review" : "left_in_place",
-        reason: facts.docType === "unknown" ? "Kiki couldn't tell what kind of document this is." : `This ${describeFacts(facts)} isn't about a renovation project, so Kiki left it where it is.`,
+        reason: facts.docType === "unknown" ? "Kiki couldn't tell what kind of document this is." : `This ${describeFacts(facts)} doesn't identify a safe project or collection, so Kiki needs clarification before filing it.`,
       });
       continue;
     }
@@ -341,7 +343,7 @@ export function buildOrganizePlan(input: {
   moves.sort((a, b) => a.targetPath.localeCompare(b.targetPath) || a.name.localeCompare(b.name) || a.file.fileId.localeCompare(b.file.fileId));
   // Folders first, in a stable order.
   for (const path of [...new Set(moves.map((m) => m.targetPath))].sort()) folders.ensure(path);
-  for (const p of [...projects].sort()) folders.ensure(projectFolderPath(p));
+  for (const p of [...projects].sort()) folders.ensure(projectFolderPath(p, input.files));
 
   const moveSeqs: number[] = [];
   for (const m of moves) {
@@ -373,7 +375,7 @@ export function buildOrganizePlan(input: {
   }
 
   for (const project of [...projects].sort()) {
-    const projectMoves = ops.filter((o) => o.kind === "move_rename" && o.newPath?.startsWith(projectFolderPath(project))).map((o) => o.seq);
+    const projectMoves = ops.filter((o) => o.kind === "move_rename" && o.newPath?.startsWith(`${projectFolderPath(project, input.files)}/`)).map((o) => o.seq);
     // Nothing moved and the index already exists: there's nothing to rewrite, so a replay stays empty.
     if (projectMoves.length === 0 && input.indexFiles[project]) continue;
     indexOp(ops, folders, project, input.indexFiles[project] ?? null, projectMoves);
@@ -403,7 +405,7 @@ export function buildVersionUpdatePlan(input: VersionUpdateInput): PlanDraft {
   const notes: PlanNote[] = [];
   const folders = new Folders(input.rootId, input.files, ops);
   const fileById = new Map(input.files.map((f) => [f.fileId, f]));
-  const quotesPath = `${projectFolderPath(input.project)}/Quotes`;
+  const quotesPath = `${projectFolderPath(input.project, input.files)}/Quotes`;
   const supersededPath = `${quotesPath}/${SUPERSEDED_FOLDER}`;
   const newFile = fileById.get(input.newDoc.fileId);
   const oldFile = fileById.get(input.oldDoc.fileId);

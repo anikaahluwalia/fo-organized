@@ -1,6 +1,6 @@
 # Kiki
 
-Kiki keeps a Google Drive folder organized as real work happens, and Fo (Wajo's assistant) keeps you posted. She was built for a small renovation business whose quotes, invoices, licences and permits end up scattered across Drive: Kiki files them into clear folders with clear names, keeps a project index current, and follows up on which quote is the current one, always with your approval.
+Kiki keeps a Google Drive workspace organized as work changes, with Fo (Wajo's assistant) handling communication. The document foundation supports business, academic, and personal collections. The renovation demo is one example, not the organizing model. General organization and the broader Fo-led correction workflow are being developed in stages; the current contractor/revision workflow is still quote-specific.
 
 Brief: [docs/FO-RGANIZED-BRIEF.md](docs/FO-RGANIZED-BRIEF.md) · Character: [docs/KIKI-DESIGN.md](docs/KIKI-DESIGN.md) · Chrome side panel: [extension/](extension/)
 
@@ -46,7 +46,7 @@ Fo signs in with your Wajo account from the app (OAuth with dynamic client regis
 Uses a dedicated test folder, never real business documents. Everything below also runs with `npm run start:mock`, labelled Mock.
 
 1. **Messy folder.** Connect Google Drive and Fo, then press "Set up the renovation folder". Kiki adds five badly named PDFs (`scan_0012.pdf`, `invoice final FINAL.pdf`, …) to a new "Renovation paperwork" folder and reads them.
-2. **Plan and approve.** Kiki proposes `Renovations/Flooring/Quotes` and `/Invoices`, readable names, and a reason for each move. Approve it: she creates the folders, moves and renames the files, checks each change in Drive (9 of 9 verified) and writes the Flooring index. Open the folder in Drive to show the result.
+2. **Plan and approve.** Kiki proposes `Projects/Flooring/Quotes` and `/Invoices`, readable names, and a reason for each move. Approve it: she creates the folders, moves and renames the files, checks each change in Drive (9 of 9 verified) and writes the Flooring index. Open the folder in Drive to show the result.
 3. **Needs a look.** Kiki points out that Oakline's quote is valid for 11 more days, the business licence expires at year end, and two contractors quoted flooring with no price accepted.
 4. **A new invoice arrives.** Turn on "Text me when Kiki finds something new", then drag `demo-files/Northside invoice Oct 17.pdf` into the Drive folder. Kiki notices it, recognizes the supplier, proposes where it goes, and Fo texts you. Reply "go ahead" (or approve in the app) and she files it.
 5. **Is this the final quote?** In the index, press "Ask Oakline Flooring Co. if it's final", confirm they agreed to hear from your assistant, and approve the exact email. Fo sends it; Kiki follows that Fo conversation.
@@ -81,7 +81,10 @@ npm run typecheck
 
 ## Known limits
 
-- One user, one workspace folder, renovation projects; quotes and invoices are the best-supported document types.
+- One user and one workspace folder. New filing uses `Projects/<stated collection>/<document type>`; existing legacy renovation project folders are reused. Arbitrary user-defined folder layouts and inferred collections are not implemented yet.
+- Recognized types now include notes, reports, research, assignments, presentations, spreadsheets, correspondence and itineraries as well as business documents. Classification does not add file-format support: unsupported formats remain unreadable.
+- General document understanding has automated mock-based coverage; live extraction quality across these new types has not yet been evaluated. Replacement matching, current-version tracking and contractor outreach remain quote-specific.
+- Existing stored classifications and project assignments are retained during the facts upgrade, so old files are not silently reclassified. New content reads use the general reader.
 - Gmail is read-only and only searched for the contractor's exact address since Fo asked; attachments over 5 MB have to be saved into the folder by hand.
 - How Fo records your text replies has only been exercised with the mock; approving in the app always works.
 - The earlier Paper Chase prototype is preserved at the git tag `paper-chase-wip`; its brief is in `docs/archive/`.

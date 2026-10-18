@@ -15,8 +15,8 @@ import { makeRig, organized, tempDbPath, type TestRig } from "./helpers.ts";
  */
 
 const WORKSPACE = "Renovation paperwork";
-const INVOICES = "Renovations/Flooring/Invoices";
-const QUOTES = "Renovations/Flooring/Quotes";
+const INVOICES = "Projects/Flooring/Invoices";
+const QUOTES = "Projects/Flooring/Quotes";
 const INDEX = "Flooring - document index (kept by Kiki).csv";
 const MUTATIONS: FakeOp[] = ["createFolder", "update", "createFile", "updateContent"];
 
@@ -24,14 +24,14 @@ const OAKLINE_BALANCE = [
   "Oakline Flooring Co.",
   "Invoice No: INV-3400",
   "Date: 2026-10-05",
-  "Project: Flooring - main floor, 12 Cedar Lane",
+  "Project: Flooring", "Location: main floor, 12 Cedar Lane",
   "",
   "Balance for Quote Q-1042: $500.00",
   "",
   "Amount due (CAD): $500.00",
 ];
 const ACME_INVOICE = ["Acme Widgets Inc.", "Invoice No: A-100", "Date: 2026-10-15", "", "Widgets, 4: $10.00", "", "Total (CAD): $10.00"];
-const NORTHSIDE_KITCHEN = ["Northside Building Supply", "Invoice No: N-5590", "Date: 2026-10-08", "Project: Kitchen cabinets", "", "Cabinet hinges, 12: $80.00", "", "Total (CAD): $80.00"];
+const NORTHSIDE_KITCHEN = ["Northside Building Supply", "Invoice No: N-5590", "Date: 2026-10-08", "Project: Kitchen", "Scope: cabinets", "", "Cabinet hinges, 12: $80.00", "", "Total (CAD): $80.00"];
 
 // Helpers ---------------------------------------------------------------------------------
 
@@ -269,14 +269,14 @@ describe("duplicate input does not duplicate operations", () => {
     const rig = newRig(t);
     const plan = await proposed(rig);
     const root = only(rig.drive, WORKSPACE).id;
-    const theirs = rig.drive.addFolder("Renovations", root);
+    const theirs = rig.drive.addFolder("Projects", root);
 
     approve(rig, plan);
     await rig.app.settle();
 
     assert.equal((await planById(rig, plan.id)).status, "applied");
     assert.deepEqual(
-      rig.drive.childrenOf(root).filter((f) => f.name === "Renovations").map((f) => f.id),
+      rig.drive.childrenOf(root).filter((f) => f.name === "Projects").map((f) => f.id),
       [theirs],
     );
     assert.equal(only(rig.drive, "Flooring").parent, theirs);
@@ -424,7 +424,7 @@ describe("out-of-workspace operations are rejected", () => {
     await rig.app.settle();
     const plan = await proposal(rig);
     const invoice = only(rig.drive, "Northside invoice Oct 17.pdf").id;
-    rig.drive.touch(only(rig.drive, "Renovations").id, { parent: "root" }); // someone drags it into My Drive
+    rig.drive.touch(only(rig.drive, "Projects").id, { parent: "root" }); // someone drags it into My Drive
 
     const mark = rig.drive.calls.length;
     approve(rig, plan);
@@ -509,7 +509,7 @@ describe("out-of-workspace operations are rejected", () => {
       approve(rig, plan);
       await rig.app.settle();
       assert.equal((await planById(rig, plan.id)).status, "partial");
-      rig.drive.touch(only(rig.drive, "Renovations").id, { parent: "root" }); // later, someone drags Kiki's folder into My Drive
+      rig.drive.touch(only(rig.drive, "Projects").id, { parent: "root" }); // later, someone drags Kiki's folder into My Drive
 
       const mark = rig.drive.calls.length;
       rig.app.resumePlan(plan.id);
@@ -718,7 +718,7 @@ describe("a restart does not repeat a completed action", () => {
     await rig.app.settle();
 
     assert.equal((await planById(rig, plan.id)).status, "applied");
-    const renovations = rig.drive.childrenOf(only(rig.drive, WORKSPACE).id).filter((f) => f.name === "Renovations");
+    const renovations = rig.drive.childrenOf(only(rig.drive, WORKSPACE).id).filter((f) => f.name === "Projects");
     assert.equal(renovations.length, 1);
     const creates = callsSince(rig.drive, mark, "createFolder");
     assert.equal(creates.length, 4, "one call per planned folder, no retry");
@@ -731,7 +731,7 @@ describe("a restart does not repeat a completed action", () => {
     const first = newRig(t, { drive, db: dbPath });
     const plan = await proposed(first);
     const mark = drive.calls.length;
-    drive.crashOnFolderNamed = "Renovations";
+    drive.crashOnFolderNamed = "Projects";
     approve(first, plan);
     void first.app.settle();
     await drive.crashed;
@@ -742,7 +742,7 @@ describe("a restart does not repeat a completed action", () => {
     const second = await restarted(t, dbPath, drive);
     assert.equal((await planById(second, plan.id)).status, "applied");
     assert.deepEqual(
-      drive.childrenOf(only(drive, WORKSPACE).id).filter((f) => f.name === "Renovations").map((f) => f.id),
+      drive.childrenOf(only(drive, WORKSPACE).id).filter((f) => f.name === "Projects").map((f) => f.id),
       [generated],
     );
     assert.equal(callsSince(drive, mark, "createFolder").filter((c) => c.id === generated).length, 1, "created once, before the crash");
@@ -775,7 +775,7 @@ describe("undo", () => {
     const original = applied.ops
       .filter((o) => o.kind === "move_rename")
       .map((o) => ({ id: only(rig.drive, o.after!.name).id, name: o.before!.name, path: o.before!.path }));
-    const folders = ["Renovations", "Flooring", "Invoices", "Quotes"].map((n) => only(rig.drive, n).id);
+    const folders = ["Projects", "Flooring", "Invoices", "Quotes"].map((n) => only(rig.drive, n).id);
 
     const { planId } = rig.app.proposeUndo(applied.id);
     assert.equal(rig.app.proposeUndo(applied.id).planId, planId, "asking twice gives the same undo plan");
@@ -822,7 +822,7 @@ describe("undo", () => {
 // 8. Supplier inference ----------------------------------------------------------------------
 
 describe("supplier inference", () => {
-  test("a projectless invoice from a supplier already filed under Flooring is proposed into Renovations/Flooring/Invoices, citing the supplier", async (t) => {
+  test("a projectless invoice from a supplier already filed under Flooring is proposed into Projects/Flooring/Invoices, citing the supplier", async (t) => {
     const rig = newRig(t);
     await organized(rig);
     await rig.app.stageRevision("invoice");
@@ -903,14 +903,14 @@ describe("the project index", () => {
     await organized(rig);
     const applied = await appliedPlan(rig);
 
-    assert.equal(rig.drive.pathOf(only(rig.drive, INDEX).id), inWorkspace("Renovations/Flooring", INDEX));
+    assert.equal(rig.drive.pathOf(only(rig.drive, INDEX).id), inWorkspace("Projects/Flooring", INDEX));
     const rows = indexRows(rig.drive);
     const filed = applied.ops.filter((o) => o.kind === "move_rename").map((o) => `${o.after!.path}/${o.after!.name}`);
     assert.deepEqual(rows.map((r) => `${r.Folder}/${r["File name"]}`).sort(), filed.sort());
     assert.equal(rows.some((r) => /licence/i.test(r["File name"] ?? "")), false, "the business licence isn't part of the Flooring project");
     const quote = rows.find((r) => r.Reference === "Q-1042");
     assert.deepEqual(
-      [quote?.Type, quote?.["Contractor or supplier"], quote?.Date, quote?.Total, quote?.Status],
+      [quote?.Type, quote?.["Issuer or author"], quote?.Date, quote?.Total, quote?.Status],
       ["quote", "Oakline Flooring Co.", "2026-09-28", "$8,450.00", "Not yet confirmed"],
     );
   });

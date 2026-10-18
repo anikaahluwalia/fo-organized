@@ -2,7 +2,7 @@
   "name": "paper-chase",
   "version": "0.1.0",
   "private": true,
-  "description": "Paper Chase with Kiki + Fo: assemble rental application documents with approved outreach",
+  "description": "Kiki + Fo: organize Google Drive workspaces with approved changes",
   "type": "module",
   "engines": {
     "node": ">=24"

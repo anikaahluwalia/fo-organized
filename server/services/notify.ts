@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { approvalInstructions, parseApprovalReport, type ApprovalBinding } from "../domain/approval.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
-import { all, kvGet, kvSet, logEvent, one, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
+import { all, kvGet, kvSet, logEvent, one, tx, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
 import type { DocFacts } from "../domain/documents.ts";
 import { money } from "../domain/reconcile.ts";
 import { classifyDispatchReply, newReference, STATUS_LINES, stripStatusLines } from "../domain/outreach.ts";
 import { AppError, badRequest, conflict } from "../errors.ts";
 import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
-import type { FoTurn } from "../fo/types.ts";
 import type { Ctx } from "./context.ts";
 import { approvePlan } from "./plans.ts";
 import { requireWorkspace } from "./workspace.ts";
@@ -99,13 +99,12 @@ export interface ReplyState {
   contentHash: string;
   conversationId?: string;
   at?: string;
+  requestId?: string;
+  requestedAt?: string;
+  clarification?: string;
 }
 
 const REPLY_WINDOW_MS = 30 * 60_000;
-const APPROVE = /\b(go ahead|yes|yep|yeah|ok|okay|sure|do it|approve|approved|file it|sounds good|please do|go for it)\b/i;
-const DECLINE = /\b(no|nope|don'?t|do not|stop|wait|hold off|not now|later|cancel)\b/i;
-const OURS = /KIKI-STATUS|BEGIN APPROVED BODY|Kiki request|Answer from the user|This comes from Kiki/;
-
 export function replyState(ctx: Ctx, taskId: string): ReplyState | null {
   const raw = kvGet(ctx.db, `notify.reply.${taskId}`);
   return raw ? (JSON.parse(raw) as ReplyState) : null;
@@ -123,48 +122,6 @@ function saveReply(ctx: Ctx, taskId: string, state: ReplyState): void {
   kvSet(ctx.db, `notify.reply.${taskId}`, JSON.stringify(state));
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
-
-/** A turn that is Kiki's text (or quotes it): its opening words, or "go ahead" plus the document's reference. */
-export function anchorMatcher(text: string, reference: string | null): (t: FoTurn) => boolean {
-  const key = norm(text).slice(0, 60);
-  const ref = reference ? norm(reference) : null;
-  return (t) => {
-    const n = norm(t.text);
-    return n.includes(key) || (ref !== null && n.includes(ref) && n.includes("go ahead"));
-  };
-}
-
-/** Reads the user's answer from the turns that follow Kiki's text, if there is one yet. */
-export function findReply(turns: FoTurn[], isAnchor: (t: FoTurn) => boolean, sentAtMs: number): { verdict: "approved" | "declined"; text: string; source: "text_reply" | "relayed_by_fo" } | null {
-  // Only what follows the most recent matching text: an answer to an earlier text with the same
-  // wording isn't an answer to this one.
-  const idx = turns.findLastIndex(isAnchor);
-  if (idx === -1) return null;
-  for (const t of turns.slice(idx + 1)) {
-    if (t.at && Date.parse(t.at) < sentAtMs - 120_000) continue;
-    let said: string | null = null;
-    let source: "text_reply" | "relayed_by_fo" = "text_reply";
-    if (t.role === "user") {
-      if (OURS.test(t.text) || t.text.length > 300) continue;
-      said = t.text.trim();
-    } else {
-      // Fo's own send turn (it carries the status line) can't contain the user's answer, even if
-      // it restates the instruction ('if you reply "go ahead"...').
-      if (/^[ \t>*_`-]*KIKI-STATUS:/im.test(t.text)) continue;
-      // Fo relaying it: only a plain report that you answered, quote right after the verb, like
-      // `You replied "go ahead".` Not "you may reply", "you haven't replied", "Dana said".
-      const m = /\byou\s+(?:just\s+)?(?:replied|responded|wrote back|texted back|texted|said)(?:\s+(?:with|back))?[:,]?\s*["“]([^"”\n]{1,200})["”]/i.exec(t.text);
-      if (!m) continue;
-      said = m[1]!.trim();
-      source = "relayed_by_fo";
-    }
-    if (DECLINE.test(said)) return { verdict: "declined", text: said, source };
-    if (APPROVE.test(said)) return { verdict: "approved", text: said, source };
-  }
-  return null;
-}
-
 /**
  * Looks for the user's reply to Kiki's text (read-only: it only reads Fo conversations). An
  * approving reply approves exactly the plan version that was texted about, nothing newer.
@@ -174,50 +131,40 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   const task = getTask(ctx.db, taskId);
   if (!state || state.status !== "waiting" || !task) return;
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId);
-  if (!plan || plan.status !== "proposed" || plan.content_hash !== state.contentHash) {
+  if (!plan || !one(ctx.db, "SELECT id FROM workspaces WHERE id = ? AND active = 1", plan.workspace_id) || plan.status !== "proposed" || plan.content_hash !== state.contentHash) {
     // Approved in the app, set aside, or replaced: the reply no longer has anything to approve.
     saveReply(ctx, taskId, { ...state, status: "stale" });
     return;
   }
-  const sentAtMs = Date.parse(task.updated_at);
-  if (Date.now() - sentAtMs > REPLY_WINDOW_MS) {
+  const sentAtMs = Date.parse(state.requestedAt ?? task.created_at);
+  if (!state.requestId || !Number.isFinite(sentAtMs) || Date.now() - sentAtMs > REPLY_WINDOW_MS) {
     saveReply(ctx, taskId, { ...state, status: "expired" });
     return;
   }
-  const text = notifyText(ctx, taskId) ?? "";
-  const move = one<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' ORDER BY seq LIMIT 1", plan.id);
-  const doc = move?.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", move.doc_id) : undefined;
-  const reference = doc?.facts_json ? ((JSON.parse(doc.facts_json) as DocFacts).reference.value ?? null) : null;
-  const isAnchor = anchorMatcher(text, reference);
-  const candidates: { id: string; channel: string }[] = [state.conversationId, task.conversation_id].filter((c): c is string => Boolean(c)).map((id) => ({ id, channel: "known" }));
-  // Kiki's conversations about other texts carry the same kind of message (and Fo's report of
-  // the answer to that one): never read them as an answer to this text.
-  const otherTexts = new Set(
-    all<{ conversation_id: string }>(ctx.db, "SELECT conversation_id FROM fo_tasks WHERE kind = 'notify' AND id <> ? AND conversation_id IS NOT NULL", taskId).map((r) => r.conversation_id),
-  );
-  try {
-    for (const c of (await ctx.fo.listConversations()).slice(0, 4)) {
-      if (!candidates.some((x) => x.id === c.conversationId) && !otherTexts.has(c.conversationId)) candidates.push({ id: c.conversationId, channel: c.channel });
-    }
-  } catch {
-    // Listing is a convenience; the known conversations are still checked.
-  }
-  for (const { id: conversationId, channel } of candidates) {
-    let turns: FoTurn[];
+  if (["asking", "working"].includes(task.state)) return { rescheduleSeconds: 6 };
+  const binding: ApprovalBinding = { requestId: state.requestId, planId: state.planId, contentHash: state.contentHash };
+  // Only Fo's report on the mapped conversation can authorize execution. Inbound SMS chats
+  // are not reliably correlated by MCP; do not search unrelated chats for an affirmative.
+  const reports: { text: string; at?: string | null }[] = [];
+  if (task.final_response && task.state === "complete") reports.push({ text: task.final_response, at: task.updated_at });
+  if (task.conversation_id) {
     try {
-      turns = await ctx.fo.getConversation(conversationId);
+      const turns = await ctx.fo.getConversation(task.conversation_id);
+      reports.push(...turns.filter((t) => t.role === "assistant"));
     } catch {
-      continue;
+      // A completed ask_fo/get_fo_reply response is also a report from this mapped conversation.
     }
-    let reply = turns.some(isAnchor) ? findReply(turns, isAnchor, sentAtMs) : null;
-    if (turns.some(isAnchor) && state.conversationId !== conversationId && conversationId !== task.conversation_id) saveReply(ctx, taskId, { ...state, conversationId });
-    // Fallback for a text thread that doesn't show Kiki's message: a short "go ahead" texted after it was sent.
-    if (!reply && channel === "sms") {
-      const late = turns.filter((t) => t.role === "user" && t.at && Date.parse(t.at) >= sentAtMs && t.text.length <= 60 && !OURS.test(t.text));
-      const last = late[late.length - 1];
-      if (last && (DECLINE.test(last.text) || APPROVE.test(last.text))) reply = { verdict: DECLINE.test(last.text) ? "declined" : "approved", text: last.text.trim(), source: "text_reply" };
+  }
+  // Use the newest report, so a later clarification cannot be bypassed by an older approval.
+  for (const turn of reports.reverse()) {
+    if (turn.at && (!Number.isFinite(Date.parse(turn.at)) || Date.parse(turn.at) < sentAtMs)) continue;
+    const report = parseApprovalReport(turn.text, binding);
+    if (!report) continue;
+    if (report.decision === "clarification") {
+      saveReply(ctx, taskId, { ...state, clarification: report.userReply });
+      return { rescheduleSeconds: 6 };
     }
-    if (!reply) continue;
+    const reply = { verdict: report.decision, text: report.userReply, source: "relayed_by_fo" as const };
     const at = new Date().toISOString();
     if (reply.verdict === "declined") {
       saveReply(ctx, taskId, { ...state, status: "declined", text: reply.text, source: reply.source, at });
@@ -225,14 +172,16 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
       return;
     }
     try {
-      approvePlan(ctx, plan.id, { contentHash: state.contentHash, clientRequestId: `fo-reply-${taskId}` });
+      tx(ctx.db, () => {
+        approvePlan(ctx, plan.id, { contentHash: state.contentHash, clientRequestId: `fo-reply-${taskId}` });
+        saveReply(ctx, taskId, { ...state, status: "approved", text: reply.text, source: reply.source, at });
+        kvSet(ctx.db, `notify.approved_by_text.${plan.id}`, taskId);
+      });
     } catch (err) {
       saveReply(ctx, taskId, { ...state, status: err instanceof AppError ? "stale" : "failed", text: reply.text, source: reply.source, at });
       logEvent(ctx.db, plan.workspace_id, "fo_reply", `You replied "${reply.text}", but the plan had changed. Review it in Kiki.`);
       return;
     }
-    saveReply(ctx, taskId, { ...state, status: "approved", text: reply.text, source: reply.source, at });
-    kvSet(ctx.db, `notify.approved_by_text.${plan.id}`, taskId);
     logEvent(ctx.db, plan.workspace_id, "approved", `You replied "${reply.text}" to Fo's text. Kiki is filing it now.`);
     return;
   }
@@ -243,10 +192,11 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
 export function sendDoneText(ctx: Ctx, planId: string): void {
   if (!kvGet(ctx.db, `notify.approved_by_text.${planId}`) || kvGet(ctx.db, `notify.done.${planId}`)) return;
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", planId);
-  if (!plan || plan.status !== "applied") return;
+  if (!plan || !["applied", "partial", "failed", "stale"].includes(plan.status)) return;
   const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state = 'verified' ORDER BY seq", planId);
-  const text =
-    moves.length === 1
+  const text = plan.status !== "applied"
+    ? `Kiki: the approved plan stopped (${plan.status}). ${all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state = 'verified'", planId).length} steps were verified in Drive. The remaining changes need review; I have not marked the plan done.`
+    : moves.length === 1
       ? `Kiki: done. It's filed in ${moves[0]!.new_path} as "${moves[0]!.new_name}".`
       : `Kiki: done. I filed ${moves.length} documents and updated the index.`;
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
@@ -260,6 +210,12 @@ export function sendDoneText(ctx: Ctx, planId: string): void {
 export function notifyHandler(ctx: Ctx): TaskHandler {
   return {
     onComplete(task, response) {
+      const state = replyState(ctx, task.id);
+      const report = state?.requestId ? parseApprovalReport(response, { requestId: state.requestId, planId: state.planId, contentHash: state.contentHash }) : null;
+      if (report) {
+        ctx.jobs.enqueue("text_reply", `text_reply:${task.id}`, { taskId: task.id });
+        return { question: report.decision === "clarification" ? "Fo needs clarification: " + report.userReply : null };
+      }
       const c = classifyDispatchReply(response);
       if (c === "sent") {
         if (notifyPurpose(ctx, task.id) === "find" && replyState(ctx, task.id)?.status === "waiting") {
@@ -270,7 +226,11 @@ export function notifyHandler(ctx: Ctx): TaskHandler {
       if (c === "not_sent") return { question: null };
       return { question: stripStatusLines(response) || response };
     },
-    onStateChange() {},
+    onStateChange(task) {
+      if (replyState(ctx, task.id)?.status === "waiting" && ["complete", "needs_user_input"].includes(task.state)) {
+        ctx.jobs.enqueue("text_reply", `text_reply:${task.id}`, { taskId: task.id }, 4);
+      }
+    },
   };
 }
 
@@ -307,7 +267,7 @@ function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; copies: n
   return { filing, copies: moves.length - filing.length };
 }
 
-export function newFindText(ctx: Ctx, plan: PlanRow): string {
+function findSummary(ctx: Ctx, plan: PlanRow): string {
   const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
   const { filing, copies } = filingMoves(ctx, plan.id);
   const also = copies ? ` (Kiki would also set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}; nothing is deleted.)` : "";
@@ -320,11 +280,25 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
   return `Kiki: ${filing.length} new documents in "${ws.name}" are ready to file.${also} Reply "go ahead" and I'll file them.`;
 }
 
+/** Complete scope is supplied to Fo and the account holder, including renames and version changes. */
+export function newFindText(ctx: Ctx, plan: PlanRow): string {
+  const ops = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state <> 'excluded' ORDER BY seq", plan.id);
+  const changes = ops.map((op) => {
+    if (op.kind === "move_rename") return `Move "${op.pre_name}" from "${op.pre_path || "workspace folder"}" to "${op.new_path}/${op.new_name}".`;
+    if (op.kind === "create_folder") return `Create folder "${op.folder_path}".`;
+    if (op.kind === "write_index") return `Update index "${op.folder_path}/${op.new_name}".`;
+    const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : null;
+    const file = doc ? one<{ name: string }>(ctx.db, "SELECT name FROM files WHERE workspace_id = ? AND file_id = ?", plan.workspace_id, doc.file_id) : null;
+    return `Mark "${file?.name ?? "document"}" as ${op.target_status}. ${op.reason}`;
+  });
+  return `${findSummary(ctx, plan)}\n\nProposed changes (version ${plan.version}):\n${changes.map((c) => "- " + c).join("\n")}\nNothing is deleted. You can answer Fo naturally, ask a question, or decline.`;
+}
+
 /** Standing permission, texts to the account holder only: one text per new proposal. */
 export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   if (!autoTextEnabled(ctx)) return;
   // Setting copies aside is housekeeping, not news: it waits in the app, no text.
-  if (filingMoves(ctx, plan.id).filing.length === 0) return;
+  if (filingMoves(ctx, plan.id).filing.length === 0 && !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND kind = 'set_status' AND state <> 'excluded'", plan.id)) return;
   // One text per distinct proposal, even if it gets re-saved as a new version.
   if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
   kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);
@@ -333,7 +307,8 @@ export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
   kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "find");
-  saveReply(ctx, taskId, { status: "waiting", text: null, source: null, planId: plan.id, contentHash: plan.content_hash });
+  const binding: ApprovalBinding = { requestId: randomUUID(), planId: plan.id, contentHash: plan.content_hash };
+  saveReply(ctx, taskId, { status: "waiting", text: null, source: null, ...binding, requestedAt: new Date().toISOString() });
   logEvent(ctx.db, plan.workspace_id, "fo_text", `Kiki asked ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to text you about it.`);
-  void ctx.engine.start(taskId, message(text, newReference(), "text", true)).catch(() => undefined);
+  void ctx.engine.start(taskId, message(text, newReference(), "text") + "\n\n" + approvalInstructions(binding)).catch(() => undefined);
 }

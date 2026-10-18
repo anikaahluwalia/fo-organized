@@ -290,9 +290,9 @@ class Execution {
   private recordProject(op: PlanOpRow): void {
     if (!op.doc_id) return;
     const [category, project] = (op.new_path ?? "").split("/");
-    if (this.plan.kind !== "undo" && category === CATEGORY && project) {
+    if (this.plan.kind !== "undo" && (category === CATEGORY || category === "Renovations") && project) {
       run(this.ctx.db, "UPDATE documents SET project_id = ?, updated_at = ? WHERE id = ? AND project_id IS NULL", ensureProject(this.ctx.db, this.ws.id, project).id, now(), op.doc_id);
-    } else if (this.plan.kind === "undo" && category !== CATEGORY) {
+    } else if (this.plan.kind === "undo" && category !== CATEGORY && category !== "Renovations") {
       run(this.ctx.db, "UPDATE documents SET project_id = NULL, updated_at = ? WHERE id = ? AND json_extract(facts_json, '$.project.value') IS NULL", now(), op.doc_id);
     }
   }
@@ -324,7 +324,7 @@ class Execution {
   private async writeIndex(op: PlanOpRow): Promise<void> {
     this.markRunning(op);
     const projectName = (op.folder_path ?? "").split("/")[1] ?? "";
-    const project = one<ProjectRow>(this.ctx.db, "SELECT * FROM projects WHERE workspace_id = ? AND category = ? AND name = ?", this.ws.id, CATEGORY, projectName);
+    const project = one<ProjectRow>(this.ctx.db, "SELECT * FROM projects WHERE workspace_id = ? AND name = ? ORDER BY created_at, id LIMIT 1", this.ws.id, projectName);
     if (!project) return this.set(op, "failed", { error: "That project isn't in the index." });
     const parentId = await this.resolveParent(op);
     const csv = buildIndexCsv(this.ctx.db, project, now());
