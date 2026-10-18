@@ -26,6 +26,8 @@ export interface PlaceLesson {
   /** Filings this rests on. */
   examples: number;
   updatedAt: string;
+  /** You said Kiki may file these on her own. */
+  auto?: boolean;
 }
 
 export const PatternSchema = z.object({

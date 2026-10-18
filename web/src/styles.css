@@ -824,3 +824,4 @@ details[open] > summary {
 .learned { list-style: none; padding: 0; margin: 0; }
 .learned li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
 .learned li:first-child { border-top: 0; }
+.learned-actions { display: flex; gap: 6px; flex-shrink: 0; }

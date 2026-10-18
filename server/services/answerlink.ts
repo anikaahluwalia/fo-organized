@@ -14,7 +14,7 @@ import { proposalLines } from "./proposal.ts";
 import { notFound } from "../errors.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
-import { alreadyFiled, displayFolder, isQuestion, LINK_LINE, LINK_ONLY, LINK_ONLY_WHERE, LINK_OR_TEXT, LINK_OR_TEXT_WHERE, notifyText, unplacedNotes, replyState, replyWindowMs } from "./notify.ts";
+import { alreadyFiled, displayFolder, isQuestion, LINK_LINE, LINK_ONLY, LINK_ONLY_WHERE, LINK_OR_TEXT, LINK_OR_TEXT_WHERE, notifyPurpose, notifyText, unplacedNotes, replyState, replyWindowMs } from "./notify.ts";
 import { replyToTask } from "./outreach.ts";
 
 const key = (token: string) => `answer.link.${createHash("sha256").update(token).digest("hex")}`;
@@ -50,6 +50,15 @@ interface Status {
 function settled(ctx: Ctx, taskId: string): Status | null {
   const r = replyState(ctx, taskId);
   if (!r) return { title: "Nothing to answer", text: "There's nothing waiting for you here.", done: false };
+  if (notifyPurpose(ctx, taskId) === "offer") {
+    // An offer to file a kind of document on her own: there's no plan, only that lesson.
+    if (r.status === "approved") return { title: "You said yes", text: "Kiki will file these on her own and text you each time. You can stop that in the Kiki app.", next: "You can close this tab.", done: true };
+    if (r.status === "declined") return { title: "Got it", text: "Kiki will keep asking you first.", next: "You can close this tab.", done: true };
+    const l = one<{ auto: number }>(ctx.db, "SELECT auto FROM lessons WHERE id = ?", r.planId);
+    if (r.status !== "waiting" || !l || l.auto) return { title: "This one's settled", text: "You can change it in the Kiki app.", done: false };
+    if ((r.answers?.length ?? 0) > 0 && ["pending", "asking", "working"].includes(getTask(ctx.db, taskId)?.state ?? "")) return { title: "Got it!", text: `You said "${r.answers!.at(-1)!.text}".`, next: "You can close this tab. Fo will let you know.", done: true };
+    return null;
+  }
   const plan = one<PlanRow>(ctx.db, "SELECT status, content_hash FROM plans WHERE id = ?", r.planId);
   if (r.status === "approved") {
     return plan?.status === "applied"

@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS lessons (
   place TEXT,
   examples INTEGER NOT NULL DEFAULT 1,
   from_plan_id TEXT,
+  -- You said Kiki may file these on her own (standing permission), and whether she offered.
+  auto INTEGER NOT NULL DEFAULT 0,
+  offer TEXT CHECK (offer IN ('offered', 'declined')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -354,6 +357,8 @@ export function openDb(file: string): Db {
 function migrate(db: Db): void {
   const has = (table: string, column: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
   if (!has("outreach_versions", "kind")) db.exec("ALTER TABLE outreach_versions ADD COLUMN kind TEXT NOT NULL DEFAULT 'ask_final' CHECK (kind IN ('ask_final', 'request_copy'))");
+  if (!has("lessons", "auto")) db.exec("ALTER TABLE lessons ADD COLUMN auto INTEGER NOT NULL DEFAULT 0");
+  if (!has("lessons", "offer")) db.exec("ALTER TABLE lessons ADD COLUMN offer TEXT CHECK (offer IN ('offered', 'declined'))");
   if (!has("outreach_versions", "request_json")) db.exec("ALTER TABLE outreach_versions ADD COLUMN request_json TEXT");
 }
 
@@ -507,6 +512,8 @@ export interface LessonRow {
   place: string | null;
   examples: number;
   from_plan_id: string | null;
+  auto: number;
+  offer: "offered" | "declined" | null;
   created_at: string;
   updated_at: string;
 }

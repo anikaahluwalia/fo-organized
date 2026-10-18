@@ -279,7 +279,7 @@ export interface EventView {
 export interface NotificationView {
   taskId: string;
   /** "decide": Fo is bringing you a proposal to decide on, here in Kiki. */
-  purpose: "find" | "done" | "summary" | "decide";
+  purpose: "find" | "done" | "summary" | "decide" | "offer";
   /** The plan the text was about. */
   planId: string | null;
   reply: {
@@ -326,6 +326,10 @@ export interface LessonView {
   /** Filings it rests on. */
   examples: number;
   since: string;
+  /** Kiki files these on her own (you said so); she texts you after. */
+  auto: boolean;
+  /** Kiki offered to, and you haven't answered. */
+  offered: boolean;
 }
 
 export interface AppView {

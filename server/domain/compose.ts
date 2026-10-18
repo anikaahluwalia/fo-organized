@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { hasMarker } from "./inert.ts";
 
-export type Situation = "new" | "revised" | "unchanged" | "question" | "done" | "stopped";
+export type Situation = "new" | "revised" | "unchanged" | "question" | "done" | "stopped" | "auto";
 
 export interface ComposeItem {
   n: number;
@@ -66,6 +66,7 @@ The text:
   - question: asks where the file should go, and may suggest up to two "options". A yes doesn't answer that: ask them to reply with a folder (or, with a link, to tap to pick one), never to "reply yes".
   - a file of kind "copy": says it's a copy of a file that's already filed and asks whether to set it aside.
   - done: says it's done and where it went. stopped: says it couldn't finish, with the numbers from verified.
+  - auto: says Kiki filed it on her own, as they allowed for this kind of document, and where; and that they can stop that in the Kiki app.
 - When alsoTidying is set, says in a few words that Kiki would also tidy that many files already filed, with the number.
 - Ends with how to answer: for answer "reply_or_link", something like "Reply yes, or tap to change it:"; for "link", something like "Tap to answer:" (and never invites a text reply); for "reply_or_app", something like "Reply yes, or answer in the Kiki app." (there's no link). Kiki adds any link right after your text, so never write a link. For done and stopped, nothing to answer.`;
 
@@ -103,6 +104,7 @@ export function checkComposed(facts: ComposeFacts, c: Composed): string[] {
   if (hasMarker(text) || /https?:\/\/|www\./i.test(text)) problems.push("has a link or a protocol line");
   if (/projects\/|version \d|\bindex\b/i.test(text)) problems.push("has a path, a version or the index");
   if (PROPOSING.includes(facts.situation) && /\b(done|i've|i have|has been|have been|is now|are now|all set)\b/i.test(text)) problems.push("says it's done before you've said yes");
+  if (facts.situation === "auto" && !/\b(own|automatic)/i.test(text)) problems.push("doesn't say Kiki did it on her own");
   if (facts.situation === "question" && !text.includes("?")) problems.push("doesn't ask where it goes");
   if (facts.situation === "question" && /\b(reply|say|answer) (with )?(a )?yes\b/i.test(text)) problems.push("asks for a yes to a question");
   if (facts.answer === "link" && /\breply\b/i.test(text)) problems.push("invites a text reply that can't be read");
@@ -168,6 +170,7 @@ export function plainText(facts: ComposeFacts): string {
   const ask = facts.answer === "reply_or_link" ? " Reply yes, or tap to change it:" : facts.answer === "link" ? " Tap to answer:" : facts.answer === "reply_or_app" ? " Reply yes, or answer in the Kiki app." : "";
   const askWhere = facts.answer === "reply_or_link" ? " Reply with a folder, or tap to pick one:" : facts.answer === "link" ? " Tap to pick a folder:" : " Reply with a folder, or answer in the Kiki app.";
 
+  if (facts.situation === "auto") return `Kiki: I filed ${list(files)} in ${new Set(files.map((i) => i.folder)).size === 1 && files[0]?.folder ? files[0].folder : where} on my own, as you allowed. You can stop that in the Kiki app.`;
   if (facts.situation === "done") {
     const all = files.length ? files : facts.items;
     const place = new Set(files.map((i) => i.folder)).size === 1 && files[0]!.folder ? files[0]!.folder : where;

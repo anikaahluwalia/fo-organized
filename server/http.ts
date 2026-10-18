@@ -112,6 +112,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   route("POST", "/api/plans/:id/ask-fo", ([id]) => app.askThroughFo(id!));
   route("POST", "/api/plans/:id/refresh", ([id]) => app.refreshPlan(id!));
   route("POST", "/api/lessons/:id/forget", ([id]) => app.forgetLesson(id!));
+  route("POST", "/api/lessons/:id/alone", ([id], b) => app.setFilesAlone(id!, b.on === true));
   route("POST", "/api/plans/:id/place", ([id], b) => app.placeFile(id!, str(b, "fileId") ?? "", str(b, "place") ?? ""));
   route("POST", "/api/documents/:id/accept", ([id], b) => app.acceptQuote(id!, b.accepted === true));
   route("POST", "/api/documents/:id/outreach", ([id], b) =>

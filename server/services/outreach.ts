@@ -1,5 +1,6 @@
 import { approvalInstructions } from "../domain/approval.ts";
-import { replyState, replyWindowMs, saveReply } from "./notify.ts";
+import { notifyPurpose, replyState, replyWindowMs, saveReply } from "./notify.ts";
+import { offerHash } from "./lessons.ts";
 import { randomUUID } from "node:crypto";
 import {
   all,
@@ -300,8 +301,14 @@ export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<v
   if (task.kind === "notify") {
     const approval = replyState(ctx, taskId);
     if (approval?.requestId) {
-      const plan = one<import("../db.ts").PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", approval.planId);
-      if (approval.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== approval.contentHash) throw conflict("That proposal is no longer awaiting approval.");
+      if (notifyPurpose(ctx, taskId) === "offer") {
+        // An offer to file a kind of document on her own: still open while that lesson is as offered.
+        const l = one<import("../db.ts").LessonRow>(ctx.db, "SELECT * FROM lessons WHERE id = ?", approval.planId);
+        if (approval.status !== "waiting" || !l || l.auto || offerHash(l) !== approval.contentHash) throw conflict("That offer isn't waiting for your answer anymore.");
+      } else {
+        const plan = one<import("../db.ts").PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", approval.planId);
+        if (approval.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== approval.contentHash) throw conflict("That proposal is no longer awaiting approval.");
+      }
       if (!approval.requestedAt || Date.now() - Date.parse(approval.requestedAt) > replyWindowMs(ctx, taskId)) throw conflict("That approval request expired. Refresh the proposal first.");
       // Fo is still reading your last answer (a second tap, say): that one stands, nothing is sent twice.
       if (["pending", "asking", "working"].includes(task.state)) throw conflict(READING_ANSWER);

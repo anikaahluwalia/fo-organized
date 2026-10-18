@@ -43,6 +43,7 @@ const CASES: { id: string; facts: ComposeFacts }[] = [
   { id: "revised", facts: { situation: "revised", workspace: ws, answer: "reply_or_link", items: [{ ...timesheet, folder: "Work › Other documents" }] } },
   { id: "unchanged", facts: { situation: "unchanged", workspace: ws, answer: "reply_or_link", items: [timesheet], note: "Those changes are already in the proposal." } },
   { id: "done", facts: { situation: "done", workspace: ws, answer: null, items: [timesheet], verified: { done: 4, total: 4 } } },
+  { id: "auto", facts: { situation: "auto", workspace: ws, answer: null, items: [timesheet], verified: { done: 3, total: 3 } } },
   { id: "stopped", facts: { situation: "stopped", workspace: ws, answer: null, items: [invoice], verified: { done: 2, total: 3 } } },
 ];
 

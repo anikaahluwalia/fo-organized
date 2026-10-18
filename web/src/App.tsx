@@ -589,10 +589,19 @@ function Learned({ view, act }: { view: AppView; act: ReturnType<typeof useActio
             <span>
               {l.text}
               {l.examples > 1 && <span className="hint"> ({l.examples} times)</span>}
+              {l.auto && <span className="hint" style={{ display: "block" }}>She files these on her own and texts you after.</span>}
+              {!l.auto && l.offered && <span className="hint" style={{ display: "block" }}>Kiki offered to file these on her own.</span>}
             </span>
-            <button className="btn btn--small btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`forget-${l.id}`, () => post(`/api/lessons/${l.id}/forget`))}>
-              Forget
-            </button>
+            <span className="learned-actions">
+              {l.kind === "place" && (
+                <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`alone-${l.id}`, () => post(`/api/lessons/${l.id}/alone`, { on: !l.auto }))}>
+                  {l.auto ? "Ask me first" : l.offered ? "Yes, on her own" : "File on her own"}
+                </button>
+              )}
+              <button className="btn btn--small btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`forget-${l.id}`, () => post(`/api/lessons/${l.id}/forget`))}>
+                Forget
+              </button>
+            </span>
           </li>
         ))}
       </ul>

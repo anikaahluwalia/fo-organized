@@ -27,7 +27,7 @@ import { approvePlan, autoPropose, discardPlan, placeFile, proposeOrganize, prop
 import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
 import { refreshPlan } from "./services/refresh.ts";
 import { textFromWebhook, watchTextReplies } from "./services/textreply.ts";
-import { forgetLesson, learnFromPlan } from "./services/lessons.ts";
+import { fileAlone, forgetLesson, learnFromPlan, setFilesAlone } from "./services/lessons.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, composeAndSend, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText, reopenQuestions } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
@@ -76,7 +76,8 @@ export function createApp(deps: AppDeps) {
     await pickUpArrivals(ctx, wsId);
     pickUpCopies(ctx, wsId);
     const proposal = autoPropose(ctx);
-    if (proposal?.created) autoNotifyProposal(ctx, proposal.plan);
+    // A kind of document you said she may file on her own is filed now (she texts after); the rest is asked.
+    if (proposal?.created && !fileAlone(ctx, proposal.plan)) autoNotifyProposal(ctx, proposal.plan);
   });
   jobs.register("execute_plan", async (p, job) => {
     await executePlan(ctx, String(p.planId), job.attempts + 1);
@@ -149,6 +150,10 @@ export function createApp(deps: AppDeps) {
     /** Kiki forgets what she learned: the next proposal is made without it. */
     forgetLesson(id: string) {
       forgetLesson(ctx, id);
+    },
+    /** You let Kiki file a kind of document on her own, or take that back. */
+    setFilesAlone(id: string, on: boolean) {
+      setFilesAlone(ctx, id, on);
     },
     updateSettings(input: { userName?: string; autoText?: boolean }) {
       if (input.userName !== undefined) setUserName(db, input.userName);

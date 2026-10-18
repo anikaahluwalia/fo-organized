@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { inert } from "../domain/inert.ts";
 import { approvalInstructions, isPlainYes, parseApprovalReport, sameAnswer, type ApprovalBinding } from "../domain/approval.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
-import { all, kvGet, kvSet, logEvent, now, one, run, tx, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
+import { all, kvGet, kvSet, logEvent, now, one, run, tx, type DocumentRow, type LessonRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
 import type { DocFacts } from "../domain/documents.ts";
 import { money } from "../domain/reconcile.ts";
 import { classifyDispatchReply, newReference, STATUS_LINES } from "../domain/outreach.ts";
@@ -15,6 +15,7 @@ import { isPersonalId, withoutIdNumbers } from "../domain/naming.ts";
 import { chooseText, plainText, type ComposeFacts, type ComposeItem, type Situation } from "../domain/compose.ts";
 import { proposalItems, proposalLines } from "./proposal.ts";
 import { requireWorkspace } from "./workspace.ts";
+import { offerHash, settleOffer } from "./lessons.ts";
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -64,7 +65,7 @@ export function notifyPreview(ctx: Ctx): { text: string; contentHash: string; pl
   return { text, contentHash: hash(text), planId: plan.id };
 }
 
-function message(text: string, reference: string, channel: "note" | "text" = "note", expectReply = false, context = ""): string {
+export function message(text: string, reference: string, channel: "note" | "text" = "note", expectReply = false, context = ""): string {
   const how =
     channel === "text"
       ? "Please text me (an SMS to my phone, nobody else) this exact message. Send only the text between the two marker lines, never the marker lines themselves:"
@@ -116,8 +117,8 @@ export function notifyText(ctx: Ctx, taskId: string): string | null {
   return kvGet(ctx.db, `notify.text.${taskId}`) ?? null;
 }
 
-export function notifyPurpose(ctx: Ctx, taskId: string): "find" | "done" | "summary" | "decide" {
-  return (kvGet(ctx.db, `notify.purpose.${taskId}`) as "find" | "done" | "summary" | "decide" | undefined) ?? "summary";
+export function notifyPurpose(ctx: Ctx, taskId: string): "find" | "done" | "summary" | "decide" | "offer" {
+  return (kvGet(ctx.db, `notify.purpose.${taskId}`) as "find" | "done" | "summary" | "decide" | "offer" | undefined) ?? "summary";
 }
 
 // Approving by replying to Fo's text ---------------------------------------------------------
@@ -183,8 +184,15 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   const state = replyState(ctx, taskId);
   const task = getTask(ctx.db, taskId);
   if (!state || state.status !== "waiting" || !task) return;
-  const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId);
-  if (!plan || !one(ctx.db, "SELECT id FROM workspaces WHERE id = ? AND active = 1", plan.workspace_id) || plan.status !== "proposed" || plan.content_hash !== state.contentHash) {
+  // An offer to file a kind of document on her own: bound to that lesson as it stood when offered.
+  const offer = notifyPurpose(ctx, taskId) === "offer" ? one<LessonRow>(ctx.db, "SELECT * FROM lessons WHERE id = ?", state.planId) : null;
+  if (notifyPurpose(ctx, taskId) === "offer" && (!offer || offer.auto || offerHash(offer) !== state.contentHash)) {
+    saveReply(ctx, taskId, { ...state, status: "stale" });
+    return;
+  }
+  // (For an offer there's no plan: the offer is settled below before anything uses it.)
+  const plan = (offer ? { workspace_id: offer.workspace_id } : one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId)) as PlanRow;
+  if (!offer && (!plan || !one(ctx.db, "SELECT id FROM workspaces WHERE id = ? AND active = 1", plan.workspace_id) || plan.status !== "proposed" || plan.content_hash !== state.contentHash)) {
     // Approved in the app, set aside, or replaced: the reply no longer has anything to approve.
     saveReply(ctx, taskId, { ...state, status: "stale" });
     return;
@@ -236,6 +244,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
       state.answers = [...state.answers!.slice(0, -1), answer];
       saveReply(ctx, taskId, state);
     }
+    if (offer) return settleOffer(ctx, taskId, state, answer, report, offer);
     if (report.decision === "clarification") {
       saveReply(ctx, taskId, { ...state, clarification: report.userReply });
       // Fo may report a change you asked for as a clarification. Kiki reads your words once: if they
@@ -300,7 +309,9 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
  */
 export function sendDoneText(ctx: Ctx, planId: string): void {
   const requestTask = kvGet(ctx.db, `notify.approved_by_text.${planId}`);
-  if (!requestTask) return;
+  // Filed on your standing OK (texts on): Kiki says what she did, after.
+  const standing = Boolean(kvGet(ctx.db, `standing.plan.${planId}`)) && autoTextEnabled(ctx);
+  if (!requestTask && !standing) return;
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", planId);
   if (!plan || !["applied", "partial", "failed", "stale"].includes(plan.status)) return;
   // One text per outcome: a "done" can still follow a "stopped" once Try again finishes it.
@@ -310,11 +321,12 @@ export function sendDoneText(ctx: Ctx, planId: string): void {
   kvSet(ctx.db, `notify.done.${planId}.${outcome}`, taskId);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "done");
   logEvent(ctx.db, plan.workspace_id, "fo_text", `Kiki asked ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to text you that it's done.`);
-  const conversationId = getTask(ctx.db, requestTask)?.conversation_id ?? undefined;
+  const conversationId = requestTask ? (getTask(ctx.db, requestTask)?.conversation_id ?? undefined) : undefined;
   const context = conversationId
     ? `It's the outcome of "${inert(plan.title)}" (version ${plan.version}), the proposal you brought me in this conversation and whose answer you reported to Kiki: Kiki ${plan.status === "applied" ? "applied it and read every change back from Google Drive" : "started applying it and read back from Google Drive what got done"}, and the text above is that verified result.`
     : undefined;
-  queueText(ctx, taskId, { planId, situation: outcome, link: null, conversationId, context, bind: false }, plainText(resultFacts(ctx, plan)));
+  const situation = outcome === "done" && !requestTask ? "auto" : outcome;
+  queueText(ctx, taskId, { planId, situation, link: null, conversationId, context, bind: false }, plainText(resultFacts(ctx, plan, situation === "auto")));
 }
 
 /** Fo's reply as you should read it: its own words, without Kiki's status and decision lines. */
@@ -564,7 +576,7 @@ export function proposalFacts(ctx: Ctx, plan: PlanRow, situation: Situation, lin
 }
 
 /** A plan you approved by text, as facts for the text that says how it went. */
-function resultFacts(ctx: Ctx, plan: PlanRow): ComposeFacts {
+function resultFacts(ctx: Ctx, plan: PlanRow, auto = false): ComposeFacts {
   const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
   const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state = 'verified' ORDER BY seq", plan.id);
   const live = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id);
@@ -575,7 +587,7 @@ function resultFacts(ctx: Ctx, plan: PlanRow): ComposeFacts {
     ...describe(ctx, op.pre_name ?? op.new_name ?? "", op.doc_id, op.file_id, plan.workspace_id),
     folder: inert(displayFolder(op.new_path)),
   }));
-  return { situation: plan.status === "applied" ? "done" : "stopped", workspace: inert(ws.name), items, answer: null, verified: { done: live.filter((o) => o.state === "verified").length, total: live.length } };
+  return { situation: plan.status !== "applied" ? "stopped" : auto ? "auto" : "done", workspace: inert(ws.name), items, answer: null, verified: { done: live.filter((o) => o.state === "verified").length, total: live.length } };
 }
 
 /** How a text is to be written and sent, kept until the job sends it. */
@@ -603,7 +615,7 @@ function queueText(ctx: Ctx, taskId: string, spec: TextSpec, fallback: string): 
 }
 
 function factsFor(ctx: Ctx, plan: PlanRow, spec: TextSpec): ComposeFacts | null {
-  return spec.situation === "done" || spec.situation === "stopped" ? resultFacts(ctx, plan) : proposalFacts(ctx, plan, spec.situation, spec.link, spec.note);
+  return spec.situation === "done" || spec.situation === "stopped" || spec.situation === "auto" ? resultFacts(ctx, plan, spec.situation === "auto") : proposalFacts(ctx, plan, spec.situation, spec.link, spec.note);
 }
 
 /** The job: writes the queued text (Claude, checked; Kiki's own if not), then has Fo send it. */
