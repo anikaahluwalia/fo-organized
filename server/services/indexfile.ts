@@ -49,9 +49,26 @@ export function projectIndexRows(db: Db, project: ProjectRow): IndexRow[] {
 export function buildIndexCsv(db: Db, project: ProjectRow, verifiedAt: string): string {
   const header = ["Type", "Status", "Contractor or supplier", "Reference", "Date", "Total", "Accepted by you", "File name", "Folder", "Notes"];
   const lines = [header.map(csvCell).join(",")];
+  // References anywhere in the folder, so a row can say when a document it names is missing.
+  const key = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/[^A-Z0-9]/g, "") : "");
+  const onFile = new Set<string>();
+  for (const d of all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ? AND read_status = 'read' AND facts_json IS NOT NULL", project.workspace_id)) {
+    const f = JSON.parse(d.facts_json!) as DocFacts;
+    if (f.reference.value) onFile.add(key(f.reference.value));
+    if (f.revision.revisesReference) onFile.add(key(f.revision.revisesReference));
+  }
   for (const row of projectIndexRows(db, project)) {
     const f = row.facts;
-    const notes = [row.latestReceived && f.docType === "quote" ? "Latest received from this contractor" : null, f.revision.isRevision ? (f.revision.label ?? "Revision") : null].filter(Boolean).join("; ");
+    const notes = [
+      row.latestReceived && f.docType === "quote" ? "Latest received from this contractor" : null,
+      f.revision.isRevision ? (f.revision.label ?? "Revision") : null,
+      f.validUntil?.value ? `Valid until ${f.validUntil.value}` : null,
+      ...(f.refersTo ?? [])
+        .filter((r) => key(r.reference) !== key(f.revision.revisesReference) && !onFile.has(key(r.reference)))
+        .map((r) => `Refers to ${r.reference}, which isn't in the folder`),
+    ]
+      .filter(Boolean)
+      .join("; ");
     lines.push(
       [
         f.docType,

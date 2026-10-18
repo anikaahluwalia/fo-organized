@@ -52,8 +52,10 @@ export function deriveKiki(v: Omit<AppView, "kiki">): KikiView {
   const watching = dispatches.find((d) => d.watch?.state === "watching" && !v.updates.some((u) => u.watchId === d.watch!.id && (u.status === "proposed" || u.status === "resolved")));
   if (watching) return { state: "waiting", label: `Waiting for ${watching.recipientName} to reply.`, detail: "I'm following the Fo conversation and will pick up the answer." };
 
+  const look = v.attention.length;
+  const lookLine = look ? `${look} thing${look === 1 ? "" : "s"} in the folder could use a look.` : null;
   const latest = [...live].sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""))[0];
-  if (latest?.status === "applied") return { state: "verified", label: "All done.", detail: latest.title };
+  if (latest?.status === "applied") return { state: "verified", label: "All done.", detail: lookLine ?? latest.title };
   if (!v.inventory.files.length) return { state: "idle", label: "Ready." };
-  return { state: "idle", label: "Ready when you are." };
+  return { state: "idle", label: "Ready when you are.", ...(lookLine ? { detail: lookLine } : {}) };
 }

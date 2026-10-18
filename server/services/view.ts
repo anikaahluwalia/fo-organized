@@ -48,6 +48,7 @@ import { getUserName } from "./outreach.ts";
 import { activeWorkspace, docFacts } from "./workspace.ts";
 import { notifyOutcome, notifyPurpose, notifyText, replyState } from "./notify.ts";
 import { foundAttachments } from "./attachments.ts";
+import { attentionItems } from "./attention.ts";
 
 const STATUS_WORD: Record<string, string> = { current: "current", superseded: "superseded", unresolved: "not yet confirmed", proposed: "proposed" };
 
@@ -153,6 +154,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       inventory: empty,
       plans: [],
       index: [],
+      attention: [],
       outreach: [],
       updates: [],
       activity: { events: all<EventRow>(db, "SELECT * FROM events WHERE workspace_id IS NULL ORDER BY id DESC LIMIT 50").map((e) => ({ at: e.at, kind: e.kind, message: e.message })), turns: [] },
@@ -409,6 +411,16 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
     },
     plans: planViews,
     index,
+    attention: attentionItems(ctx, ws.id).map((i) => ({
+      key: i.key,
+      kind: i.kind,
+      project: i.project,
+      title: i.title,
+      detail: i.detail,
+      evidence: i.evidence,
+      // Offer "ask" only where the index would (a quote not already being asked about).
+      askDocId: i.askDocId && index.some((p) => p.rows.some((r) => r.docId === i.askDocId && r.canAsk)) ? i.askDocId : null,
+    })),
     outreach,
     updates,
     activity: {

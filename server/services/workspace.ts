@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { all, kvGet, kvSet, logEvent, now, one, run, tx, type Db, type DocumentRow, type FileOrigin, type FileRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
 import { DEMO_WORKSPACE_NAME, demoFileContent, MESSY_FOLDER, NEW_SUPPLIER_INVOICE, REVISED_QUOTE, SECOND_REVISION, type DemoDoc } from "../demo/renovation.ts";
-import { toFacts, type DocFacts } from "../domain/documents.ts";
+import { FACTS_VERSION, toFacts, type DocFacts } from "../domain/documents.ts";
 import { CATEGORY } from "../domain/naming.ts";
 import { join } from "../domain/plan.ts";
 import { badRequest, conflict } from "../errors.ts";
@@ -227,6 +227,44 @@ export async function runInventory(ctx: Ctx, wsId: string): Promise<{ seen: numb
   }
 }
 
+/**
+ * Adds the fields newer facts have to a document read earlier. Unchanged content keeps every
+ * fact Kiki already had (so nothing gets renamed or moved); changed content is a normal re-read.
+ */
+async function upgradeFacts(ctx: Ctx, doc: DocumentRow): Promise<boolean> {
+  const prior = docFacts(doc)!;
+  const markDone = () =>
+    run(ctx.db, "UPDATE documents SET facts_json = ?, updated_at = ? WHERE id = ?", JSON.stringify({ ...prior, refersTo: prior.refersTo ?? [], validUntil: prior.validUntil ?? null, version: FACTS_VERSION }), now(), doc.id);
+  try {
+    const file = await ctx.drive.getFile(doc.file_id);
+    if (doc.read_file_version && file.contentKey && doc.read_file_version !== file.contentKey) {
+      run(ctx.db, "UPDATE documents SET read_status = 'pending', updated_at = ? WHERE id = ?", now(), doc.id);
+      return false;
+    }
+    const content = await ctx.drive.readContent(file, MAX_READ_BYTES);
+    if (content.kind === "unsupported") {
+      markDone();
+      return false;
+    }
+    const fresh = toFacts(await ctx.reader.read(content, file.name), localText(content));
+    run(
+      ctx.db,
+      "UPDATE documents SET facts_json = ?, updated_at = ? WHERE id = ?",
+      JSON.stringify({ ...prior, refersTo: fresh.refersTo ?? [], validUntil: fresh.validUntil ?? null, version: FACTS_VERSION } satisfies DocFacts),
+      now(),
+      doc.id,
+    );
+    return true;
+  } catch (err) {
+    // A document Kiki can't read again keeps what she knew; she doesn't keep retrying it.
+    if (err instanceof ReadError || (err instanceof DriveError && err.kind === "not_found")) {
+      markDone();
+      return false;
+    }
+    throw err;
+  }
+}
+
 export function ensureProject(db: Db, wsId: string, name: string): ProjectRow {
   run(db, "INSERT OR IGNORE INTO projects (id, workspace_id, category, name, created_at) VALUES (?, ?, ?, ?, ?)", randomUUID(), wsId, CATEGORY, name, now());
   return one<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? AND category = ? AND name = ?", wsId, CATEGORY, name)!;
@@ -238,18 +276,30 @@ export function docFacts(doc: Pick<DocumentRow, "facts_json">): DocFacts | null 
 
 const MAX_READ_BYTES = 8 * 1024 * 1024;
 
-/** Reads every document whose content Kiki hasn't seen yet. Facts come only from the content. */
+/**
+ * Reads every document whose content Kiki hasn't seen yet. Facts come only from the content.
+ * Documents read before the facts gained fields are read again in the background: if their
+ * content is unchanged, only the new fields are taken, so names and folders never shift.
+ */
 export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
   const pending = all<DocumentRow>(
     ctx.db,
     `SELECT d.* FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
-     WHERE d.workspace_id = ? AND d.read_status IN ('pending', 'reading') AND f.present = 1`,
+     WHERE d.workspace_id = ? AND f.present = 1
+       AND (d.read_status IN ('pending', 'reading')
+            OR (d.read_status = 'read' AND d.facts_json IS NOT NULL AND COALESCE(json_extract(d.facts_json, '$.version'), 1) < ?))`,
     wsId,
+    FACTS_VERSION,
   );
   let readCount = 0;
+  let upgraded = 0;
   const queue = [...pending];
   const worker = async () => {
     for (let doc = queue.shift(); doc; doc = queue.shift()) {
+      if (doc.read_status === "read") {
+        upgraded += (await upgradeFacts(ctx, doc)) ? 1 : 0;
+        continue;
+      }
       run(ctx.db, "UPDATE documents SET read_status = 'reading', updated_at = ? WHERE id = ?", now(), doc.id);
       let file: DriveFile;
       try {
@@ -296,6 +346,7 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
     }
   };
   await Promise.all([worker(), worker(), worker()]);
+  if (upgraded) logEvent(ctx.db, wsId, "read", `Kiki took another look at ${upgraded} document${upgraded === 1 ? "" : "s"} for validity dates and references to other documents. Names and folders are unchanged.`);
   if (readCount) {
     const types = all<{ doc_type: string; n: number }>(ctx.db, "SELECT doc_type, COUNT(*) AS n FROM documents WHERE workspace_id = ? AND read_status = 'read' GROUP BY doc_type", wsId);
     logEvent(ctx.db, wsId, "read", `${ctx.reader.mode === "mock" ? "Mock reading" : "Claude"} read ${readCount} document${readCount === 1 ? "" : "s"} (${types.map((t) => `${t.n} ${t.doc_type}`).join(", ")}).`);

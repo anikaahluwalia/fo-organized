@@ -22,8 +22,13 @@ export const ReadSchema = z.object({
     revises_reference: z.string().nullable(),
     quote: z.string().nullable(),
   }),
+  refers_to: z.array(z.object({ doc_type: z.enum(DOC_TYPES), reference: z.string().nullable(), quote: z.string().nullable() })),
+  validity: z.object({ until: z.string().nullable(), days: z.number().nullable(), quote: z.string().nullable() }),
 });
 export type ReadResult = z.infer<typeof ReadSchema>;
+
+/** Bumped when stored facts gain fields. Older facts get the new fields on a background re-read. */
+export const FACTS_VERSION = 2;
 
 export const READ_SYSTEM_PROMPT = `You read one business document for Kiki, an assistant that organizes a small renovation business's files.
 
@@ -39,7 +44,9 @@ Rules:
 - project: the renovation area the document is about, in a word or two (for example "flooring" or "kitchen"), or null.
 - scope_summary: one plain sentence describing the work or goods, or null.
 - line_items: priced lines as written, at most 15.
-- revision: whether the document says it revises or replaces an earlier document, its revision label, and the reference it replaces.`;
+- revision: whether the document says it revises or replaces an earlier document, its revision label, and the reference it replaces.
+- refers_to: other documents this one names by their reference number (for example "Deposit for Quote Q-1042" names quote Q-1042), at most 5. Never the document's own reference number.
+- validity: when the document states until when it is valid (until, as YYYY-MM-DD) or for how many days (days), with the exact quote. Otherwise nulls.`;
 
 // Stored facts --------------------------------------------------------------------------
 
@@ -63,6 +70,19 @@ export interface DocFacts {
   /** Lines that address AI tools. Recorded so the user can see them; never followed. */
   aiDirectedText: string[];
   textAvailable: boolean;
+  /** Other documents this one names, like the quote a deposit invoice is for. (Absent in facts before version 2.) */
+  refersTo?: { docType: DocType; reference: string; quote: string | null }[];
+  /** The last day the document says it's valid: stated outright, or its date plus a stated number of days. */
+  validUntil?: (Fact<string> & { basis: "stated" | "days" }) | null;
+  version?: number;
+}
+
+const refKey = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/[^A-Z0-9]/g, "") : "");
+
+function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function normalize(text: string): string {
@@ -116,11 +136,30 @@ export function toFacts(read: ReadResult, text: string | null): DocFacts {
     return { value, quote, quoteFound: found };
   };
   const projectFact = fact(normalizeProject(read.project.value), read.project.quote);
+  const reference = fact(read.reference_number.value?.trim() || null, read.reference_number.quote);
+  const date = fact(isoDate(read.document_date.value), read.document_date.quote);
+  // A reference to another document counts only if its evidence is in the text and names it.
+  const refersTo = (read.refers_to ?? [])
+    .filter((r) => r.reference?.trim() && r.quote && check(r.quote) !== false && refKey(r.quote).includes(refKey(r.reference)))
+    .map((r) => ({ docType: r.doc_type, reference: r.reference!.trim(), quote: r.quote }))
+    .filter((r) => refKey(r.reference) !== refKey(reference.value))
+    .slice(0, 5);
+  let validUntil: DocFacts["validUntil"] = null;
+  const v = read.validity;
+  const vFound = v ? check(v.quote) : false;
+  if (v?.quote && vFound !== false) {
+    const until = isoDate(v.until);
+    const days = v.days;
+    if (until) validUntil = { value: until, quote: v.quote, quoteFound: vFound, basis: "stated" };
+    else if (typeof days === "number" && Number.isInteger(days) && days > 0 && days <= 3660 && date.value && v.quote.includes(String(days))) {
+      validUntil = { value: addDays(date.value, days), quote: v.quote, quoteFound: vFound, basis: "days" };
+    }
+  }
   return {
     docType: read.doc_type,
     issuer: fact(read.issuer.value?.trim() || null, read.issuer.quote),
-    reference: fact(read.reference_number.value?.trim() || null, read.reference_number.quote),
-    date: fact(isoDate(read.document_date.value), read.document_date.quote),
+    reference,
+    date,
     total: { ...fact(typeof read.total.amount === "number" && Number.isFinite(read.total.amount) ? read.total.amount : null, read.total.quote), currency: read.total.currency },
     project: projectFact,
     scope: read.scope_summary,
@@ -128,6 +167,9 @@ export function toFacts(read: ReadResult, text: string | null): DocFacts {
     revision: { isRevision: read.revision.is_revision, label: read.revision.label, revisesReference: read.revision.revises_reference, quote: read.revision.quote },
     aiDirectedText: text ? aiDirectedLines(text) : [],
     textAvailable: text !== null,
+    refersTo,
+    validUntil,
+    version: FACTS_VERSION,
   };
 }
 
@@ -170,7 +212,15 @@ export function mockRead(text: string): ReadResult {
   const total = totalLine ? money(/\$\s?([\d,]+\.\d\d)/.exec(totalLine)?.[1]) : null;
   const currency = totalLine ? (/\b(CAD|USD|EUR|GBP)\b/.exec(totalLine)?.[1] ?? null) : null;
   const projectLine = line(text, /^project\s*:/i);
-  const revisionLine = line(text, /\b(revision|revised|replaces)\b/i);
+  // The line saying what it replaces beats a "(REVISED)" title.
+  const revisionLine = line(text, /\breplaces\b/i) ?? line(text, /\b(revision|revised)\b/i);
+  const kinds: Record<string, ReadResult["doc_type"]> = { quote: "quote", estimate: "quote", invoice: "invoice", contract: "contract", permit: "permit" };
+  const refersTo = lines
+    .filter((l) => l !== refLine)
+    .flatMap((l) => [...l.matchAll(/\b(quote|estimate|invoice|contract|permit)\s*(?:no\.?|number|#)?\s*:?\s*([A-Z]{1,5}-?\d[A-Z0-9-]*)/gi)].map((m) => ({ doc_type: kinds[m[1]!.toLowerCase()] ?? "other", reference: m[2]!, quote: l })));
+  const validLine = line(text, /\bvalid\b/i);
+  const validDate = validLine ? ([...validLine.matchAll(/\d{4}-\d{2}-\d{2}/g)].pop()?.[0] ?? null) : null;
+  const validDays = validLine ? /\b(\d{1,4})\s+days\b/i.exec(validLine)?.[1] : undefined;
   const items = lines
     .filter((l) => /:\s*\$\s?[\d,]+\.\d\d$/.test(l) && !/\b(total|amount due)\b/i.test(l))
     .map((l) => ({ description: l.replace(/:\s*\$.*$/, ""), amount: money(/\$\s?([\d,]+\.\d\d)/.exec(l)?.[1]), quote: l }));
@@ -189,5 +239,7 @@ export function mockRead(text: string): ReadResult {
       revises_reference: revisionLine ? (/replaces (?:quote )?([A-Z0-9-]+)/i.exec(revisionLine)?.[1] ?? null) : null,
       quote: revisionLine,
     },
+    refers_to: refersTo.slice(0, 5),
+    validity: { until: validDate, days: validDays ? Number(validDays) : null, quote: validLine },
   };
 }

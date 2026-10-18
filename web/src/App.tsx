@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AppView, NotificationView, PlanView } from "../../shared/api.ts";
+import type { AppView, AttentionItemView, NotificationView, PlanView } from "../../shared/api.ts";
 import { getState, newId, post, time } from "./api.ts";
 import { Kiki } from "./Kiki.tsx";
 import { AskContractor, OutreachCard, UpdateCard } from "./Contractor.tsx";
@@ -241,6 +241,10 @@ function OpEditor({ planId, seq, name, act }: { planId: string; seq: number; nam
 }
 
 function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAction> }) {
+  // A finished, verified plan is a record: one line until you want the steps.
+  const done = plan.status === "applied";
+  const [open, setOpen] = useState(!done);
+  const steps = plan.ops.length;
   return (
     <section className="card card--plain" aria-labelledby={`plan-${plan.id}`}>
       <div className="card-head">
@@ -273,32 +277,44 @@ function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAct
           <strong>{plan.conflict}</strong>
         </div>
       )}
-      <ol className="item-list">
-        {plan.ops.map((op) => (
-          <li key={op.seq} className="item">
-            <div className="item-head">
-              <span className="item-label">
-                {op.seq}. {op.title}
-              </span>
-              <span className={`chip chip--${op.state === "verified" ? "confirmed" : op.state === "pending" ? "not_searched" : "needs_review"}`}>{OP_STATE[op.state]}</span>
-            </div>
-            {op.before && op.kind === "move_rename" && (
-              <p>
-                <span className="hint">From</span> {op.before.path || "Top level"} / <strong>{op.before.name}</strong>
-              </p>
-            )}
-            {op.after && (
-              <p>
-                <span className="hint">To</span> {op.after.path || "Top level"} / <strong>{op.after.name}</strong>
-              </p>
-            )}
-            {op.kind !== "create_folder" && <p className="hint">{op.reason}</p>}
-            {op.error && <p className="error-text">{op.error}</p>}
-            {op.editable && op.state === "pending" && op.after && <OpEditor planId={plan.id} seq={op.seq} name={op.after.name} act={act} />}
-          </li>
-        ))}
-      </ol>
-      {plan.notes.length > 0 && (
+      {done && (
+        <div className="row">
+          <span className="hint">
+            {plan.counts.verified} of {plan.counts.total} changes verified in Drive{plan.finishedAt ? ` · ${time(plan.finishedAt)}` : ""}.
+          </span>
+          <button className="btn btn--quiet btn--small" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? "Hide the steps" : `Show the ${steps} step${steps === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      )}
+      {open && (
+        <ol className="item-list">
+          {plan.ops.map((op) => (
+            <li key={op.seq} className="item">
+              <div className="item-head">
+                <span className="item-label">
+                  {op.seq}. {op.title}
+                </span>
+                <span className={`chip chip--${op.state === "verified" ? "confirmed" : op.state === "pending" ? "not_searched" : "needs_review"}`}>{OP_STATE[op.state]}</span>
+              </div>
+              {op.before && op.kind === "move_rename" && (
+                <p>
+                  <span className="hint">From</span> {op.before.path || "Top level"} / <strong>{op.before.name}</strong>
+                </p>
+              )}
+              {op.after && (
+                <p>
+                  <span className="hint">To</span> {op.after.path || "Top level"} / <strong>{op.after.name}</strong>
+                </p>
+              )}
+              {op.kind !== "create_folder" && <p className="hint">{op.reason}</p>}
+              {op.error && <p className="error-text">{op.error}</p>}
+              {op.editable && op.state === "pending" && op.after && <OpEditor planId={plan.id} seq={op.seq} name={op.after.name} act={act} />}
+            </li>
+          ))}
+        </ol>
+      )}
+      {open && plan.notes.length > 0 && (
         <>
           <h3>Not moved</h3>
           <ul className="plain-list">
@@ -318,6 +334,56 @@ function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAct
           <span className="hint">Kiki prepares the reversal for you to approve. Nothing is deleted.</span>
         </div>
       )}
+    </section>
+  );
+}
+
+const ATTENTION_CHIP: Record<AttentionItemView["kind"], { label: string; tone: string }> = {
+  missing: { label: "Missing", tone: "chip--missing" },
+  expired: { label: "Expired", tone: "chip--missing" },
+  which_current: { label: "Unclear", tone: "chip--needs_review" },
+  expiring: { label: "Soon", tone: "chip--needs_review" },
+  undecided: { label: "Your call", tone: "chip--not_searched" },
+  unreadable: { label: "Couldn't read", tone: "chip--needs_review" },
+};
+
+/** Things Kiki noticed that need a person. Nothing here changes anything by itself. */
+function AttentionCard({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+  const [asking, setAsking] = useState<string | null>(null);
+  if (!view.attention.length) return null;
+  const rows = view.index.flatMap((p) => p.rows);
+  return (
+    <section className="card card--plain" aria-labelledby="attention-title">
+      <div className="card-head">
+        <h2 id="attention-title">Needs a look</h2>
+      </div>
+      <ul className="item-list">
+        {view.attention.map((a) => {
+          const chip = ATTENTION_CHIP[a.kind];
+          const row = a.askDocId ? rows.find((r) => r.docId === a.askDocId) : undefined;
+          return (
+            <li key={a.key} className="item">
+              <div className="item-head">
+                <span className="item-label">{a.title}</span>
+                <span className={`chip ${chip.tone}`}>{chip.label}</span>
+              </div>
+              {a.detail && <p className="hint">{a.detail}</p>}
+              {a.evidence && <p className="quote">“{a.evidence}”</p>}
+              <div className="row">
+                {row && asking !== a.key && (
+                  <button className="btn btn--quiet btn--small" onClick={() => setAsking(a.key)}>
+                    Ask {row.issuer ?? "the contractor"} if it's final
+                  </button>
+                )}
+                <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`dismiss-${a.key}`, () => post("/api/attention/dismiss", { key: a.key }))}>
+                  Got it
+                </button>
+              </div>
+              {row && asking === a.key && <AskContractor row={row} view={view} act={act} onDone={() => setAsking(null)} />}
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
@@ -718,10 +784,18 @@ export function App() {
       <div className="layout">
         <main className="main">
           <WorkspaceCard view={view} act={act} />
+          {shownPlans
+            .filter((p) => p.status !== "applied")
+            .map((p) => (
+              <PlanCard key={p.id} plan={p} act={act} />
+            ))}
+          <AttentionCard view={view} act={act} />
           <InventoryCard view={view} />
-          {shownPlans.map((p) => (
-            <PlanCard key={p.id} plan={p} act={act} />
-          ))}
+          {shownPlans
+            .filter((p) => p.status === "applied")
+            .map((p) => (
+              <PlanCard key={p.id} plan={p} act={act} />
+            ))}
           <IndexCard view={view} act={act} />
           <Activity view={view} />
         </main>

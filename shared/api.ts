@@ -283,6 +283,17 @@ export interface NotificationView {
   createdAt: string;
 }
 
+export interface AttentionItemView {
+  key: string;
+  kind: "missing" | "expired" | "which_current" | "expiring" | "undecided" | "unreadable";
+  project: string | null;
+  title: string;
+  detail: string | null;
+  evidence: string | null;
+  /** A quote Fo could ask the contractor about, when asking makes sense right now. */
+  askDocId: string | null;
+}
+
 export interface AppView {
   notifications: NotificationView[];
   integrations: IntegrationsView;
@@ -291,6 +302,8 @@ export interface AppView {
   inventory: InventoryView;
   plans: PlanView[];
   index: ProjectIndexView[];
+  /** What Kiki thinks needs a person's look: missing documents, dates running out, unclear quotes. */
+  attention: AttentionItemView[];
   outreach: OutreachView[];
   updates: UpdateView[];
   activity: { events: EventView[]; turns: TurnView[] };
