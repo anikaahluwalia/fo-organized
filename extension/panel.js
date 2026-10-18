@@ -17,6 +17,13 @@ const JUST_CHANGED_MS = 1500;
  */
 export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs = REFRESH_MS }) {
   const $ = (sel) => doc.querySelector(sel);
+  // How this page was opened: in the browser's side panel (the default), in Kiki's own window
+  // (browsers that never show extension side panels, like Arc), or as the toolbar button's popup.
+  const openedAs = (() => {
+    const v = new URLSearchParams(doc.location?.search ?? "").get("view");
+    return v === "window" || v === "popup" ? v : "side";
+  })();
+  doc.documentElement?.classList.add(`as-${openedAs}`);
   const el = {
     screen: $("#screen"),
     modes: $("#modes"),
@@ -79,7 +86,13 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
 
   async function readTab() {
     try {
-      const [t] = await chromeApi.tabs.query({ active: true, currentWindow: true });
+      let query = { active: true, currentWindow: true };
+      // In Kiki's own window, the tab you're looking at is in your browser window, not in hers.
+      if (openedAs === "window" && typeof chromeApi.windows?.getLastFocused === "function") {
+        const w = await chromeApi.windows.getLastFocused({ windowTypes: ["normal"] });
+        if (typeof w?.id === "number") query = { active: true, windowId: w.id };
+      }
+      const [t] = await chromeApi.tabs.query(query);
       // Chrome only fills in url and title for tabs this extension has host access to (Drive).
       return t && typeof t.url === "string" ? { url: t.url, title: typeof t.title === "string" ? t.title : null } : null;
     } catch {
@@ -452,6 +465,35 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     await unpaired("This browser forgot the pairing. To revoke it in Kiki too, click Unpair in the Kiki app.");
   });
   el.kiki?.addEventListener("animationend", () => el.kiki.classList.remove("bob", "tilt"));
+
+  // Tell the toolbar button that this side panel is open and can be seen: its next click then
+  // closes it, and a browser that opens the panel without ever showing it gets a Kiki window.
+  function announce() {
+    if (openedAs !== "side" || stopped || typeof chromeApi.runtime?.connect !== "function") return;
+    let port;
+    try {
+      port = chromeApi.runtime.connect({ name: "kiki-panel" });
+    } catch {
+      return;
+    }
+    const send = async () => {
+      try {
+        const w = await chromeApi.windows?.getCurrent?.();
+        port.postMessage({ view: "side", windowId: typeof w?.id === "number" ? w.id : null, visible: doc.visibilityState === "visible" });
+      } catch {
+        // The worker went away; the reconnect below tells the next one.
+      }
+    };
+    const onVisibility = () => void send();
+    doc.addEventListener("visibilitychange", onVisibility);
+    port.onDisconnect.addListener(() => {
+      doc.removeEventListener("visibilitychange", onVisibility);
+      // The browser stops idle extension workers; say it again to the next one.
+      if (!stopped) setTimeout(announce, 1000);
+    });
+    void send();
+  }
+  announce();
 
   render();
   refresh()

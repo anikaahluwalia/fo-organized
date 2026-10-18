@@ -11,6 +11,8 @@ A small client of the Kiki app running on your computer. It shows Kiki's status,
 
 After changing files here, click the reload icon on Kiki's card in `chrome://extensions`, then reopen the panel.
 
+**Arc and other browsers without extension side panels:** the button still works. Kiki opens in a small window of her own (or as the button's popup where the browser has no side panel API at all). The window looks at the tab in your browser window, so "Organize this folder" still works for the Drive folder you have open.
+
 ## Pair it with Kiki
 
 1. In the Kiki app, under **Chrome side panel**, click **Pair side panel**. Kiki shows a 6-digit code. It works once, expires after ten minutes, and five wrong tries cancel it.

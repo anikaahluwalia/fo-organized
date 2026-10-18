@@ -33,6 +33,12 @@ body {
   font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/* A toolbar popup sizes to its content, so give it the side panel's width. */
+.as-popup body {
+  width: 400px;
+  min-height: 560px;
+}
+
 button,
 input {
   font: inherit;
