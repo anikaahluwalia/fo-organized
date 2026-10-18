@@ -22,7 +22,7 @@ import {
   stopDispatch,
 } from "./services/outreach.ts";
 import { approvePlan, autoPropose, discardPlan, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
-import { autoNotifyProposal, autoTextEnabled, notifyHandler, notifyPreview, notifySend, setAutoText } from "./services/notify.ts";
+import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { dismissOutcome, followUp, pasteReply, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
 import { activeWorkspace, createDemoWorkspace, requireWorkspace, runInventory, runReading, selectWorkspace, stageRevisedQuote } from "./services/workspace.ts";
@@ -46,7 +46,7 @@ export function createApp(deps: AppDeps) {
   const { db, drive, reader, fo } = deps;
   const jobs = new JobQueue(db);
   const ctx = { db, drive, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30 } as Ctx;
-  ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler }, deps.engineOptions);
+  ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler(ctx) }, deps.engineOptions);
 
   const pollSeconds = deps.workspacePollSeconds ?? 10;
   // Kiki keeps looking at the selected folder (read-only) so she notices new files on her own.
@@ -61,7 +61,12 @@ export function createApp(deps: AppDeps) {
     const proposal = autoPropose(ctx);
     if (proposal?.created) autoNotifyProposal(ctx, proposal.plan);
   });
-  jobs.register("execute_plan", async (p, job) => executePlan(ctx, String(p.planId), job.attempts + 1));
+  jobs.register("execute_plan", async (p, job) => {
+    await executePlan(ctx, String(p.planId), job.attempts + 1);
+    sendDoneText(ctx, String(p.planId));
+  });
+  // Watches for your reply to Fo's text ("go ahead"), read-only, until it arrives or expires.
+  jobs.register("text_reply", async (p) => checkTextReply(ctx, String(p.taskId)));
   jobs.register("watch", async (p) => watchJob(ctx, String(p.watchId), ctx.watchIntervalSeconds));
   jobs.register("outcome", async (p) => runOutcome(ctx, String(p.outcomeId)));
 

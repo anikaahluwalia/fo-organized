@@ -46,7 +46,7 @@ import type { Ctx } from "./context.ts";
 import { projectIndexRows } from "./indexfile.ts";
 import { getUserName } from "./outreach.ts";
 import { activeWorkspace, docFacts } from "./workspace.ts";
-import { notifyOutcome, notifyText } from "./notify.ts";
+import { notifyOutcome, notifyPurpose, notifyText, replyState } from "./notify.ts";
 
 const STATUS_WORD: Record<string, string> = { current: "current", superseded: "superseded", unresolved: "not yet confirmed", proposed: "proposed" };
 
@@ -373,6 +373,11 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
   // Only this workspace's notes, in the current Fo mode (a mock rehearsal's notes don't show here).
   const notifications = all<FoTaskRow>(db, "SELECT * FROM fo_tasks WHERE kind = 'notify' AND mode = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10", integrations.fo.mode, ws.created_at).map((t) => ({
     taskId: t.id,
+    purpose: notifyPurpose(ctx, t.id),
+    reply: (() => {
+      const r = replyState(ctx, t.id);
+      return r ? { status: r.status, text: r.text, source: r.source } : null;
+    })(),
     mode: t.mode,
     state: t.state,
     outcome: t.state === "complete" ? notifyOutcome(t.final_response) : null,

@@ -63,7 +63,7 @@ function Badge({ kind, children }: { kind: "live" | "mock" | "demo" | "problem" 
 }
 
 function Integrations({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
-  const { drive, claude, fo } = view.integrations;
+  const { drive, fo } = view.integrations;
   const connect = (name: "google" | "fo") =>
     act.run(`connect-${name}`, async () => {
       const r = await post<{ authorizationUrl: string }>(`/api/${name}/connect`);
@@ -82,7 +82,6 @@ function Integrations({ view, act }: { view: AppView; act: ReturnType<typeof use
           Connect Google Drive
         </button>
       )}
-      <Badge kind={claude.mode === "live" ? "live" : "mock"}>{claude.mode === "live" ? "Claude reading: Live" : "Reading: Mock"}</Badge>
       {fo.mode === "mock" ? (
         <Badge kind="mock">Fo: Mock</Badge>
       ) : fo.connection === "connected" ? (
@@ -367,9 +366,20 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
 function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; act: ReturnType<typeof useAction> }) {
   const fo = mock ? "Mock Fo" : "Fo";
   const [answer, setAnswer] = useState("");
+  const r = n.reply;
   const label =
-    n.outcome === "reported_sent"
-      ? `${fo} reports it texted you.`
+    r?.status === "approved"
+      ? `You replied "${r.text}". Kiki is filing it.`
+      : r?.status === "declined"
+        ? `You replied "${r.text}". Not filing it.`
+        : n.purpose === "done" && n.outcome === "reported_sent"
+          ? `${fo} texted you that it's done.`
+          : r?.status === "waiting" && n.outcome === "reported_sent"
+            ? `${fo} texted you. Reply "go ahead" to file it, or approve here.`
+            : r?.status === "expired"
+              ? "No reply yet. You can approve here."
+              : n.outcome === "reported_sent"
+                ? `${fo} reports it texted you.`
       : n.state === "failed"
         ? "The text wasn't sent."
         : n.state === "uncertain"
@@ -428,11 +438,13 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
           />
           <span>
             <strong>Text me when Kiki finds something new</strong>
-            <span className="hint" style={{ display: "block" }}>Sent by Fo, only to you.</span>
+            <span className="hint" style={{ display: "block" }}>Reply "go ahead" to Fo and Kiki files it.</span>
           </span>
         </label>
       )}
-      {view.notifications[0] && (proposed || running || view.notifications[0].state !== "complete") && <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} act={act} />}
+      {view.notifications[0] && (proposed || running || view.notifications[0].state !== "complete" || view.notifications[0].purpose === "done") && (
+        <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} act={act} />
+      )}
       {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
       {view.workspace && !proposed && !running && (
         <div className="stack">

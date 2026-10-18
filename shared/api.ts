@@ -259,6 +259,8 @@ export interface EventView {
 
 export interface NotificationView {
   taskId: string;
+  purpose: "find" | "done" | "summary";
+  reply: { status: "waiting" | "approved" | "declined" | "expired" | "stale" | "failed"; text: string | null; source: "text_reply" | "relayed_by_fo" | null } | null;
   mode: Mode;
   state: FoTaskView["state"];
   outcome: "reported_sent" | "not_sent" | "unclear" | null;

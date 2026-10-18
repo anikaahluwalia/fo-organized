@@ -26,6 +26,17 @@ export class MockFoClient implements FoClient {
   private conversations = new Map<string, MockConversation>();
   private readonly stepMs: number;
   private readonly replyDelayMs: number;
+  private lastSms: MockConversation | null = null;
+
+  /** Rehearsal/test helper: the user texts back, as if replying on their phone. */
+  replyToLastText(text: string): void {
+    this.lastSms?.turns.push({ role: "user", text, at: new Date().toISOString() });
+    if (this.lastSms) {
+      this.conversations.delete(this.lastSms.id);
+      this.conversations.set(this.lastSms.id, this.lastSms);
+    }
+  }
+
   /** What the simulated contractor says. */
   contractorReply = "No, use the revised quote I emailed today.";
 
@@ -60,6 +71,10 @@ export class MockFoClient implements FoClient {
     if (/don't send the email/.test(args.message)) {
       convo.pending = { progress: [], final: `${MOCK_NOTE}\nOkay, I won't send it.\nKIKI-STATUS: NOT-SENT` };
     } else if (/^Please text me/.test(args.message)) {
+      const body = /-----BEGIN APPROVED BODY-----\n([\s\S]*?)\n-----END APPROVED BODY-----/.exec(args.message)?.[1] ?? "";
+      const sms: MockConversation = { id: `mock-sms-${randomUUID()}`, startedAt: new Date().toISOString(), turns: [{ role: "assistant", text: body, at: new Date().toISOString() }], pending: null, turnStartedAt: Date.now(), contractor: null, sentAt: null, replyPosted: true };
+      this.conversations.set(sms.id, sms);
+      this.lastSms = sms;
       convo.pending = { progress: ["Texting you (mock)…"], final: `${MOCK_NOTE}\nI would have texted you Kiki's message.\nKIKI-STATUS: SENT` };
     } else if (/^Please send me \(nobody else\)/.test(args.message)) {
       convo.pending = { progress: ["Sending you the note (mock)…"], final: `${MOCK_NOTE}\nI would have sent you Kiki's note. In mock mode nothing leaves this computer.\nKIKI-STATUS: SENT` };
