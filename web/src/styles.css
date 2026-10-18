@@ -95,6 +95,12 @@ a {
   order: 3;
 }
 
+/* Settings-like cards come last on a phone, after Kiki's decisions. */
+.companion-extra {
+  order: 4;
+  min-width: 0;
+}
+
 @media (min-width: 960px) {
   .page {
     padding: 28px 32px 80px;

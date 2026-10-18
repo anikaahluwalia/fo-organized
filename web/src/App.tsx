@@ -3,6 +3,7 @@ import type { AppView, AttentionItemView, NotificationView, PlanView } from "../
 import { getState, newId, post, time } from "./api.ts";
 import { Kiki } from "./Kiki.tsx";
 import { AskContractor, OutreachCard, UpdateCard } from "./Contractor.tsx";
+import { ExtensionPairing } from "./ExtensionPairing.tsx";
 
 const KIKI_STATE_NAMES: Record<string, string> = {
   idle: "Idle",
@@ -811,6 +812,9 @@ export function App() {
           </section>
           <Decisions view={view} act={act} />
           <FoUpdates view={view} act={act} />
+          <div className="companion-extra">
+            <ExtensionPairing paired={view.extension?.paired} />
+          </div>
         </aside>
       </div>
     </div>

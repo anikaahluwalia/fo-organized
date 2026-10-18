@@ -12,6 +12,7 @@ Brief: [docs/FO-RGANIZED-BRIEF.md](docs/FO-RGANIZED-BRIEF.md) · Character: [doc
 - **Ask a contractor if a quote is final.** From a quote in the index, Kiki drafts a short, honest email; you approve the exact message, and Fo sends it. Kiki then follows that Fo conversation, picks up the reply, finds the revised quote in Drive (asking you if two files could match), and proposes filing it as current, moving the old one to `Quotes/Superseded`, with the price and scope differences shown. "Current" never means "price accepted": you mark that yourself.
 - **Find the emailed revision.** If the contractor says "I emailed it" and it isn't in Drive, Kiki can look in Gmail (read-only, only once you allow it) for attachments from that contractor's exact address since Fo asked. Saving one into the folder waits for your click. If you drop the file into the folder yourself, she notices and links it without being asked again.
 - **Point out what needs a look.** From what she read, Kiki lists documents that others refer to but that aren't in the folder (a deposit invoice for a quote you don't have), quotes and licences whose validity is running out, several quotes from one contractor with none marked current, and competing quotes with no price accepted, each with the line that supports it. Nothing there changes anything; "Got it" sets an item aside until the situation changes.
+- **Chrome side panel.** Follow Kiki next to Google Drive: her status, the plan with each step's reason, approve or set it aside, "Organize this folder" for the Drive folder you have open, and Fo's latest text. It talks only to the Kiki app on this computer, after pairing with a one-time code.
 - **Undo.** Any applied plan can be reversed (after its own approval) where nothing changed since; folders Kiki created stay, and nothing is ever deleted.
 
 ## Run it
@@ -23,6 +24,8 @@ npm run start:mock   # everything simulated and labelled Mock: no Google, Claude
 ```
 
 Connect Google Drive and Fo from the top of the page, then set up the renovation folder or paste a Drive folder link.
+
+**Side panel:** in `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and pick the `extension` folder. Then click **Pair side panel** in the app and type the 6-digit code into the panel. Details in [extension/README.md](extension/README.md).
 
 ### Setup (`.env`, never committed)
 

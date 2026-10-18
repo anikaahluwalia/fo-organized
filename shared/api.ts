@@ -309,4 +309,6 @@ export interface AppView {
   activity: { events: EventView[]; turns: TurnView[] };
   busy: { inventory: boolean; reading: boolean; executing: boolean; interpreting: boolean };
   kiki: KikiView;
+  /** Added by the HTTP layer: whether a Chrome side panel is paired with this app. */
+  extension?: { paired: boolean };
 }

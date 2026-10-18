@@ -1,1 +1,27 @@
-{"manifest_version":3,"name":"Kiki — a little order","version":"0.1.0","description":"An interactive organizing companion prototype. Uses demo files only; no Drive or Fo access.","minimum_chrome_version":"116","permissions":["sidePanel"],"action":{"default_title":"Open Kiki"},"side_panel":{"default_path":"panel.html"},"background":{"service_worker":"background.js"}}
+{
+  "manifest_version": 3,
+  "name": "Kiki",
+  "version": "0.2.0",
+  "description": "Kiki's side panel. It talks only to the Kiki app running on this computer, so you can follow her work and approve her plans.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel", "storage"],
+  "host_permissions": ["http://localhost:8787/*", "https://drive.google.com/*"],
+  "icons": {
+    "16": "icons/kiki-16.png",
+    "32": "icons/kiki-32.png",
+    "48": "icons/kiki-48.png",
+    "128": "icons/kiki-128.png"
+  },
+  "action": {
+    "default_title": "Open Kiki",
+    "default_icon": {
+      "16": "icons/kiki-16.png",
+      "32": "icons/kiki-32.png"
+    }
+  },
+  "side_panel": { "default_path": "panel.html" },
+  "background": { "service_worker": "background.js" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src http://localhost:8787; img-src 'self'; base-uri 'none'"
+  }
+}

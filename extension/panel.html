@@ -1,1 +1,43 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kiki · Your organizing companion</title><link rel="stylesheet" href="panel.css"></head><body><header><div class="brand">kiki<span>a little order.</span></div><button id="settings" aria-label="About this prototype" class="icon">···</button></header><main><div class="demo">DESIGN PROTOTYPE · SAMPLE FILES</div><section class="hello"><img src="kiki.png" alt="Kiki, your pink organizing companion"><h1 id="heading">Let's give this a little order.</h1><p id="intro">Your files stay in Drive.<br>I'll help them find their place.</p></section><div class="context"><span class="folder">▰</span><div><small>DEMO FOLDER</small><strong>Flooring renovation</strong></div><span class="pill">4 files</span></div><nav aria-label="Kiki views"><button data-view="plan" class="selected">Organize</button><button data-view="updates">From Fo <span class="badge">1</span></button><button data-view="history">Activity</button></nav><div id="view"></div><div class="privacy">♧ &nbsp; You review. Kiki organizes.<br><span>Originals stay available. No surprise changes.</span></div></main><footer><form id="ask"><input id="question" aria-label="Ask Kiki" placeholder="Ask Kiki about this folder…" required><button type="submit" aria-label="Send question">↑</button></form><small>No accounts connected · No real files changed</small></footer><dialog id="dialog"><div class="dialogbody"><button id="close" class="icon" aria-label="Close">×</button><h2 id="dtitle"></h2><p id="dcopy"></p><button id="dismiss" class="primary">Got it</button></div></dialog><script src="panel.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Kiki</title>
+    <link rel="stylesheet" href="panel.css" />
+    <script type="module" src="panel.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">kiki<span>a little order.</span></div>
+      <button id="about" type="button" class="icon" aria-label="About this side panel" aria-haspopup="dialog">···</button>
+    </header>
+    <main>
+      <div class="modes" id="modes" hidden></div>
+      <section class="hello" aria-live="polite">
+        <img id="kiki" src="kiki.png" alt="" width="160" height="131" />
+        <p class="state" id="state-name" hidden></p>
+        <h1 id="status">Connecting to Kiki…</h1>
+        <p id="detail" hidden></p>
+      </section>
+      <div id="screen"></div>
+      <div class="privacy">♧ &nbsp; You review. Kiki organizes.<br /><span>Originals stay available. No surprise changes.</span></div>
+    </main>
+    <footer>
+      <a class="open" href="http://localhost:8787/" target="_blank" rel="noopener noreferrer">Open Kiki</a>
+      <small id="foot" hidden></small>
+    </footer>
+    <dialog id="dialog" aria-labelledby="dtitle">
+      <div class="dialogbody">
+        <button id="close" type="button" class="icon" aria-label="Close">×</button>
+        <h2 id="dtitle">About this side panel</h2>
+        <p>This panel shows what Kiki is doing and lets you approve her plans. It talks only to the Kiki app running on this computer, at localhost:8787. Kiki does the organizing in Google Drive, and only after you approve.</p>
+        <p>When your current tab is a Google Drive folder, the panel reads that tab's address and title so it can offer to organize it. It doesn't read pages, files or other sites.</p>
+        <p>The pairing key stays in this browser's extension storage. To revoke it, click Unpair in the Kiki app.</p>
+        <button id="forget" type="button" class="secondary" hidden>Forget the pairing on this browser</button>
+        <button id="dismiss" type="button" class="primary">Got it</button>
+      </div>
+    </dialog>
+  </body>
+</html>
