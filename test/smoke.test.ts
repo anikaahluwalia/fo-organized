@@ -6,7 +6,7 @@ test("the demo loop: organize, a new invoice arrives, it's proposed and filed af
   const rig = makeRig();
   await organized(rig);
   let view = await rig.app.view();
-  assert.equal(view.plans.find((p) => p.title === "Organize the renovation paperwork")?.status, "applied");
+  assert.equal(view.plans.find((p) => p.title === 'Organize "Renovation paperwork"')?.status, "applied");
 
   rig.app.updateSettings({ autoText: true });
   await rig.app.stageRevision("invoice");

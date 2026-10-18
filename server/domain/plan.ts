@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import type { OpKind } from "../db.ts";
 import type { DocFacts } from "./documents.ts";
 import { deduplicateName, indexFileName, projectFolderPath, proposedName, SUPERSEDED_FOLDER, targetFolder } from "./naming.ts";
-import { issuerKey } from "./safety.ts";
 import { copyMap, DUPLICATES_FOLDER } from "./duplicates.ts";
+import { assignCollections, isFiledPath, KIKI_ROOTS, type Destination } from "./collections.ts";
 
 export interface PlanFile {
   fileId: string;
@@ -12,6 +12,7 @@ export interface PlanFile {
   parentId: string | null;
   path: string; // folder path the file lives in, relative to the workspace root ("" = root)
   version: string | null;
+  size?: number | null;
   createdTime: string | null;
   isFolder: boolean;
   isShortcut: boolean;
@@ -26,6 +27,7 @@ export interface PlanDoc {
   readStatus: string;
   readError: string | null;
   versionStatus: string | null;
+  acceptedAt?: string | null;
 }
 
 export type Ref = { file: string } | { op: number };
@@ -156,6 +158,14 @@ class Folders {
   }
 }
 
+/** Why a document goes where it goes, citing what that rests on; null when its label already says it. */
+function placementReason(dest: Destination): string | null {
+  if (dest.how === "supplier") return dest.because;
+  if (dest.kind === "user") return `Into your "${dest.path}" folder: it says "${dest.because}".`;
+  if (dest.how === "title") return `Goes with ${dest.name}: its title is "${dest.because}".`;
+  return dest.because === dest.name ? null : `${dest.name}: it says "${dest.because}".`;
+}
+
 function describeFacts(f: DocFacts): string {
   const bits = [f.issuer.value, f.reference.value, f.date.value].filter(Boolean);
   const type = f.docType === "unknown" ? "document" : f.revision.isRevision && f.docType === "quote" ? "revised quote" : f.docType;
@@ -214,6 +224,8 @@ export function buildOrganizePlan(input: {
   files: PlanFile[];
   docs: PlanDoc[];
   indexFiles: Record<string, { fileId: string; version: string | null } | null>;
+  /** Files whose filing the user undid (and that haven't changed since): left where they are. */
+  undone?: Set<string>;
 }): PlanDraft {
   const ops: PlannedOp[] = [];
   const notes: PlanNote[] = [];
@@ -225,23 +237,28 @@ export function buildOrganizePlan(input: {
   const moves: Move[] = [];
   const projects = new Set<string>();
 
-  // Suppliers Kiki already knows: an invoice that doesn't name its project goes where that
-  // supplier's other documents are (only when they all point to one project).
-  const supplierProjects = new Map<string, Set<string>>();
-  for (const d of input.docs) {
-    const key = issuerKey(d.facts?.issuer.value);
-    const project = d.facts?.project.value;
-    if (key && project) supplierProjects.set(key, (supplierProjects.get(key) ?? new Set()).add(project));
-  }
-
   const docs = [...input.docs].sort((a, b) => a.fileId.localeCompare(b.fileId));
   // Exact copies (same content): Kiki files one and sets the others aside next to it.
   const copyOf = copyMap(
     docs.flatMap((d) => {
       const f = fileById.get(d.fileId);
-      return f && d.readStatus === "read" && !f.isFolder && !f.isShortcut ? [{ docId: d.docId, fileId: f.fileId, name: f.name, path: f.path, contentKey: f.version, createdTime: f.createdTime }] : [];
+      return f && d.readStatus === "read" && !f.isFolder && !f.isShortcut
+        ? [{ docId: d.docId, fileId: f.fileId, name: f.name, path: f.path, contentKey: f.version, createdTime: f.createdTime, size: f.size ?? null, accepted: Boolean(d.acceptedAt), current: d.versionStatus === "current" }]
+        : [];
     }),
   );
+
+  // Only loose files are filed: at the top of the workspace or in a catch-all folder ("Old scans").
+  // What's in Kiki's folders or a folder the user named after something stays where it is.
+  const readable = docs.filter(
+    (d) => d.readStatus === "read" && d.facts && fileById.get(d.fileId) && !fileById.get(d.fileId)!.isShortcut && !copyOf.has(d.docId) && !input.undone?.has(d.fileId),
+  );
+  const placeOf = (path: string) => (KIKI_ROOTS.includes(path.split("/")[0]!) ? (path.split("/")[1] ?? null) : `user:${path}`);
+  const destinations: Map<string, Destination> = assignCollections({
+    inbox: readable.filter((d) => !isFiledPath(fileById.get(d.fileId)!.path)).map((d) => ({ docId: d.docId, facts: d.facts! })),
+    filed: readable.filter((d) => isFiledPath(fileById.get(d.fileId)!.path)).map((d) => ({ facts: d.facts, collection: placeOf(fileById.get(d.fileId)!.path) })),
+    files: input.files,
+  });
   const resolved = new Map<string, { targetPath: string; name: string }>();
   const setAside: PlanDoc[] = [];
   for (const doc of docs) {
@@ -260,32 +277,35 @@ export function buildOrganizePlan(input: {
       notes.push({ ...at, status: "needs_review", reason: doc.readError ?? "Kiki couldn't read this file, so she won't guess where it goes." });
       continue;
     }
+    if (input.undone?.has(file.fileId)) {
+      notes.push({ ...at, status: "left_in_place", reason: "You undid moving this, so Kiki leaves it here unless it changes." });
+      continue;
+    }
     if (copyOf.has(doc.docId)) {
       setAside.push(doc);
       continue;
     }
-    let facts = doc.facts;
-    let supplierNote: string | null = null;
-    if (!facts.project.value && ["invoice", "quote", "receipt"].includes(facts.docType)) {
-      const known = supplierProjects.get(issuerKey(facts.issuer.value) ?? "");
-      if (known && known.size === 1) {
-        const project = [...known][0]!;
-        const count = input.docs.filter((d) => d.docId !== doc.docId && issuerKey(d.facts?.issuer.value) === issuerKey(facts.issuer.value)).length;
-        facts = { ...facts, project: { value: project, quote: null, quoteFound: null } };
-        supplierNote = `No project on it, but ${facts.issuer.value}'s other ${count === 1 ? "document is" : `${count} documents are`} in ${project}.`;
-      }
+    if (isFiledPath(file.path)) {
+      // Still counts for keeping its collection's index in Drive.
+      const collection = placeOf(file.path);
+      if (collection && !collection.startsWith("user:")) projects.add(collection);
+      notes.push({ ...at, status: "already_organized", reason: `Filed in ${file.path}. Kiki leaves filed documents where they are.` });
+      continue;
     }
-    const folder = targetFolder(facts, input.files);
-    if (!folder) {
+    const dest = destinations.get(doc.docId);
+    const facts = dest?.kind === "kiki" ? { ...doc.facts, project: { value: dest.name, quote: null, quoteFound: null } } : doc.facts;
+    const folder = !dest || facts.docType === "unknown" ? null : dest.kind === "user" ? dest.path : targetFolder(facts, input.files);
+    if (!folder || !dest) {
       notes.push({
         ...at,
         status: facts.docType === "unknown" ? "needs_review" : "left_in_place",
-        reason: facts.docType === "unknown" ? "Kiki couldn't tell what kind of document this is." : `This ${describeFacts(facts)} doesn't identify a safe project or collection, so Kiki needs clarification before filing it.`,
+        reason: facts.docType === "unknown" ? "Kiki couldn't tell what kind of document this is." : `This ${describeFacts(facts)} doesn't say which project or folder it belongs to, so Kiki is leaving it where it is.`,
       });
       continue;
     }
-    projects.add(facts.project.value!);
-    const targetPath = doc.versionStatus === "superseded" && facts.docType === "quote" ? `${folder}/${SUPERSEDED_FOLDER}` : folder;
+    if (dest.kind === "kiki") projects.add(dest.name);
+    const placed = placementReason(dest);
+    const targetPath = doc.versionStatus === "superseded" && facts.docType === "quote" && dest.kind === "kiki" ? `${folder}/${SUPERSEDED_FOLDER}` : folder;
     const suggested = proposedName(facts, file.name, file.mimeType);
     const name = suggested ?? file.name;
     if (file.path === targetPath && file.name === name) {
@@ -305,7 +325,7 @@ export function buildOrganizePlan(input: {
     const article = /^[aeiou]/i.test(kind) ? "an" : "a";
     void article;
     const label = `${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
-    const why = supplierNote ? [`${label}.`, supplierNote] : [`${label}, ${facts.project.value!.toLowerCase()}.`];
+    const why = placed ? [`${label}.`, placed] : [`${label}, ${dest.name}.`];
     if (!suggested) why.push("Keeps its name (not enough details to rename).");
     if (facts.aiDirectedText.length) why.push("Contains instructions aimed at AI tools; ignored.");
     resolved.set(doc.docId, { targetPath, name });

@@ -43,6 +43,7 @@ export function planFiles(db: Db, wsId: string): PlanFile[] {
     parentId: f.parent_id,
     path: f.path,
     version: f.version,
+    size: f.size,
     createdTime: f.created_time,
     isFolder: Boolean(f.is_folder),
     isShortcut: Boolean(f.is_shortcut),
@@ -52,7 +53,7 @@ export function planFiles(db: Db, wsId: string): PlanFile[] {
 }
 
 export function planDoc(d: DocumentRow): PlanDoc {
-  return { docId: d.id, fileId: d.file_id, facts: docFacts(d), readStatus: d.read_status, readError: d.read_error, versionStatus: d.version_status };
+  return { docId: d.id, fileId: d.file_id, facts: docFacts(d), readStatus: d.read_status, readError: d.read_error, versionStatus: d.version_status, acceptedAt: d.accepted_at };
 }
 
 export function indexFiles(db: Db, wsId: string): Record<string, { fileId: string; version: string | null } | null> {
@@ -186,11 +187,34 @@ function organizeDraft(db: Db, ws: WorkspaceRow): PlanDraft {
       ws.id,
     ).map((r) => r.file_id),
   );
+  // A filing the user undid isn't proposed again unless the file has changed since.
+  const files = planFiles(db, ws.id);
+  const version = new Map(files.map((f) => [f.fileId, f.version]));
+  const undone = new Set(
+    all<{ file_id: string; result_json: string | null }>(
+      db,
+      "SELECT o.file_id, o.result_json FROM plan_ops o JOIN plans p ON p.id = o.plan_id WHERE p.workspace_id = ? AND p.kind = 'undo' AND o.kind = 'move_rename' AND o.state = 'verified'",
+      ws.id,
+    )
+      .filter((r) => r.result_json && (JSON.parse(r.result_json) as { version?: string }).version === version.get(r.file_id))
+      .map((r) => r.file_id),
+  );
   const docs = all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id)
     .filter((d) => !reserved.has(d.file_id) && !held.has(d.file_id))
     .map(planDoc);
-  return buildOrganizePlan({ rootId: ws.root_file_id, files: planFiles(db, ws.id), docs, indexFiles: indexFiles(db, ws.id) });
+  return buildOrganizePlan({ rootId: ws.root_file_id, files, docs, indexFiles: indexFiles(db, ws.id), undone });
 }
+
+/** What an organizing plan does, for any kind of workspace. */
+function organizeTitle(workspace: string, first: boolean, moves: number, copies: number): string {
+  if (first) return `Organize "${workspace}"`;
+  if (moves > 0) return moves === 1 ? "File the new document" : "File the new documents";
+  if (copies > 0) return `Set aside ${copies === 1 ? "a duplicate copy" : "duplicate copies"}`;
+  return "Update the index";
+}
+
+/** Edits the user made to a proposal, by file, so a fresh version of it keeps them. */
+type Edits = Record<string, { newName?: string; exclude?: boolean }>;
 
 /** Re-checks an open organizing proposal against the current state: withdraw it if nothing is left to do. */
 export function refreshOrganizeProposal(ctx: Ctx): void {
@@ -211,8 +235,22 @@ function saveOrganize(db: Db, ws: WorkspaceRow, draft: PlanDraft): { plan: PlanR
   const seriesId = `organize:${ws.id}`;
   // You edited the proposal and nothing in the folder changed since: keep your version.
   const open = one<PlanRow>(db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", seriesId);
-  const revisedFrom = open?.details_json ? (JSON.parse(open.details_json) as { revisedFrom?: string } | null)?.revisedFrom : undefined;
-  if (open && revisedFrom && revisedFrom === hashWithExclusions(draft.ops, new Set())) return { plan: open, created: false };
+  const openDetails = open?.details_json ? (JSON.parse(open.details_json) as { revisedFrom?: string; edits?: Edits } | null) : null;
+  const kikiHash = hashWithExclusions(draft.ops, new Set());
+  if (open && openDetails?.revisedFrom === kikiHash) return { plan: open, created: false };
+  // Something changed: Kiki's new draft, with your edits carried over to the files they were about.
+  const edits = openDetails?.edits ?? {};
+  const excluded = new Set<number>();
+  for (const op of draft.ops) {
+    const e = op.kind === "move_rename" && op.fileId ? edits[op.fileId] : undefined;
+    if (!e) continue;
+    if (e.newName) {
+      op.newName = e.newName;
+      op.reason = `${op.reason} You chose this name.`;
+    }
+    if (e.exclude) excluded.add(op.seq);
+  }
+  const edited = Object.keys(edits).some((fileId) => draft.ops.some((o) => o.fileId === fileId));
   const before = one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM plans WHERE series_id = ? AND status = 'applied'", seriesId)!.n;
   const folders = countBy(draft.ops, "create_folder");
   const copies = draft.ops.filter((o) => o.kind === "move_rename" && o.newPath !== null && inDuplicatesFolder(o.newPath)).length;
@@ -228,12 +266,12 @@ function saveOrganize(db: Db, ws: WorkspaceRow, draft: PlanDraft): { plan: PlanR
   return savePlanVersion(db, ws, {
     kind: "organize",
     seriesId,
-    title:
-      before === 0 ? "Organize the renovation paperwork" : moves === 0 ? `Set aside ${copies === 1 ? "a duplicate copy" : "duplicate copies"}` : moves === 1 ? "File the new document" : "File the new documents",
+    title: organizeTitle(ws.name, before === 0, moves, copies),
     summary: `Kiki would ${summary}.`,
     draft,
-    details: { notes: draft.notes },
+    details: { notes: draft.notes, ...(edited ? { edits, revisedFrom: kikiHash } : {}) },
     source: null,
+    excluded,
   });
 }
 
@@ -272,18 +310,7 @@ export function autoPropose(ctx: Ctx): { plan: PlanRow; created: boolean } | nul
   const hash = hashWithExclusions(draft.ops, new Set());
   // Don't re-propose something the user set aside, or that already failed: they choose to retry.
   if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('discarded', 'failed', 'partial', 'stale') AND content_hash = ?", seriesId, hash)) return null;
-  // Nor redo what the user just undid.
-  if (
-    one<PlanRow>(
-      ctx.db,
-      `SELECT p.* FROM plans p WHERE p.series_id = ? AND p.status = 'applied' AND p.content_hash = ?
-         AND EXISTS (SELECT 1 FROM plans u WHERE u.kind = 'undo' AND u.status = 'applied' AND json_extract(u.source_json, '$.undoOf') = p.id)`,
-      seriesId,
-      hash,
-    )
-  ) {
-    return null;
-  }
+  // (What the user undid is already left out of the draft, file by file.)
   return saveOrganize(ctx.db, ws, draft);
 }
 
@@ -332,8 +359,15 @@ export function revisePlan(ctx: Ctx, planId: string, edits: { seq: number; newNa
     }
   }
   const prior = plan.details_json ? JSON.parse(plan.details_json) : null;
-  // Remember which of Kiki's drafts this edit started from, so her next look doesn't undo it.
-  const details = plan.kind === "organize" ? { ...(prior ?? {}), revisedFrom: prior?.revisedFrom ?? plan.content_hash } : prior;
+  // Remember which of Kiki's drafts this edit started from, so her next look doesn't undo it, and
+  // the edits themselves by file, so a fresh draft after a real change keeps them.
+  const byFile: Edits = { ...(prior?.edits ?? {}) };
+  for (const edit of edits) {
+    const op = ops.find((o) => o.seq === edit.seq);
+    if (!op?.fileId || op.kind !== "move_rename") continue;
+    byFile[op.fileId] = { ...byFile[op.fileId], ...(edit.newName !== undefined ? { newName: op.newName ?? undefined } : {}), ...(edit.exclude !== undefined ? { exclude: edit.exclude } : {}) };
+  }
+  const details = plan.kind === "organize" ? { ...(prior ?? {}), edits: byFile, revisedFrom: prior?.revisedFrom ?? plan.content_hash } : prior;
   const { plan: next } = savePlanVersion(ctx.db, ws, {
     kind: plan.kind,
     seriesId: plan.series_id,

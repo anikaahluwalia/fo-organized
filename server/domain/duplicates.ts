@@ -15,15 +15,23 @@ export interface CopyCandidate {
   /** Drive's MD5 of the content when it has one; anything else (a modified time) proves nothing. */
   contentKey: string | null;
   createdTime: string | null;
+  /** Bytes, when known: empty files all share one MD5 and are never copies of each other. */
+  size?: number | null;
+  /** The user accepted this copy's price, or it's the current version: it's the one to keep. */
+  accepted?: boolean;
+  current?: boolean;
 }
 
 export const inDuplicatesFolder = (path: string) => path.split("/").includes(DUPLICATES_FOLDER);
 const numbered = (name: string) => /\s\(\d+\)(\.[A-Za-z0-9]{1,5})?$/.test(name);
 
-/** The copy to keep: not already set aside, not a "(2)" name, the oldest, then a stable tiebreak. */
+/** The copy to keep: accepted or current first, then not set aside, filed, not a "(2)" name, the oldest. */
 function keeperOrder(a: CopyCandidate, b: CopyCandidate): number {
   return (
+    Number(Boolean(b.accepted)) - Number(Boolean(a.accepted)) ||
+    Number(Boolean(b.current)) - Number(Boolean(a.current)) ||
     Number(inDuplicatesFolder(a.path)) - Number(inDuplicatesFolder(b.path)) ||
+    Number(a.path === "") - Number(b.path === "") ||
     Number(numbered(a.name)) - Number(numbered(b.name)) ||
     (a.createdTime ?? "").localeCompare(b.createdTime ?? "") ||
     a.fileId.localeCompare(b.fileId)
@@ -34,7 +42,7 @@ function keeperOrder(a: CopyCandidate, b: CopyCandidate): number {
 export function exactCopies<T extends CopyCandidate>(docs: T[]): { keep: T; copies: T[] }[] {
   const groups = new Map<string, T[]>();
   for (const d of docs) {
-    if (!d.contentKey || !MD5.test(d.contentKey)) continue;
+    if (!d.contentKey || !MD5.test(d.contentKey) || d.size === 0) continue;
     const k = d.contentKey.toLowerCase();
     groups.set(k, [...(groups.get(k) ?? []), d]);
   }

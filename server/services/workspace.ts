@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { all, kvGet, kvSet, logEvent, now, one, run, tx, type Db, type DocumentRow, type FileOrigin, type FileRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
 import { DEMO_WORKSPACE_NAME, demoFileContent, MESSY_FOLDER, NEW_SUPPLIER_INVOICE, REVISED_QUOTE, SECOND_REVISION, type DemoDoc } from "../demo/renovation.ts";
 import { FACTS_VERSION, toFacts, type DocFacts } from "../domain/documents.ts";
+import { isSameCollection } from "../domain/collections.ts";
 import { CATEGORY } from "../domain/naming.ts";
 import { join } from "../domain/plan.ts";
 import { badRequest, conflict } from "../errors.ts";
@@ -267,6 +268,21 @@ async function upgradeFacts(ctx: Ctx, doc: DocumentRow): Promise<boolean> {
   }
 }
 
+/**
+ * The project a document's own text names. When that's a collection Kiki already keeps, spelled
+ * differently ("CS245" for "CS 245"), it's that collection, so a new file shows in its index.
+ */
+export function projectNamed(db: Db, wsId: string, name: string): ProjectRow {
+  const projects = all<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? ORDER BY created_at, id", wsId);
+  const same = (ps: ProjectRow[]) => ps.filter((p) => isSameCollection(p.name, name));
+  const kept = same(projects.filter((p) => p.index_file_id));
+  if (kept.length === 1) return kept[0]!;
+  const exact = projects.find((p) => p.name === name);
+  if (exact) return exact;
+  const spelled = same(projects);
+  return spelled.length === 1 ? spelled[0]! : ensureProject(db, wsId, name);
+}
+
 export function ensureProject(db: Db, wsId: string, name: string): ProjectRow {
   const existing = one<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? AND name = ? ORDER BY created_at, id LIMIT 1", wsId, name);
   if (existing) return existing;
@@ -317,7 +333,7 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
         const raw = await ctx.reader.read(content, file.name);
         const facts = toFacts(raw, localText(content));
         tx(ctx.db, () => {
-          const project = facts.project.value ? ensureProject(ctx.db, wsId, facts.project.value) : null;
+          const project = facts.project.value ? projectNamed(ctx.db, wsId, facts.project.value) : null;
           run(
             ctx.db,
             `UPDATE documents SET doc_type = ?, facts_json = ?, project_id = COALESCE(?, project_id), read_status = 'read', read_mode = ?, read_error = NULL,

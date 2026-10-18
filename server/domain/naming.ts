@@ -70,6 +70,7 @@ export function targetFolder(facts: DocFacts, files: Parameters<typeof projectFo
 
 export function sanitizeName(name: string): string {
   return name
+    .replace(/\s*:\s+/g, " - ")
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
     .replace(/\s+/g, " ")
     .trim()
@@ -104,13 +105,26 @@ export function meaningfulTitle(title: string | null | undefined): string | null
   return words.length > 0 && words.every((w) => GENERIC_TITLE_WORDS.has(w)) ? null : t;
 }
 
+/** A long title cut at its last clause break that fits ("2026 Property Assessment - 12 Cedar Lane"), else after a whole word, marked "…". */
+function shortTitle(title: string, max = 60): string {
+  if (title.length <= max) return title;
+  const head = title.slice(0, max);
+  const clause = Math.max(...[" - ", ", ", ": ", "; "].map((s) => head.lastIndexOf(s)));
+  if (clause >= 20) return head.slice(0, clause);
+  return `${(/\s/.test(title[max]!) ? head : head.replace(/\s+\S*$/, "")).trimEnd()}…`;
+}
+
 export function proposedName(facts: DocFacts, originalName: string, mimeType: string): string | null {
   const date = facts.date.value;
   const issuer = facts.issuer.value;
   const title = meaningfulTitle(facts.title?.value);
   if (!date && !issuer && !title) return null;
   const label = facts.docType === "quote" && facts.revision.isRevision ? "Revised quote" : TYPE_LABELS[facts.docType];
-  const parts = [title || label, issuer, facts.reference.value].filter((p): p is string => Boolean(p));
+  const short = title ? shortTitle(title) : null;
+  const key = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // A reference already in the (shortened) title isn't repeated.
+  const reference = facts.reference.value && !(short && key(short).includes(key(facts.reference.value))) ? facts.reference.value : null;
+  const parts = [short || label, issuer, reference].filter((p): p is string => Boolean(p));
   const base = `${date ? `${date} ` : ""}${parts.join(" - ")}`;
   return sanitizeName(base) + extension(originalName, mimeType);
 }

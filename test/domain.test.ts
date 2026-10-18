@@ -183,7 +183,7 @@ describe("naming.ts", () => {
 
   test("slashes and other characters Drive paths can't hold are replaced", () => {
     const name = proposedName(facts({ issuer: "North/South: Floors\\Tiles", reference: "Q/10*42" }), "scan.pdf", "application/pdf")!;
-    assert.equal(name, "2026-09-28 Quote - North-South- Floors-Tiles - Q-10-42.pdf");
+    assert.equal(name, "2026-09-28 Quote - North-South - Floors-Tiles - Q-10-42.pdf");
     assert.doesNotMatch(name.replace(/\.pdf$/, ""), /[\\/:*?"<>|]/);
   });
 
@@ -191,6 +191,16 @@ describe("naming.ts", () => {
     const name = proposedName(facts({ issuer: "Oakline ".repeat(40) }), "scan.pdf", "application/pdf")!;
     assert.ok(name.length <= 154, `length ${name.length}`);
     assert.ok(name.endsWith(".pdf"));
+  });
+
+  test("a long title is cut at a clause break, and a reference cut from it is named after it", () => {
+    const letter = {
+      ...facts({ docType: "correspondence", issuer: "Riverton Property Tax Office", reference: "4401-220-118", date: "2026-09-30" }),
+      title: known("2026 Property Assessment - 12 Cedar Lane, Roll No. 4401-220-118"),
+    };
+    assert.equal(proposedName(letter, "scan 9.pdf", "application/pdf"), "2026-09-30 2026 Property Assessment - 12 Cedar Lane - Riverton Property Tax Office - 4401-220-118.pdf");
+    const noBreak = { ...facts({ issuer: null, reference: null }), title: known("Notes on the structural induction proofs for lists and trees and graphs") };
+    assert.equal(proposedName(noBreak, "n.txt", "text/plain"), "2026-09-28 Notes on the structural induction proofs for lists and trees….txt");
   });
 
   test("a document goes to its project's folder for its type, or nowhere when either is unknown", () => {
@@ -359,8 +369,13 @@ describe("documents.ts", () => {
     }
     assert.equal(normalizeProject("  CS   245  "), "CS 245");
   });
-  test("normalizeProject rejects empty and unsafe folder segments", () => {
-    for (const name of [null, undefined, "", "..", ".", "a/b", "a\\b", "a".repeat(151)]) assert.equal(normalizeProject(name), null);
+  test("normalizeProject rejects empty, dot and folder-climbing names", () => {
+    for (const name of [null, undefined, "", "..", ".", "../../outside", "a/../b", "a\\..\\b", "a".repeat(151)]) assert.equal(normalizeProject(name), null);
+  });
+  test("normalizeProject replaces what a folder name can't hold, so a project is always one folder", () => {
+    assert.equal(normalizeProject("Q3/Q4 planning"), "Q3-Q4 planning");
+    assert.equal(normalizeProject("CS 245: Logic and Computation"), "CS 245 - Logic and Computation");
+    assert.equal(normalizeProject("a\\b"), "a-b");
   });
 });
 
@@ -554,7 +569,7 @@ describe("plan.ts buildOrganizePlan", () => {
     assert.equal(note("mystery.pdf")?.status, "needs_review");
     assert.equal(note("mystery.pdf")?.reason, "Kiki couldn't tell what kind of document this is.");
     assert.equal(note("Business licence 2026.pdf")?.status, "left_in_place");
-    assert.match(note("Business licence 2026.pdf")!.reason, /needs clarification/);
+    assert.match(note("Business licence 2026.pdf")!.reason, /doesn't say which project or folder it belongs to/);
     assert.equal(note("Quote (shortcut)")?.status, "left_in_place");
     assert.match(note("Quote (shortcut)")!.reason, /shortcut/);
     assert.equal(note("new scan.pdf")?.status, "waiting");

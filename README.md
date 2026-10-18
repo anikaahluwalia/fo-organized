@@ -81,7 +81,7 @@ npm run typecheck
 
 ## Known limits
 
-- One user and one workspace folder. New filing uses `Projects/<stated collection>/<document type>`; existing legacy renovation project folders are reused. Arbitrary user-defined folder layouts and inferred collections are not implemented yet.
+- One user and one workspace folder. Kiki files loose files (at the top of the workspace, or in catch-all folders like "Old scans"); anything in a folder you made stays put. A file goes into a folder you already keep when its name matches, otherwise into `Projects/<collection>/<document type>`, where one collection holds a project however its documents spell it. Existing legacy renovation project folders are reused.
 - Recognized types now include notes, reports, research, assignments, presentations, spreadsheets, correspondence and itineraries as well as business documents. Classification does not add file-format support: unsupported formats remain unreadable.
 - General document understanding has automated mock-based coverage; live extraction quality across these new types has not yet been evaluated. Replacement matching, current-version tracking and contractor outreach remain quote-specific.
 - Existing stored classifications and project assignments are retained during the facts upgrade, so old files are not silently reclassified. New content reads use the general reader.

@@ -242,7 +242,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
 
   // Index: per project, from verified locations and read facts.
   const openDispatchDocs = new Set(all<{ document_id: string }>(db, "SELECT document_id FROM dispatches WHERE open = 1").map((r) => r.document_id));
-  const index: ProjectIndexView[] = all<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? ORDER BY name", ws.id).map((project) => {
+  const index: ProjectIndexView[] = all<ProjectRow>(db, "SELECT * FROM projects WHERE workspace_id = ? ORDER BY name", ws.id).flatMap((project) => {
     const rows: IndexRowView[] = projectIndexRows(db, project).map((r) => {
       const lastEvent = one<VersionEventRow>(db, "SELECT * FROM version_events WHERE document_id = ? ORDER BY id DESC LIMIT 1", r.doc.id);
       return {
@@ -263,7 +263,9 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
         canAsk: r.facts.docType === "quote" && r.doc.version_status !== "superseded" && !openDispatchDocs.has(r.doc.id),
       };
     });
-    return { name: project.name, category: project.category, indexFileLink: project.index_file_id ? (fileById.get(project.index_file_id)?.web_link ?? null) : null, rows };
+    // A spelling none of the documents carries any more: they were filed into its collection.
+    if (rows.length === 0 && !project.index_file_id) return [];
+    return [{ name: project.name, category: project.category, indexFileLink: project.index_file_id ? (fileById.get(project.index_file_id)?.web_link ?? null) : null, rows }];
   });
 
   // Outreach per quote.

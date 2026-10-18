@@ -116,11 +116,20 @@ export function quoteFound(source: string, quote: string | null | undefined): bo
   return normalize(source).includes(normalize(quote));
 }
 
-/** Preserve arbitrary collection identities; reject labels that cannot safely be one path segment. */
+/**
+ * A project as one folder name: what the document calls it, with the characters a folder name
+ * can't hold replaced ("Q3/Q4 planning" -> "Q3-Q4 planning", "CS 245: Logic" -> "CS 245 - Logic").
+ * A label that climbs out of a folder ("../../outside") is refused, not repaired.
+ */
 export function normalizeProject(hint: string | null | undefined): string | null {
-  if (!hint) return null;
-  const name = hint.normalize("NFC").replace(/\s+/g, " ").trim();
-  if (!name || name.length > 150 || name === "." || name === ".." || /[\\/:*?"<>|\u0000-\u001f]/.test(hint)) return null;
+  if (!hint || hint.split(/[\\/]/).some((s) => /^\s*\.+\s*$/.test(s))) return null;
+  const name = hint
+    .normalize("NFC")
+    .replace(/\s*:\s+/g, " - ")
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!name || name.length > 150) return null;
   return name;
 }
 

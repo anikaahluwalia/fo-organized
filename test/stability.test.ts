@@ -43,27 +43,27 @@ test("a background re-read never renames a filed document, even when the reader 
   rig.app.close();
 });
 
-test("Fo texts only about new documents, not about renaming ones already filed", async () => {
+test("a filed document isn't renamed when it reads differently later, and Fo texts only about new documents", async () => {
   const fo = new MockFoClient({ stepMs: 5, replyDelayMs: 0 });
   const rig = makeRig({ fo });
   await organized(rig);
   rig.app.updateSettings({ autoText: true });
-  // A filed document now reads differently (a real title), so Kiki proposes renaming it.
+  // A filed document now reads differently (a real title). It's filed, so its name stays.
   const filed = all<{ id: string; facts_json: string }>(rig.db, "SELECT id, facts_json FROM documents WHERE doc_type = 'quote' LIMIT 1")[0]!;
   const facts = JSON.parse(filed.facts_json) as DocFacts;
   run(rig.db, "UPDATE documents SET facts_json = ? WHERE id = ?", JSON.stringify({ ...facts, title: { value: "Main floor oak", quote: null, quoteFound: null } }), filed.id);
   rig.app.refreshInventory();
   await rig.app.settle();
   let view = await rig.app.view();
-  assert.ok(view.plans.some((p) => p.status === "proposed" && p.ops.some((o) => o.kind === "move_rename")), "the rename is proposed in the app");
-  assert.equal(view.notifications.length, 0, "but it isn't news: no text");
+  assert.equal(view.plans.some((p) => p.status === "proposed" && p.ops.some((o) => o.kind === "move_rename")), false, "no rename proposed");
+  assert.equal(view.notifications.length, 0, "and no text");
 
-  // A new invoice arrives: that's worth a text, which also mentions the rename.
+  // A new invoice arrives: that's worth a text.
   await rig.app.stageRevision("invoice");
   await rig.app.settle();
   view = await rig.app.view();
   const text = view.notifications[0]?.text ?? "";
   assert.match(text, /^Kiki: a new invoice from Northside Building Supply/);
-  assert.match(text, /rename or move 1 document already filed/);
+  assert.doesNotMatch(text, /already filed/);
   rig.app.close();
 });

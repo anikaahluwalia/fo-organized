@@ -283,15 +283,16 @@ class Execution {
   }
 
   /**
-   * A document filed into a project folder belongs to that project, even when the project came
-   * from what Kiki knows about its supplier rather than from the document itself, so the index
-   * lists it. Moved back out by an undo, it only keeps a project its own text names.
+   * A document filed into a project folder belongs to that project, so the index lists it: also
+   * when its text spells the project differently ("CS245" filed into "CS 245") or names none
+   * (placed by its title or its supplier). Moved back out by an undo, it only keeps a project its
+   * own text names.
    */
   private recordProject(op: PlanOpRow): void {
     if (!op.doc_id) return;
     const [category, project] = (op.new_path ?? "").split("/");
     if (this.plan.kind !== "undo" && (category === CATEGORY || category === "Renovations") && project) {
-      run(this.ctx.db, "UPDATE documents SET project_id = ?, updated_at = ? WHERE id = ? AND project_id IS NULL", ensureProject(this.ctx.db, this.ws.id, project).id, now(), op.doc_id);
+      run(this.ctx.db, "UPDATE documents SET project_id = ?, updated_at = ? WHERE id = ?", ensureProject(this.ctx.db, this.ws.id, project).id, now(), op.doc_id);
     } else if (this.plan.kind === "undo" && category !== CATEGORY && category !== "Renovations") {
       run(this.ctx.db, "UPDATE documents SET project_id = NULL, updated_at = ? WHERE id = ? AND json_extract(facts_json, '$.project.value') IS NULL", now(), op.doc_id);
     }

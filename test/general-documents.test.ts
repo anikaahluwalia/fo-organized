@@ -76,7 +76,7 @@ test("a shared author alone cannot assign academic notes to a project", () => {
     docs: [known, unknown].map((facts, i) => ({ docId: i ? "b" : "a", fileId: i ? "b" : "a", facts, readStatus: "read", readError: null, versionStatus: null })), indexFiles: {},
   });
   assert.equal(plan.ops.some((o) => o.fileId === "b"), false);
-  assert.match(plan.notes.find((n) => n.fileId === "b")!.reason, /clarification/);
+  assert.match(plan.notes.find((n) => n.fileId === "b")!.reason, /doesn't say which project or folder it belongs to/);
 });
 
 test("legacy stored project records keep their index when new documents arrive", async (t) => {
