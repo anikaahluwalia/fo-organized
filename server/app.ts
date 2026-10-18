@@ -219,6 +219,9 @@ export function createApp(deps: AppDeps) {
       }
       const ws = activeWorkspace(db);
       if (ws) jobs.enqueue("read", `read:${ws.id}`, { workspaceId: ws.id });
+      // An open proposal that never reached Fo (made while Kiki ran older code, or texts were off):
+      // with texts on, Fo brings it now. Each proposal is texted at most once.
+      for (const p of db.prepare("SELECT * FROM plans WHERE status = 'proposed' AND workspace_id = ?").all(ws?.id ?? "") as unknown as PlanRow[]) autoNotifyProposal(ctx, p);
     },
     start() {
       jobs.start();

@@ -90,3 +90,22 @@ test("dropping a copy and a file Kiki can't place gets you one text about both",
   assert.match(texts[0]!.text ?? "", /"quote again\.pdf" is an exact copy/);
   assert.match(texts[0]!.text ?? "", /can't tell where "thoughts\.txt" goes/);
 });
+
+test("a proposal that never reached Fo is texted when Kiki starts, once", async (t) => {
+  const fo = new FakeFo();
+  const rig = makeRig({ fo });
+  rig.app.ctx.watchIntervalSeconds = 3600;
+  t.after(() => rig.app.close());
+  fo.onAsk = async (_args, n) => reply(`kiki-${n}`, "complete", { response: TEXTED });
+  await organized(rig);
+  await rig.app.stageRevision("invoice"); // proposed while texts were off
+  await rig.app.settle();
+  assert.equal(fo.asks.length, 0);
+  rig.app.updateSettings({ autoText: true });
+  rig.app.recover();
+  await rig.app.settle();
+  assert.equal(fo.asks.filter((a) => a.message.startsWith("Please text me")).length, 1, "texted on start");
+  rig.app.recover();
+  await rig.app.settle();
+  assert.equal(fo.asks.filter((a) => a.message.startsWith("Please text me")).length, 1, "not again");
+});
