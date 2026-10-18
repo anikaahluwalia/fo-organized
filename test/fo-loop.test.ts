@@ -849,7 +849,7 @@ describe("texts to the account holder through Fo", () => {
     assert.match(rig.fo.asks[0]!.message, /The exact proposal this text is about/, "and every step is with Fo");
     const ask = rig.fo.asks[0]!;
     assert.equal(ask.newConversation, true);
-    assert.match(ask.message, /^Please text me \(an SMS to my phone, nobody else\) this exact message:/);
+    assert.match(ask.message, /^Please text me \(an SMS to my phone, nobody else\) this exact message\. Send only the text between the two marker lines, never the marker lines themselves:/);
     assert.match(ask.message, /Don't contact anyone else/);
     assert.match(ask.message, /Please don't move or change any files yourself/);
     const [note] = (await rig.app.view()).notifications;

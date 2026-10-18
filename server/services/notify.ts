@@ -64,7 +64,10 @@ export function notifyPreview(ctx: Ctx): { text: string; contentHash: string; pl
 }
 
 function message(text: string, reference: string, channel: "note" | "text" = "note", expectReply = false, context = ""): string {
-  const how = channel === "text" ? "Please text me (an SMS to my phone, nobody else) this exact message:" : "Please send me (nobody else) this exact note, the way you normally reach me:";
+  const how =
+    channel === "text"
+      ? "Please text me (an SMS to my phone, nobody else) this exact message. Send only the text between the two marker lines, never the marker lines themselves:"
+      : "Please send me (nobody else) this exact note, the way you normally reach me. Send only the text between the two marker lines, never the marker lines themselves:";
   const reply = expectReply
     ? `
 
