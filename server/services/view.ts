@@ -50,6 +50,7 @@ import { notifyOutcome, notifyPlanId, notifyPurpose, notifyText, replyState } fr
 import { foundAttachments } from "./attachments.ts";
 import { attentionItems } from "./attention.ts";
 import { lessonsView } from "./lessons.ts";
+import { redact } from "../secrets.ts";
 
 const STATUS_WORD: Record<string, string> = { current: "current", superseded: "superseded", unresolved: "not yet confirmed", proposed: "proposed" };
 
@@ -65,7 +66,7 @@ function docView(d: DocumentRow): DocView {
     docType: d.doc_type,
     readStatus: d.read_status,
     readMode: d.read_mode,
-    readError: d.read_error,
+    readError: d.read_error === null ? null : redact(d.read_error),
     issuer: fact(f?.issuer),
     reference: fact(f?.reference),
     date: fact(f?.date),

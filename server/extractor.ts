@@ -6,6 +6,7 @@ import { PATTERN_SYSTEM_PROMPT, PatternSchema, patternUserMessage, type Pattern 
 import { mockInterpret, OUTCOME_SYSTEM_PROMPT, OutcomeSchema, outcomeUserMessage, verifyOutcome, type Outcome, type OutcomeContext } from "./domain/outcome.ts";
 import { COMPOSE_SYSTEM_PROMPT, ComposeSchema, composeUserMessage, type ComposeFacts, type Composed } from "./domain/compose.ts";
 import { pdfText } from "./domain/pdftext.ts";
+import { redact } from "./secrets.ts";
 import type { DriveContent } from "./google/types.ts";
 
 /** Reads documents and interprets Fo conversation turns. Live = Claude; mock = labelled patterns. */
@@ -66,16 +67,18 @@ export class MockReader implements Reader {
 }
 
 function claudeError(err: unknown, model: string): ReadError {
+  // A key with a space or comment in it fails before Claude is even asked, with the key in the message.
+  if (err instanceof TypeError && /header/i.test(err.message)) return new ReadError("ANTHROPIC_API_KEY looks malformed: set it to the key alone, with no spaces or comment after it.");
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
     return new ReadError("Claude isn't configured on the server. Set ANTHROPIC_API_KEY in .env and restart, or run in mock mode.");
   }
   if (err instanceof Anthropic.NotFoundError) return new ReadError(`The Claude model "${model}" isn't available to this API key.`);
   if (err instanceof Anthropic.RateLimitError) return new ReadError("Claude is rate-limiting requests. Kiki will try again.", { retryable: true });
-  if (err instanceof Anthropic.BadRequestError) return new ReadError(`Claude rejected the request: ${err.message}`);
+  if (err instanceof Anthropic.BadRequestError) return new ReadError(redact(`Claude rejected the request: ${err.message}`));
   if (err instanceof Anthropic.InternalServerError) return new ReadError("Claude had a temporary problem. Kiki will try again.", { retryable: true });
   if (err instanceof Anthropic.APIConnectionError) return new ReadError("Couldn't reach Claude. Kiki will try again.", { retryable: true });
-  if (err instanceof Anthropic.APIError) return new ReadError(`Claude request failed: ${err.message}`);
-  return new ReadError(err instanceof Error ? err.message : String(err));
+  if (err instanceof Anthropic.APIError) return new ReadError(redact(`Claude request failed: ${err.message}`));
+  return new ReadError(redact(err instanceof Error ? err.message : String(err)));
 }
 
 export class ClaudeReader implements Reader {

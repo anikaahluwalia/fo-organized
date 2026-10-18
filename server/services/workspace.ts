@@ -9,6 +9,7 @@ import { badRequest, conflict } from "../errors.ts";
 import { localText, ReadError } from "../extractor.ts";
 import { changeToken, DriveError, FOLDER_MIME, SHORTCUT_MIME, type DriveFile } from "../google/types.ts";
 import type { Ctx } from "./context.ts";
+import { redact } from "../secrets.ts";
 
 export function activeWorkspace(db: Db): WorkspaceRow | undefined {
   return one<WorkspaceRow>(db, "SELECT * FROM workspaces WHERE active = 1");
@@ -355,7 +356,7 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
         readTypes.set(facts.docType, (readTypes.get(facts.docType) ?? 0) + 1);
       } catch (err) {
         if (err instanceof ReadError && !err.retryable) {
-          run(ctx.db, "UPDATE documents SET read_status = 'failed', read_error = ?, updated_at = ? WHERE id = ?", err.message, now(), doc.id);
+          run(ctx.db, "UPDATE documents SET read_status = 'failed', read_error = ?, updated_at = ? WHERE id = ?", redact(err.message), now(), doc.id);
           continue;
         }
         if (err instanceof DriveError && err.kind === "not_found") {

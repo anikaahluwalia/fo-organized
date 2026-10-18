@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app.ts";
 import { claudeCredentialsPresent, configProblems, loadConfig } from "./config.ts";
 import { openDb } from "./db.ts";
+import { scrubSaved } from "./secrets.ts";
 import { ClaudeReader, MockReader } from "./extractor.ts";
 import { createHttpServer, type OAuthFlow } from "./http.ts";
 import { LiveFoClient } from "./fo/live.ts";
@@ -23,6 +24,7 @@ if (problems.length) {
   process.exit(1);
 }
 const db = openDb(path.join(config.dataDir, "fo-rganized.db"));
+scrubSaved(db);
 
 // Each integration is live or mock by configuration only. A live integration that fails stays a
 // visible failure; it is never swapped for a mock behind the user's back.

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { App } from "./app.ts";
 import type { Config } from "./config.ts";
 import { AppError, badRequest, notFound } from "./errors.ts";
+import { redact } from "./secrets.ts";
 import { cookieValue, endSession, LoginLimiter, loginPage, passwordGeneration, passwordMatches, safeNext, SESSION_COOKIE, sessionCookie, sessionValid, startSession } from "./auth.ts";
 import { createPairingCode, extensionStatus, pairExtension, unpairAll, verifyExtensionToken } from "./extension.ts";
 import { answerPage, submitAnswer } from "./services/answerlink.ts";
@@ -196,7 +197,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
       back.searchParams.set("connected", label);
     } catch (err) {
       // The app says only that it didn't connect (a link's text is never shown as if it were Kiki's); the reason is here.
-      console.error(`Connecting ${label} failed: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
+      console.error(`Connecting ${label} failed: ${redact(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
       back.searchParams.set("connectError", label);
     }
     res.writeHead(302, { ...SECURITY_HEADERS, Location: back.toString(), "Cache-Control": "no-store" });
@@ -384,9 +385,9 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
       if (err instanceof AppError) return send(err.status, { error: err.message, code: err.code });
       const name = err instanceof Error ? err.name : "";
       if (name === "DriveError" || name === "FoCallError") {
-        return send(502, { error: err instanceof Error ? err.message : String(err) });
+        return send(502, { error: redact(err instanceof Error ? err.message : String(err)) });
       }
-      console.error("Request failed:", err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+      console.error("Request failed:", redact(err instanceof Error ? `${err.name}: ${err.message}` : String(err)));
       send(500, { error: "Something went wrong on the server." });
     }
   });

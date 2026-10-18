@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontex
 import { auth, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { DbOAuthProvider } from "./oauth.ts";
+import { redact } from "../secrets.ts";
 import {
   FoCallError,
   FoConversationListSchema,
@@ -42,7 +43,7 @@ function errorCodes(err: unknown): string[] {
 /** Maps any failure to whether the request could have reached Fo. Unknown is the default. */
 export function classifyFoError(err: unknown, stage: "connect" | "call"): FoCallError {
   if (err instanceof FoCallError) return err;
-  const message = err instanceof Error ? err.message : String(err);
+  const message = redact(err instanceof Error ? err.message : String(err));
   if (err instanceof UnauthorizedError) return new FoCallError("Fo isn't connected. Sign in to Wajo first.", "not_sent", "not_connected");
   if (err instanceof StreamableHTTPError && (err.code === 401 || err.code === 403)) {
     return new FoCallError("Wajo rejected the sign-in. Connect Fo again.", "not_sent", "not_connected");

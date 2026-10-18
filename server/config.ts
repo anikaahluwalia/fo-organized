@@ -1,4 +1,5 @@
 import path from "node:path";
+import { malformedSecrets } from "./secrets.ts";
 
 export type IntegrationMode = "live" | "mock";
 
@@ -58,11 +59,12 @@ export interface Config {
 const MIN_PASSWORD = 12;
 
 /** Why Kiki can't start with this configuration (empty when she can). */
-export function configProblems(c: Config): string[] {
+export function configProblems(c: Config, env: NodeJS.ProcessEnv = process.env): string[] {
   const problems: string[] = [];
   if (c.hosted && !c.password) problems.push(`Kiki is online (APP_ORIGIN is ${c.appOrigin}), so set KIKI_PASSWORD (${MIN_PASSWORD} characters or more) first.`);
   if (!c.hosted && !c.password && !["127.0.0.1", "::1", "localhost"].includes(c.listenHost)) problems.push(`Kiki would listen on ${c.listenHost} (beyond this machine), so set KIKI_PASSWORD (${MIN_PASSWORD} characters or more) first.`);
   if (c.password !== null && c.password.length < MIN_PASSWORD) problems.push(`KIKI_PASSWORD needs ${MIN_PASSWORD} characters or more.`);
+  for (const name of malformedSecrets(env)) problems.push(`${name} has a space or a comment in it: set it to the value alone.`);
   return problems;
 }
 
