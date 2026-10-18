@@ -274,6 +274,8 @@ export interface EventView {
 export interface NotificationView {
   taskId: string;
   purpose: "find" | "done" | "summary";
+  /** The plan the text was about. */
+  planId: string | null;
   reply: { status: "waiting" | "approved" | "declined" | "expired" | "stale" | "failed"; text: string | null; source: "text_reply" | "relayed_by_fo" | null } | null;
   mode: Mode;
   state: FoTaskView["state"];

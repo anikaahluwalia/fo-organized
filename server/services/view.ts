@@ -46,7 +46,7 @@ import type { Ctx } from "./context.ts";
 import { projectIndexRows } from "./indexfile.ts";
 import { getUserName, requestOf } from "./outreach.ts";
 import { activeWorkspace, docFacts } from "./workspace.ts";
-import { notifyOutcome, notifyPurpose, notifyText, replyState } from "./notify.ts";
+import { notifyOutcome, notifyPlanId, notifyPurpose, notifyText, replyState } from "./notify.ts";
 import { foundAttachments } from "./attachments.ts";
 import { attentionItems } from "./attention.ts";
 
@@ -387,6 +387,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
   const notifications = all<FoTaskRow>(db, "SELECT * FROM fo_tasks WHERE kind = 'notify' AND mode = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10", integrations.fo.mode, ws.created_at).map((t) => ({
     taskId: t.id,
     purpose: notifyPurpose(ctx, t.id),
+    planId: notifyPlanId(ctx, t.id),
     reply: (() => {
       const r = replyState(ctx, t.id);
       return r ? { status: r.status, text: r.text, source: r.source } : null;

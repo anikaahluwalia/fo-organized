@@ -111,6 +111,14 @@ export function replyState(ctx: Ctx, taskId: string): ReplyState | null {
   return raw ? (JSON.parse(raw) as ReplyState) : null;
 }
 
+/** The plan a text was about: the proposal it offered, the plan it reported done, or the one it summarized. */
+export function notifyPlanId(ctx: Ctx, taskId: string): string | null {
+  const r = replyState(ctx, taskId);
+  if (r?.planId) return r.planId;
+  const row = one<{ key: string }>(ctx.db, "SELECT key FROM kv WHERE (key LIKE 'notify.done.%' OR key LIKE 'notify.plan.%') AND value = ?", taskId);
+  return row ? row.key.replace(/^notify\.(done|plan)\./, "") : null;
+}
+
 function saveReply(ctx: Ctx, taskId: string, state: ReplyState): void {
   kvSet(ctx.db, `notify.reply.${taskId}`, JSON.stringify(state));
 }

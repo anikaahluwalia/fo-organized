@@ -339,6 +339,17 @@ function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAct
   );
 }
 
+/**
+ * Fo's latest text belongs next to the plan it was about: while Fo is still sending it, while
+ * that plan is proposed or running, or for a while after a "done" or summary text. An older text
+ * about a plan that's gone shouldn't read as being about the plan on screen now.
+ */
+function textIsCurrent(n: NotificationView, proposedId: string | null, runningId: string | null): boolean {
+  if (n.state !== "complete") return true;
+  if (n.planId && (n.planId === proposedId || n.planId === runningId)) return true;
+  return n.purpose !== "find" && Date.now() - Date.parse(n.createdAt) < 30 * 60_000;
+}
+
 const ATTENTION_CHIP: Record<AttentionItemView["kind"], { label: string; tone: string }> = {
   missing: { label: "Missing", tone: "chip--missing" },
   expired: { label: "Expired", tone: "chip--missing" },
@@ -487,7 +498,10 @@ function FoUpdates({ view, act }: { view: AppView; act: ReturnType<typeof useAct
 function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
   const [preview, setPreview] = useState<{ text: string; contentHash: string } | null>(null);
   const requestId = useMemo(() => newId(), [preview?.contentHash]);
-  const latest: NotificationView | undefined = view.notifications[0];
+  // Only a summary you asked for, while it's on its way or just sent; otherwise offer a new one.
+  const latest: NotificationView | undefined = view.notifications.find(
+    (n) => n.purpose === "summary" && (n.state !== "complete" || Date.now() - Date.parse(n.createdAt) < 30 * 60_000),
+  );
   const fo = view.integrations.fo;
   const foLabel = fo.mode === "mock" ? "Mock Fo" : "Fo";
 
@@ -657,7 +671,7 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
           </span>
         </label>
       )}
-      {view.notifications[0] && (proposed || running || view.notifications[0].state !== "complete" || view.notifications[0].purpose === "done") && (
+      {view.notifications[0] && textIsCurrent(view.notifications[0], proposed?.id ?? null, running?.id ?? null) && (
         <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} act={act} />
       )}
       {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
