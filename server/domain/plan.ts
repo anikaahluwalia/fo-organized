@@ -179,6 +179,7 @@ function placesThatFit(facts: DocFacts, files: PlanFile[], roots: string[]): str
 function placementReason(dest: Destination): string | null {
   if (dest.how === "choice") return dest.kind === "user" ? `Into your "${dest.path}" folder, as you asked.` : `${dest.name}, as you asked.`;
   if (dest.how === "supplier") return dest.because;
+  if (dest.how === "suggested") return `${dest.kind === "user" ? `Your "${dest.path}" folder` : dest.name}: Kiki's suggestion for a ${dest.because.toLowerCase()}.`;
   if (dest.how === "learned") return `${dest.kind === "user" ? `Into your "${dest.path}" folder` : dest.name}, like the ${dest.because} you filed there before.`;
   if (dest.kind === "user") return `Into your "${dest.path}" folder: it says "${dest.because}".`;
   if (dest.how === "title") return `Goes with ${dest.name}: its title is "${dest.because}".`;
@@ -326,7 +327,13 @@ export function buildOrganizePlan(input: {
     // Nothing in the document says where it goes, but you filed one like it before: same place.
     const learned = !chosen && !destinations.get(doc.docId) && doc.facts.docType !== "unknown" ? matchLesson(input.lessons ?? [], file.name, doc.facts) : null;
     const before = learned ? choosePlace(learned.place, input.files, roots) : null;
-    const dest = chosen ? choosePlace(chosen, input.files, roots) : (destinations.get(doc.docId) ?? (before && learned ? { ...before, how: "learned" as const, because: learned.description } : undefined));
+    // Nothing says where it goes and you haven't shown her: where a file like it naturally goes, as
+    // Kiki's suggestion (you approve it like any other step).
+    const usual = !chosen && !destinations.get(doc.docId) && !before && doc.facts.docType !== "unknown" && doc.facts.suggested ? choosePlace(doc.facts.suggested, input.files, roots) : null;
+    const dest = chosen
+      ? choosePlace(chosen, input.files, roots)
+      : (destinations.get(doc.docId) ??
+        (before && learned ? { ...before, how: "learned" as const, because: learned.description } : usual ? { ...usual, how: "suggested" as const, because: doc.facts.kind ?? "file like this" } : undefined));
     const facts = dest?.kind === "kiki" ? { ...doc.facts, project: { value: dest.name, quote: null, quoteFound: null } } : doc.facts;
     const folder = !dest || facts.docType === "unknown" ? null : dest.kind === "user" ? dest.path : targetFolder(facts, layout);
     if (chosen && !folder) {

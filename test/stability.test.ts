@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { all, run } from "../server/db.ts";
-import { mockRead, toFacts, type DocFacts } from "../server/domain/documents.ts";
+import { FACTS_VERSION, mockRead, toFacts, type DocFacts } from "../server/domain/documents.ts";
 import { meaningfulTitle, proposedName } from "../server/domain/naming.ts";
 import { MockFoClient } from "../server/fo/mock.ts";
 import { makeRig, organized } from "./helpers.ts";
@@ -37,7 +37,7 @@ test("a background re-read never renames a filed document, even when the reader 
   rig.app.refreshInventory();
   await rig.app.settle();
   const facts = all<{ facts_json: string }>(rig.db, "SELECT facts_json FROM documents WHERE facts_json IS NOT NULL").map((d) => JSON.parse(d.facts_json) as DocFacts);
-  assert.ok(facts.every((f) => f.version === 3 && !f.title?.value), "names come from what was read when the file was filed");
+  assert.ok(facts.every((f) => f.version === FACTS_VERSION && !f.title?.value), "names come from what was read when the file was filed");
   assert.equal((await rig.app.view()).plans.length, plansBefore, "no new proposal");
   assert.deepEqual([...rig.drive.files.values()].map((f) => f.name).sort(), names);
   rig.app.close();

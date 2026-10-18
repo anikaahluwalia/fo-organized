@@ -531,7 +531,7 @@ function describe(ctx: Ctx, name: string, docId: string | null, fileId: string |
       : undefined;
   const f = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
   const personal = isPersonalId(f, name);
-  const about = [f?.title?.value, f?.issuer?.value, personal ? null : f?.reference?.value, f?.docType && f.docType !== "unknown" && f.docType !== "other" ? f.docType : null, f?.project?.value]
+  const about = [f?.title?.value, f?.kind, f?.issuer?.value, personal ? null : f?.reference?.value, f?.docType && f.docType !== "unknown" && f.docType !== "other" ? f.docType : null, f?.project?.value]
     .filter((x): x is string => Boolean(x))
     .map((x) => inert(personal ? withoutIdNumbers(x, f?.reference?.value) : x, 120))
     .filter(Boolean);

@@ -38,6 +38,20 @@ const CASES: { id: string; facts: ComposeFacts }[] = [
     id: "many-files",
     facts: { situation: "new", workspace: ws, answer: "reply_or_link", items: Array.from({ length: 7 }, (_, i) => ({ n: i + 1, kind: "file" as const, name: `receipt_${i + 1}.pdf`, about: ["receipt"], folder: i < 4 ? "Kitchen › Receipts" : "Flooring › Receipts" })), alsoTidying: 2 },
   },
+  {
+    id: "mixed",
+    facts: {
+      situation: "new",
+      workspace: ws,
+      answer: "reply_or_link",
+      items: [
+        { n: 1, kind: "file", name: "ANIKA_AHLUWALIA_RESUME_SWE.pdf", about: ["Résumé", "Anika Ahluwalia"], folder: "Career" },
+        { n: 2, kind: "copy", name: "Screenshot 2026-10-18 at 2.02.22 PM 1.png", about: ["Screenshot"] },
+        { n: 3, kind: "unplaced", name: "Screenshot 2026-10-18 at 2.40.02 PM.png", about: ["Screenshot"] },
+        { n: 4, kind: "unplaced", name: "kiki.png", about: ["Illustration"] },
+      ],
+    },
+  },
   { id: "question", facts: { situation: "question", workspace: ws, answer: "reply_or_link", items: [{ ...timesheet, kind: "unplaced", folder: undefined, options: ["Flooring renovation › Other documents"] }] } },
   { id: "copy", facts: { situation: "new", workspace: ws, answer: "reply_or_link", items: [{ n: 1, kind: "copy", name: "quote again.pdf", about: ["Oakline Flooring Co.", "Q-1042", "quote"] }] } },
   { id: "revised", facts: { situation: "revised", workspace: ws, answer: "reply_or_link", items: [{ ...timesheet, folder: "Work › Other documents" }] } },

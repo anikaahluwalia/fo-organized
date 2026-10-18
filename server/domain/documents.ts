@@ -25,11 +25,14 @@ export const ReadSchema = z.object({
   }),
   refers_to: z.array(z.object({ doc_type: z.enum(DOC_TYPES), reference: z.string().nullable(), quote: z.string().nullable() })),
   validity: z.object({ until: z.string().nullable(), days: z.number().nullable(), quote: z.string().nullable() }),
+  // What the file is and where it would naturally go: Kiki's reading of it, not a fact it states.
+  kind: z.string().nullable().optional(),
+  belongs_with: z.string().nullable().optional(),
 });
 export type ReadResult = z.infer<typeof ReadSchema>;
 
 /** Bumped when stored facts gain fields. Older facts get the new fields on a background re-read. */
-export const FACTS_VERSION = 3;
+export const FACTS_VERSION = 4;
 
 export const READ_SYSTEM_PROMPT = `You read one file for Kiki, an assistant that organizes business, academic, and personal workspaces.
 
@@ -43,12 +46,14 @@ Rules:
 - issuer: the organization or person that issued or authored the document, as written.
 - document_date: the document's own date as YYYY-MM-DD, only if it is stated unambiguously.
 - total: the grand total as a number (no currency symbols or commas), with the stated currency code if any.
-- project: the explicitly named project, course, event, or collection, or null. Preserve identifying details (course codes, addresses, dates, client names); never collapse distinct projects into a generic topic. Do not invent a project from the filename or subject matter.
+- project: the explicitly named project, course, event, or collection, or null. Preserve identifying details (course codes, addresses, dates, client names); never collapse distinct projects into a generic topic. Do not invent a project from the filename or subject matter. In a screenshot or photo of an app, website or chat, a name that's merely visible on screen is not its project.
 - scope_summary: one plain sentence describing the contents, or null.
 - line_items: priced lines as written, at most 15.
 - revision: whether the document says it revises or replaces an earlier document, its revision label, and the reference it replaces.
 - refers_to: other documents this one names by their reference number (for example "Deposit for Quote Q-1042" names quote Q-1042), at most 5. Never the document's own reference number.
-- validity: when the document states until when it is valid (until, as YYYY-MM-DD) or for how many days (days), with the exact quote. Otherwise nulls.`;
+- validity: when the document states until when it is valid (until, as YYYY-MM-DD) or for how many days (days), with the exact quote. Otherwise nulls.
+- kind: what this file is, in 1 to 3 plain words, singular and capitalized as a label ("Résumé", "Screenshot", "Pay stub", "Driver's licence", "Lecture notes", "Bank statement", "Photo"). Your reading of it, so no quote. Null only if you can't tell at all.
+- belongs_with: when no project is named, the everyday folder a tidy person would keep it in, as a short plural or general name ("Career", "Screenshots", "Personal documents", "School", "Finances", "Home", "Travel", "Health", "Work"). Pick by what the file is for, never by a name that just appears in it. Null if a project is named or there's no sensible place.`;
 
 // Stored facts --------------------------------------------------------------------------
 
@@ -72,6 +77,10 @@ export interface DocFacts {
   revision: { isRevision: boolean; label: string | null; revisesReference: string | null; quote: string | null };
   /** Lines that address AI tools. Recorded so the user can see them; never followed. */
   aiDirectedText: string[];
+  /** What the file is ("Résumé", "Screenshot"): Kiki's reading, not a stated fact. (Absent before version 4.) */
+  kind?: string | null;
+  /** Where it would naturally go when no project is named ("Career"): Kiki's suggestion. (Absent before version 4.) */
+  suggested?: string | null;
   textAvailable: boolean;
   /** Other documents this one names, like the quote a deposit invoice is for. (Absent in facts before version 2.) */
   refersTo?: { docType: DocType; reference: string; quote: string | null }[];
@@ -173,7 +182,14 @@ export function toFacts(read: ReadResult, text: string | null): DocFacts {
       validUntil = { value: addDays(date.value, days), quote: v.quote, quoteFound: vFound, basis: "days" };
     }
   }
+  // A label or a folder name: short, one line, no path or marker tricks.
+  const label = (v: string | null | undefined, max: number) => {
+    const t = (v ?? "").replace(/[\r\n\t]+/g, " ").replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+    return t && t.length <= max ? t : null;
+  };
   return {
+    kind: label(read.kind, 40),
+    suggested: projectFact.value ? null : normalizeProject(label(read.belongs_with, 40)),
     docType: read.doc_type,
     title: fact(read.title?.value?.trim() || null, read.title?.quote ?? null),
     issuer: fact(read.issuer.value?.trim() || null, read.issuer.quote),

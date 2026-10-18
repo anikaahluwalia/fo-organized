@@ -18,7 +18,8 @@ const TYPE_FOLDERS: Record<DocType, string | null> = {
   spreadsheet: "Spreadsheets",
   correspondence: "Correspondence",
   itinerary: "Itineraries",
-  other: "Other documents",
+  // Anything else goes straight into its folder: no "Other documents" level.
+  other: "",
   unknown: null,
 };
 
@@ -64,8 +65,8 @@ export function projectFolderPath(project: string, files: { name: string; path: 
 export function targetFolder(facts: DocFacts, files: Parameters<typeof projectFolderPath>[1] = []): string | null {
   const project = normalizeProject(facts.project.value);
   const typeFolder = TYPE_FOLDERS[facts.docType];
-  if (!project || !typeFolder) return null;
-  return `${projectFolderPath(project, files)}/${typeFolder}`;
+  if (!project || typeFolder === null) return null;
+  return typeFolder ? `${projectFolderPath(project, files)}/${typeFolder}` : projectFolderPath(project, files);
 }
 
 export function sanitizeName(name: string): string {
@@ -137,14 +138,25 @@ export function withoutIdNumbers(s: string, reference?: string | null): string {
     .trim();
 }
 
+/** A name that says nothing about the file: "IMG_2041", "scan_0012", "document (3)", "Untitled", "123". */
+export function isJunkName(name: string): boolean {
+  const base = name.replace(/(\.[a-z0-9]{2,5})+$/i, "").trim();
+  return /^(?:img|image|scan|scanned|doc|document|file|untitled|download|photo|dsc|dscn|pxl|mvimg|copy of)?[\s_-]*(?:\(?\d+\)?[\s_-]*)*$/i.test(base);
+}
+
 export function proposedName(facts: DocFacts, originalName: string, mimeType: string): string | null {
+  // A file that isn't a known kind of document keeps its own name, unless that name says nothing:
+  // a résumé or a screenshot is better known by the name you gave it than by what's written in it.
+  const general = facts.docType === "other" || facts.docType === "unknown";
+  if (general && !isJunkName(originalName)) return null;
   const date = facts.date.value;
   const issuer = facts.issuer.value;
   const personal = isPersonalId(facts, originalName);
   const stated = meaningfulTitle(facts.title?.value);
   const title = stated && personal ? withoutIdNumbers(stated, facts.reference.value) || null : stated;
-  if (!date && !issuer && !title) return null;
-  const label = facts.docType === "quote" && facts.revision.isRevision ? "Revised quote" : TYPE_LABELS[facts.docType];
+  // A junk name is replaced even when all Kiki knows is what the file is ("Boarding pass.png").
+  if (!date && !issuer && !title && !(general && facts.kind)) return null;
+  const label = facts.docType === "quote" && facts.revision.isRevision ? "Revised quote" : general && facts.kind ? facts.kind : TYPE_LABELS[facts.docType];
   const short = title ? shortTitle(title) : null;
   const key = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
   // A reference already in the (shortened) title isn't repeated.

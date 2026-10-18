@@ -739,7 +739,8 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
       {n.state === "working" && n.pollPaused && n.pollError && <p>{n.pollError}</p>}
       {r?.clarification && <p>{fo} needs clarification: “{r.clarification}”</p>}
       {n.state === "working" && n.progress && <p>{n.progress}</p>}
-      {(n.state === "needs_user_input" || (n.state === "complete" && r?.status === "waiting")) && r?.status !== "adjusting" && (r === null || r.status === "waiting") && (
+      {/* Only when Fo actually asks you something: a texted proposal is answered by text, its link, or Approve below. */}
+      {n.state === "needs_user_input" && r?.status !== "adjusting" && (r === null || r.status === "waiting") && (
         <form
           className="stack"
           style={{ marginTop: 8 }}

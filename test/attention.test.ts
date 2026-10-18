@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { all, run } from "../server/db.ts";
 import { findAttention, type AttentionDoc } from "../server/domain/attention.ts";
-import { mockRead, toFacts, type DocFacts } from "../server/domain/documents.ts";
+import { FACTS_VERSION, mockRead, toFacts, type DocFacts } from "../server/domain/documents.ts";
 import { attentionItems } from "../server/services/attention.ts";
 import { makeRig, organized } from "./helpers.ts";
 
@@ -122,7 +122,7 @@ test("facts read before references and validity existed get them in the backgrou
   rig.app.refreshInventory();
   await rig.app.settle();
   const facts = all<{ facts_json: string }>(db, "SELECT facts_json FROM documents WHERE facts_json IS NOT NULL").map((d) => JSON.parse(d.facts_json) as DocFacts);
-  assert.ok(facts.every((f) => f.version === 3));
+  assert.ok(facts.every((f) => f.version === FACTS_VERSION));
   assert.ok(facts.some((f) => f.validUntil?.value === "2026-10-28"));
   assert.ok(facts.some((f) => f.refersTo?.some((r) => r.reference === "Q-1042")));
   const view = await rig.app.view();

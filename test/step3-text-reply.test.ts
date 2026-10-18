@@ -88,8 +88,7 @@ test("dropping a copy and a file Kiki can't place gets you one text about both",
   await rig.app.settle();
   const texts = (await rig.app.view()).notifications.filter((n) => n.purpose === "find");
   assert.equal(texts.length, 1, "one text");
-  assert.match(texts[0]!.text ?? "", /"quote again\.pdf" is a copy of a file already filed/);
-  assert.match(texts[0]!.text ?? "", /where should "thoughts" go\?/);
+  assert.match(texts[0]!.text ?? "", /1 copy to set aside and 1 needs a folder/, "both, as counts (the link shows each)");
 });
 
 test("a proposal that never reached Fo is texted when Kiki starts, once", async (t) => {

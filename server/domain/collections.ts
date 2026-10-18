@@ -57,7 +57,7 @@ export interface Destination {
   /** "user": a folder the user keeps, filed into directly. "kiki": Projects/<name>/<type>. */
   kind: "user" | "kiki";
   /** Why: the folder's name is in the document, its stated project, its title, its supplier, the user chose it, or Kiki learned it from them. */
-  how: "folder" | "project" | "title" | "supplier" | "choice" | "learned";
+  how: "folder" | "project" | "title" | "supplier" | "choice" | "learned" | "suggested";
   name: string;
   /** The user's folder path; for Kiki's collections the path follows from the name. */
   path: string | null;
