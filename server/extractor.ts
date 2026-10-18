@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { ADJUST_SYSTEM_PROMPT, adjustUserMessage, ChangeRequestSchema, mockAdjust, type ChangeRequest, type ProposalItem } from "./domain/adjust.ts";
-import { mockRead, READ_SYSTEM_PROMPT, ReadSchema, type ReadResult } from "./domain/documents.ts";
+import { mockRead, READ_SYSTEM_PROMPT, ReadSchema, type DocFacts, type ReadResult } from "./domain/documents.ts";
+import { PATTERN_SYSTEM_PROMPT, PatternSchema, patternUserMessage, type Pattern } from "./domain/lessons.ts";
 import { mockInterpret, OUTCOME_SYSTEM_PROMPT, OutcomeSchema, outcomeUserMessage, verifyOutcome, type Outcome, type OutcomeContext } from "./domain/outcome.ts";
 import { COMPOSE_SYSTEM_PROMPT, ComposeSchema, composeUserMessage, type ComposeFacts, type Composed } from "./domain/compose.ts";
 import { pdfText } from "./domain/pdftext.ts";
@@ -16,6 +17,8 @@ export interface Reader {
   interpretChange(items: ProposalItem[], reply: string): Promise<ChangeRequest>;
   /** A text for Fo to send you, written for the moment; null when Kiki should use her own (mock mode). Kiki checks it. */
   composeText(facts: ComposeFacts): Promise<Composed | null>;
+  /** What kind of document you just filed somewhere, to recognize the next one; null in mock mode. Kiki checks it. */
+  describeKind(name: string, facts: DocFacts | null, place: string): Promise<Pattern | null>;
 }
 
 export class ReadError extends Error {
@@ -54,6 +57,10 @@ export class MockReader implements Reader {
   }
 
   async composeText(): Promise<Composed | null> {
+    return null;
+  }
+
+  async describeKind(): Promise<Pattern | null> {
     return null;
   }
 }
@@ -149,6 +156,24 @@ export class ClaudeReader implements Reader {
     if (response.stop_reason === "refusal") throw new ReadError("Claude declined to read this answer. Change the proposal in Kiki yourself.");
     if (!response.parsed_output) throw new ReadError("Claude's answer didn't match the expected format.");
     return response.parsed_output;
+  }
+
+  async describeKind(name: string, facts: DocFacts | null, place: string): Promise<Pattern | null> {
+    let response;
+    try {
+      response = await this.client.beta.messages.parse({
+        model: this.model,
+        max_tokens: 1000,
+        system: PATTERN_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: patternUserMessage(name, facts, place) }],
+        output_config: { effort: "low", format: betaZodOutputFormat(PatternSchema) },
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+      });
+    } catch (err) {
+      throw claudeError(err, this.model);
+    }
+    return response.stop_reason === "refusal" ? null : (response.parsed_output ?? null);
   }
 
   async composeText(facts: ComposeFacts): Promise<Composed | null> {

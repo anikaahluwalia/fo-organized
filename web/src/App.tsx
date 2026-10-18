@@ -576,6 +576,30 @@ function FoUpdates({ view, act }: { view: AppView; act: ReturnType<typeof useAct
   );
 }
 
+/** What Kiki learned from your answers. Each one only shapes a proposal; forgetting it takes it back. */
+function Learned({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+  if (!view.lessons.length) return null;
+  return (
+    <section className="card decision" aria-labelledby="learned-title">
+      <h2 id="learned-title">What Kiki learned</h2>
+      <p className="hint" style={{ marginTop: 0 }}>From your answers. She still asks before changing anything.</p>
+      <ul className="learned">
+        {view.lessons.map((l) => (
+          <li key={l.id}>
+            <span>
+              {l.text}
+              {l.examples > 1 && <span className="hint"> ({l.examples} times)</span>}
+            </span>
+            <button className="btn btn--small btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`forget-${l.id}`, () => post(`/api/lessons/${l.id}/forget`))}>
+              Forget
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
   const [preview, setPreview] = useState<{ text: string; contentHash: string } | null>(null);
   const requestId = useMemo(() => newId(), [preview?.contentHash]);
@@ -970,6 +994,7 @@ export function App() {
             </div>
           </section>
           <Decisions view={view} act={act} />
+          <Learned view={view} act={act} />
           <FoUpdates view={view} act={act} />
           <div className="companion-extra">
             <ExtensionPairing paired={view.extension?.paired} pairedAt={view.extension?.pairedAt ?? null} />

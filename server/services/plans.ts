@@ -23,6 +23,7 @@ import { badRequest, conflict, notFound } from "../errors.ts";
 import type { Ctx } from "./context.ts";
 import { docFacts, requireWorkspace } from "./workspace.ts";
 import { heldFileIds } from "./holds.ts";
+import { keepsNames, placeLessons } from "./lessons.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
 
 export function getPlan(db: Db, id: string): PlanRow {
@@ -235,7 +236,7 @@ function organizeDraft(db: Db, ws: WorkspaceRow, places: Map<string, string> = n
   const docs = all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id)
     .filter((d) => !reserved.has(d.file_id) && !held.has(d.file_id))
     .map(planDoc);
-  return buildOrganizePlan({ rootId: ws.root_file_id, files, docs, indexFiles: indexFiles(db, ws.id), undone, places });
+  return buildOrganizePlan({ rootId: ws.root_file_id, files, docs, indexFiles: indexFiles(db, ws.id), undone, places, lessons: placeLessons(db, ws.id) });
 }
 
 /** What an organizing plan would do, counting only the steps that will run. */
@@ -328,6 +329,14 @@ function saveOrganize(db: Db, ws: WorkspaceRow, kikiDraft: PlanDraft, requested?
       op.reason = `${op.reason} You chose this name.`;
     }
     if (e.exclude) excluded.add(op.seq);
+  }
+  // You keep files' own names (Kiki learned it): she doesn't propose renames, unless you named one.
+  if (keepsNames(db, ws.id)) {
+    for (const op of draft.ops) {
+      if (op.kind !== "move_rename" || !op.pre || op.newName === op.pre.name || (op.fileId && edits[op.fileId]?.newName)) continue;
+      op.newName = op.pre.name;
+      op.reason = `${op.reason} Keeps its name, as you usually do.`;
+    }
   }
   settleExclusions(draft.ops, excluded);
   const edited = Object.keys(edits).some((fileId) => draft.ops.some((o) => o.fileId === fileId));

@@ -49,6 +49,7 @@ import { activeWorkspace, docFacts } from "./workspace.ts";
 import { notifyOutcome, notifyPlanId, notifyPurpose, notifyText, replyState } from "./notify.ts";
 import { foundAttachments } from "./attachments.ts";
 import { attentionItems } from "./attention.ts";
+import { lessonsView } from "./lessons.ts";
 
 const STATUS_WORD: Record<string, string> = { current: "current", superseded: "superseded", unresolved: "not yet confirmed", proposed: "proposed" };
 
@@ -150,6 +151,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       notifications: [],
       integrations,
       settings: { userName: getUserName(db) },
+      lessons: [],
       workspace: null,
       inventory: empty,
       plans: [],
@@ -416,6 +418,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
     notifications,
     integrations,
     settings: { userName: getUserName(db) },
+    lessons: lessonsView(db, ws.id),
     workspace: {
       name: ws.name,
       origin: ws.origin,

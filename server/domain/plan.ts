@@ -4,6 +4,7 @@ import type { DocFacts } from "./documents.ts";
 import { deduplicateName, indexFileName, projectFolderPath, proposedName, SUPERSEDED_FOLDER, targetFolder } from "./naming.ts";
 import { copyMap, DUPLICATES_FOLDER } from "./duplicates.ts";
 import { assignCollections, choosePlace, isFiledPath, KIKI_ROOTS, kikiCollections, userFolders, type Destination } from "./collections.ts";
+import { matchLesson, type PlaceLesson } from "./lessons.ts";
 
 export interface PlanFile {
   fileId: string;
@@ -178,6 +179,7 @@ function placesThatFit(facts: DocFacts, files: PlanFile[], roots: string[]): str
 function placementReason(dest: Destination): string | null {
   if (dest.how === "choice") return dest.kind === "user" ? `Into your "${dest.path}" folder, as you asked.` : `${dest.name}, as you asked.`;
   if (dest.how === "supplier") return dest.because;
+  if (dest.how === "learned") return `${dest.kind === "user" ? `Into your "${dest.path}" folder` : dest.name}, like the ${dest.because} you filed there before.`;
   if (dest.kind === "user") return `Into your "${dest.path}" folder: it says "${dest.because}".`;
   if (dest.how === "title") return `Goes with ${dest.name}: its title is "${dest.because}".`;
   return dest.because === dest.name ? null : `${dest.name}: it says "${dest.because}".`;
@@ -245,6 +247,8 @@ export function buildOrganizePlan(input: {
   undone?: Set<string>;
   /** Where the user said a file goes ("Kitchen", "Taxes"), by file id: it overrides Kiki's choice. */
   places?: Map<string, string>;
+  /** Where the user filed documents of a kind before: for one Kiki has no other place for. */
+  lessons?: PlaceLesson[];
 }): PlanDraft {
   const ops: PlannedOp[] = [];
   const notes: PlanNote[] = [];
@@ -319,7 +323,10 @@ export function buildOrganizePlan(input: {
       notes.push({ ...at, status: "already_organized", reason: `Filed in ${file.path}. Kiki leaves filed documents where they are.` });
       continue;
     }
-    const dest = chosen ? choosePlace(chosen, input.files, roots) : destinations.get(doc.docId);
+    // Nothing in the document says where it goes, but you filed one like it before: same place.
+    const learned = !chosen && !destinations.get(doc.docId) && doc.facts.docType !== "unknown" ? matchLesson(input.lessons ?? [], file.name, doc.facts) : null;
+    const before = learned ? choosePlace(learned.place, input.files, roots) : null;
+    const dest = chosen ? choosePlace(chosen, input.files, roots) : (destinations.get(doc.docId) ?? (before && learned ? { ...before, how: "learned" as const, because: learned.description } : undefined));
     const facts = dest?.kind === "kiki" ? { ...doc.facts, project: { value: dest.name, quote: null, quoteFound: null } } : doc.facts;
     const folder = !dest || facts.docType === "unknown" ? null : dest.kind === "user" ? dest.path : targetFolder(facts, layout);
     if (chosen && !folder) {

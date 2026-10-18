@@ -318,6 +318,16 @@ export interface AttentionItemView {
   copy: { documentId: string; reference: string; issuer: string | null; asked: boolean } | null;
 }
 
+export interface LessonView {
+  id: string;
+  kind: "place" | "keep_names";
+  /** What Kiki learned, in a sentence: "Weekly timesheets go in Work." */
+  text: string;
+  /** Filings it rests on. */
+  examples: number;
+  since: string;
+}
+
 export interface AppView {
   notifications: NotificationView[];
   integrations: IntegrationsView;
@@ -331,6 +341,8 @@ export interface AppView {
   outreach: OutreachView[];
   updates: UpdateView[];
   activity: { events: EventView[]; turns: TurnView[] };
+  /** What Kiki learned from your answers; each can be forgotten. */
+  lessons: LessonView[];
   busy: { inventory: boolean; reading: boolean; executing: boolean; interpreting: boolean };
   kiki: KikiView;
   /** Added by the HTTP layer: whether a Chrome side panel is paired with this app. */

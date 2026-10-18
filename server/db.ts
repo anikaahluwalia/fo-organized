@@ -111,6 +111,20 @@ CREATE TABLE IF NOT EXISTS version_events (
 );
 
 -- Proposed changes. Every edit is a new version in the same series; approvals bind to one version.
+-- What Kiki learned from your answers: where a kind of document goes, or that you keep names.
+CREATE TABLE IF NOT EXISTS lessons (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  kind TEXT NOT NULL CHECK (kind IN ('place', 'keep_names')),
+  description TEXT NOT NULL,
+  keywords_json TEXT,
+  place TEXT,
+  examples INTEGER NOT NULL DEFAULT 1,
+  from_plan_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -483,6 +497,19 @@ export interface VersionEventRow {
 
 export type PlanKind = "organize" | "version_update" | "undo";
 export type PlanStatus = "proposed" | "approved" | "executing" | "applied" | "partial" | "stale" | "failed" | "superseded" | "discarded";
+
+export interface LessonRow {
+  id: string;
+  workspace_id: string;
+  kind: "place" | "keep_names";
+  description: string;
+  keywords_json: string | null;
+  place: string | null;
+  examples: number;
+  from_plan_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface PlanRow {
   id: string;

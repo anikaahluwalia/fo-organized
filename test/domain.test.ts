@@ -1043,6 +1043,7 @@ describe("kiki.ts deriveKiki", () => {
 
   const appView = (over: Partial<KikiInput> = {}): KikiInput => ({
     notifications: [],
+    lessons: [],
     integrations: {
       drive: { mode: "mock", connection: "connected", account: "demo@example.com", scopes: "narrow", missingScopes: [], gmail: "off" },
       claude: { mode: "mock", credentialsDetected: false, model: "test-model" },
