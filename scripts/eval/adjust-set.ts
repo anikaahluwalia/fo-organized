@@ -55,6 +55,7 @@ export const ADJUST_SET: AdjustCase[] = [
   { id: "rename-all-collection", reply: "Use Kitchen Reno as the folder for all four instead of Flooring.", expected: { kind: "changes", edits: moves.map((item) => ({ item, action: "move" as const, value: "Kitchen Reno" })), unsupported: "none" } },
   { id: "by-number", reply: "Skip number 3, and keep the original name for number 2.", expected: { kind: "changes", edits: [{ item: 3, action: "skip" }, { item: 2, action: "keep_name" }], unsupported: "none" } },
   { id: "question", reply: "What's IMG_2041? I don't remember that one.", expected: { kind: "question", edits: [], unsupported: "none" } },
+  { id: "described-folder", reply: "Put the licence in a new work folder.", expected: { kind: "changes", edits: [{ item: 5, action: "move", value: "Work" }], unsupported: "none" } },
   { id: "plain-yes", reply: "Yes, go ahead.", expected: { kind: "none", edits: [], unsupported: "none" } },
   { id: "plain-no", reply: "No thanks, leave it all as it is.", expected: { kind: "none", edits: [], unsupported: "none" } },
   { id: "unsure", reply: "Hmm, maybe later.", expected: { kind: "none", edits: [], unsupported: "none" } },

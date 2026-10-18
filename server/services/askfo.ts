@@ -12,7 +12,7 @@ import { kvGet, kvSet, logEvent, now, one, tx, type PlanRow, type WorkspaceRow }
 import { conflict } from "../errors.ts";
 import { getTask, insertTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
-import { replyState, saveReply, textedProposal } from "./notify.ts";
+import { notifyPurpose, replyState, saveReply, textedProposal } from "./notify.ts";
 import { adjustOrganize, getPlan } from "./plans.ts";
 import { proposalItems, proposalLines } from "./proposal.ts";
 
@@ -120,8 +120,9 @@ export async function handleChangeRequest(ctx: Ctx, taskId: string, opts: { quie
     const lead = next
       ? `I asked for changes (${said}), and Kiki made version ${next.version} of the proposal.${note ? ` ${note}` : ""}`
       : `I answered ${said}, but Kiki didn't change the proposal. ${note ?? ""}`.trim();
-    // You answered by text: the next version comes back to you as a text too.
-    const byText = Boolean(state.answers?.at(-1)?.via);
+    // The proposal reached you as a text (you answered by text, or at its link): the next version
+    // comes back to you as a text too, with its own link.
+    const byText = Boolean(state.answers?.at(-1)?.via) || notifyPurpose(ctx, taskId) === "find";
     const sent = newRequest(ctx, target, (binding) => decideMessage(ctx, ws, target, binding, lead), byText ? (binding, id) => textedProposal(ctx, target, binding, next ? `Kiki: you asked for changes, so here's version ${next.version}.` : `Kiki: she didn't change the proposal. ${note ?? ""}`.trim(), id) : undefined);
     saveReply(ctx, taskId, { ...state, status: next ? "revised" : "not_changed", revision: { planId: next?.id ?? null, version: next?.version ?? null, note } });
     logEvent(ctx.db, ws.id, "plan", next ? `You asked for changes through Fo, so Kiki made version ${next.version} of "${next.title}". It needs your decision.` : `You answered through Fo, but Kiki didn't change the proposal. ${note ?? ""}`.trim());

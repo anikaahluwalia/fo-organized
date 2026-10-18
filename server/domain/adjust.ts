@@ -47,7 +47,7 @@ The only changes there are:
 - skip: leave a proposed file where it is, as it is.
 - rename: give a proposed file a different name. new_name: the name they gave, without a folder.
 - keep_name: still move a proposed file, but keep its current name.
-- move: put a file into a different project, collection or folder. place: the name they used for it ("Kitchen", "Taxes", "School/CS 245"). For a file Kiki couldn't place, this is how they say where it goes.
+- move: put a file into a different project, collection or folder. place: the name they used for it ("Kitchen", "Taxes", "School/CS 245"). For a file Kiki couldn't place, this is how they say where it goes. When they describe a folder instead of naming it ("a new work folder", "make a folder for taxes", "the school one"), place is the name inside the description ("Work", "Taxes", "School"), never the whole description.
 
 Report:
 - kind: "changes" when they ask for at least one of these changes; "question" when they ask about the proposal without asking for a change; "none" for anything else, such as a plain yes or no, "later", or thanks.

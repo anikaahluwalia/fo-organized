@@ -120,7 +120,8 @@ test("Kiki asks you through Fo where a document she can't place goes, and your a
 
   // 2. You answer inside Kiki; Kiki passes it to Fo on the same conversation.
   await answerInKiki(rig, ANSWER);
-  const continuation = rig.fo.asks.at(-1)!;
+  // (The new version then comes back to you as a text: the question reached you as one.)
+  const continuation = rig.fo.asks.findLast((a) => a.message.startsWith("Answer from the account holder"))!;
   assert.ok(continuation.conversationId, "your answer went to Fo on the mapped conversation");
   assert.match(continuation.message, /Put it with the flooring invoices/);
 

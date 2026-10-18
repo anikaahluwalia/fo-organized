@@ -217,3 +217,20 @@ test("a question a plain yes left stuck before this fix is reopened when Kiki st
   assert.match(page.text, /Where should it go\?/);
   assert.match(page.text, /Kiki needs to know where it goes/);
 });
+
+test("a change you ask for at the link comes back to you as a text, with its own link", async (t) => {
+  const s = await setup(t);
+  const path = new URL(s.link!).pathname;
+  const state = replyState(s.rig.app.ctx, s.note.taskId)!;
+  const words = "Put the Northside invoice under Kitchen instead";
+  s.fo.onAsk = async (args, n) =>
+    args.conversationId === "kiki-1" && args.message.startsWith("Answer from the account holder")
+      ? reply("kiki-1", "complete", { response: "KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: "changes_requested", userReply: words, actor: "account_holder", presentedExactProposal: true }) })
+      : reply(`kiki-${n}`, "complete", { response: TEXTED });
+  await request(s.port, { method: "POST", path, host: new URL(PUBLIC).host, body: `answer=other&other=${encodeURIComponent(words)}`, origin: PUBLIC });
+  await s.rig.app.settle();
+  const next = s.fo.asks.at(-1)!;
+  assert.match(next.message, /^Please text me/, "Fo is asked to text it, not just tell you in Kiki");
+  assert.match(next.message, /here's version \d+/);
+  assert.match(next.message, /Answer here: https:\/\/kiki-test\.example\/a\//);
+});
