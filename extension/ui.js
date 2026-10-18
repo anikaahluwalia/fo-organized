@@ -199,6 +199,27 @@ function doneCard(h, d, ws) {
   );
 }
 
+function attentionCard(h, m) {
+  return h(
+    "section",
+    { class: "fo", "aria-label": "Needs a look" },
+    h("div", { class: "eyebrow", text: "NEEDS A LOOK" }),
+    h(
+      "ul",
+      { class: "steps" },
+      m.attention.map((a) =>
+        h(
+          "li",
+          { class: "step" },
+          h("div", { class: "steptop" }, h("strong", { text: a.title }), a.chip ? h("span", { class: `chip ${a.chip.tone}`, text: a.chip.label }) : null),
+          a.detail ? h("p", { text: a.detail }) : null,
+        ),
+      ),
+    ),
+    m.attentionMore ? h("p", { class: "copy", text: `And ${m.attentionMore} more in the Kiki app.` }) : null,
+  );
+}
+
 function organizeView(h, m, ui, act) {
   return [
     ui.error ? notice(h, "bad", null, ui.error, { role: "alert", dismiss: act.dismissError }) : null,
@@ -211,6 +232,7 @@ function organizeView(h, m, ui, act) {
     m.running ? runningCard(h, m.running) : null,
     m.broken ? brokenCard(h, m.broken, ui, act) : null,
     m.done ? doneCard(h, m.done, m.workspace) : null,
+    m.attention.length && !m.proposed ? attentionCard(h, m) : null,
     m.check
       ? h(
           "div",

@@ -198,6 +198,17 @@ function foLabel(f) {
  * Everything the panel shows, from the app's view and the active tab ({ url, title } or null).
  * Plain data only, so the panel can compare it between refreshes and skip redrawing.
  */
+/** The chip for each kind of thing Kiki points out, as in the app's "Needs a look". */
+const ATTENTION_CHIP = {
+  missing: { label: "Missing", tone: "bad" },
+  expired: { label: "Expired", tone: "bad" },
+  which_current: { label: "Unclear", tone: "warn" },
+  duplicate: { label: "Copy?", tone: "warn" },
+  expiring: { label: "Soon", tone: "warn" },
+  undecided: { label: "Your call", tone: "" },
+  unreadable: { label: "Couldn't read", tone: "warn" },
+};
+
 export function buildModel(view, { tab = null, now = new Date() } = {}) {
   const v = view ?? {};
   const drive = v.integrations?.drive ?? {};
@@ -350,6 +361,9 @@ export function buildModel(view, { tab = null, now = new Date() } = {}) {
     // Without a connected Drive, the alert above already says what to do.
     empty: ws ? null : mockDrive ? "Kiki is using a mock Drive. Open Kiki to set up the renovation folder." : driveReady ? "Open a Google Drive folder in this tab, and I'll offer to organize it." : null,
     autoText: ws ? { on: autoTextOn } : null,
+    // What Kiki noticed in the folder; the app has the details and the actions.
+    attention: (Array.isArray(v.attention) ? v.attention : []).slice(0, 4).map((a) => ({ title: String(a.title ?? ""), detail: a.detail ? String(a.detail) : null, chip: ATTENTION_CHIP[a.kind] ?? null })),
+    attentionMore: Math.max(0, (Array.isArray(v.attention) ? v.attention.length : 0) - 4),
     events: (Array.isArray(v.activity?.events) ? v.activity.events : []).slice(0, 50).map((e) => ({ time: formatTime(e.at, now), message: String(e.message ?? "") })),
   };
 }

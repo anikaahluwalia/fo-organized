@@ -32,6 +32,7 @@ curl -s -X POST -H 'content-type: application/json' -d '{}' http://localhost:878
 - The latest plan, with each step's before and after and Kiki's reason. **Approve** applies exactly the version on screen; clicking twice still approves once. **Not now** sets it aside, and nothing in Drive changes.
 - Progress while Kiki applies the plan, then "Done: N of M changes verified in Drive." If a plan only partly finished or was stopped, the panel says so and offers **Try again** or **Refresh the plan**.
 - The latest text through Fo: what it says, whether Fo reports it was sent, and your reply once Kiki reads it.
+- **Needs a look**: what Kiki noticed in the folder (a document others refer to that's missing, dates running out, unclear quotes), the same list as in the app, which has the details and actions.
 - **Text me when Kiki finds something new**, the same setting as in the app.
 - **Activity**: Kiki's log, newest first.
 - **Open Kiki** opens the full app.
