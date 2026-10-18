@@ -310,7 +310,7 @@ export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<v
         if (getTask(ctx.db, taskId)?.state === "complete") run(ctx.db, "UPDATE fo_tasks SET state = 'needs_user_input' WHERE id = ? AND state = 'complete'", taskId);
         // A decision will count only as Fo's reply to this answer.
         const latest = replyState(ctx, taskId) ?? approval;
-        saveReply(ctx, taskId, { ...latest, answers: [...(latest.answers ?? []), { text, at: new Date().toISOString() }] });
+        saveReply(ctx, taskId, { ...latest, note: undefined, answers: [...(latest.answers ?? []), { text, at: new Date().toISOString() }] });
         void ctx.engine.continue(taskId, relayed).catch(() => undefined);
         logEvent(ctx.db, null, "fo_reply", "You answered Fo's question.");
       };

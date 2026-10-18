@@ -137,7 +137,12 @@ export interface ReplyState {
   textsChecked?: string[];
   /** The answer Kiki last read for changes Fo reported only as a clarification (each is read once). */
   interpretedAt?: string;
+  /** Kiki's word on your last answer when it didn't settle anything, shown where you answer next. */
+  note?: string;
 }
+
+/** A yes to "where does this go?" doesn't say where. */
+export const NEEDS_PLACE = "Kiki needs to know where it goes: pick a place, type a project or folder, or leave it where it is.";
 
 const REPLY_WINDOW_MS = 30 * 60_000;
 /** A proposal Fo brings you in Kiki waits for your answer there, as long as the proposal itself is unchanged. */
@@ -245,7 +250,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     const at = new Date().toISOString();
     if (reply.verdict === "approved" && (!sameAnswer(report.userReply, answer.text) || !isPlainYes(answer.text))) {
       // Fo says yes, but your own words aren't a plain yes, or aren't what Fo quotes: nothing is approved.
-      saveReply(ctx, taskId, { ...state, clarification: `Fo reported an approval, but your answer ("${inert(answer.text, 200)}") isn't a plain yes to this version, so Kiki didn't apply it. Answer again, or approve it in Kiki.` });
+      saveReply(ctx, taskId, { ...state, clarification: `Fo reported an approval, but your answer ("${inert(answer.text, 200)}") isn't a plain yes to this version, so Kiki didn't apply it. Answer again, or approve it in Kiki.`, note: "Kiki didn't apply anything: your answer wasn't a plain yes. Answer again below." });
       logEvent(ctx.db, plan.workspace_id, "fo_reply", `Fo reported an approval, but your answer wasn't a plain yes, so Kiki didn't apply anything.`);
       return;
     }
@@ -256,6 +261,12 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
         run(ctx.db, "UPDATE plans SET status = 'discarded', finished_at = ? WHERE id = ? AND status = 'proposed'", now(), plan.id);
       }
       logEvent(ctx.db, plan.workspace_id, "fo_reply", `You replied "${reply.text}" to Fo's text, so Kiki isn't filing it.`);
+      return;
+    }
+    if (!one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id)) {
+      // A question ("where does this go?") has nothing to approve: the request stays open for a place.
+      saveReply(ctx, taskId, { ...state, note: NEEDS_PLACE });
+      logEvent(ctx.db, plan.workspace_id, "fo_reply", `You said "${reply.text}", but Kiki needs to know where it goes. She's still waiting for a place.`);
       return;
     }
     try {
@@ -395,9 +406,30 @@ function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; fresh: Pl
 }
 
 /** Files the proposal asks you about: Kiki read them but couldn't tell where they go. */
+/** The files a proposal asks you about (Kiki couldn't tell where they go), with the places that fit. */
+export function unplacedNotes(plan: PlanRow): { name: string; options: string[] }[] {
+  const notes = (plan.details_json ? (JSON.parse(plan.details_json) as { notes?: { name: string; unplaced?: boolean; options?: string[] }[] } | null) : null)?.notes ?? [];
+  return notes.filter((n) => n.unplaced).map((n) => ({ name: n.name, options: n.options ?? [] }));
+}
+
 function openQuestionNames(plan: PlanRow): string[] {
-  const notes = ((plan.details_json ? (JSON.parse(plan.details_json) as { notes?: { name: string; unplaced?: boolean }[] } | null) : null)?.notes ?? []);
-  return notes.filter((n) => n.unplaced).map((n) => n.name);
+  return unplacedNotes(plan).map((n) => n.name);
+}
+
+/**
+ * On start: a "where does this go?" request that a plain yes left marked stale (before Kiki kept
+ * those open) is reopened, as long as the question itself is unchanged, so its link works again.
+ */
+export function reopenQuestions(ctx: Ctx): void {
+  for (const { key } of all<{ key: string }>(ctx.db, "SELECT key FROM kv WHERE key LIKE 'notify.reply.%'")) {
+    const taskId = key.slice("notify.reply.".length);
+    const state = replyState(ctx, taskId);
+    if (state?.status !== "stale" || !state.requestId) continue;
+    const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId);
+    if (!plan || plan.status !== "proposed" || plan.content_hash !== state.contentHash) continue;
+    if (one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id)) continue;
+    saveReply(ctx, taskId, { ...state, status: "waiting", text: null, source: null, note: NEEDS_PLACE });
+  }
 }
 
 function findSummary(ctx: Ctx, plan: PlanRow): string {
@@ -446,11 +478,19 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
  */
 export const LINK_ONLY = "Please tap the link to approve or ask for changes: text replies can't be processed.";
 export const LINK_OR_TEXT = "Tap the link to approve or ask for changes, or just reply to this text.";
+/** The same for "where does this go?". */
+export const LINK_ONLY_WHERE = "Please tap the link to tell her: text replies can't be processed.";
+export const LINK_OR_TEXT_WHERE = "Tap the link to tell her, or just reply to this text.";
+
+/** A proposal that only asks where files go: nothing to approve, so you answer with a place. */
+export function isQuestion(ctx: Ctx, plan: PlanRow): boolean {
+  return !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id);
+}
 
 /** A text with its answer link, saying how to answer. */
-function withLink(ctx: Ctx, text: string, link: string | null): string {
+function withLink(ctx: Ctx, plan: PlanRow, text: string, link: string | null): string {
   if (!link) return text;
-  const how = ctx.foWebhook ? LINK_OR_TEXT : LINK_ONLY;
+  const how = isQuestion(ctx, plan) ? (ctx.foWebhook ? LINK_OR_TEXT_WHERE : LINK_ONLY_WHERE) : ctx.foWebhook ? LINK_OR_TEXT : LINK_ONLY;
   const body = text
     .replace(/ ?Reply to this text, or answer in Kiki: yes, a change, or no\./g, "")
     .replace(/Reply to this text, or answer in Kiki:/g, "At the link,")
@@ -461,7 +501,7 @@ function withLink(ctx: Ctx, text: string, link: string | null): string {
 /** The request that has Fo text you a proposal (and only you), with the binding for your answer. */
 export function textedProposal(ctx: Ctx, plan: PlanRow, binding: ApprovalBinding, lead?: string, taskId?: string): { body: string; request: string } {
   const link = taskId ? answerLink(ctx, taskId) : null;
-  const body = withLink(ctx, `${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`, link);
+  const body = withLink(ctx, plan, `${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`, link);
   return { body, request: message(body, newReference(), "text") + "\n\n" + approvalInstructions(binding) };
 }
 
@@ -479,7 +519,7 @@ export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   // The link to answer it: your answer there stays tied to this exact proposal.
   const link = answerLink(ctx, taskId);
-  const text = withLink(ctx, newFindText(ctx, plan), link);
+  const text = withLink(ctx, plan, newFindText(ctx, plan), link);
   kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
   kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "find");

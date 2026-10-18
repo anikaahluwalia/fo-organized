@@ -163,3 +163,57 @@ test("after you answer, the page says you can close it; a second tap sends nothi
   assert.equal(done.conversationId, "kiki-1", "the done text goes to Fo in the conversation where you said yes");
   assert.match(done.message, /^Please text me[\s\S]*the proposal you brought me in this conversation/);
 });
+
+/** A file Kiki can't place: Fo texts you "where does it go?" with a link. */
+async function askedWhere(t: TestContext) {
+  const fo = new FakeFo();
+  const rig = makeRig({ fo });
+  rig.app.ctx.watchIntervalSeconds = 3600;
+  rig.app.ctx.publicUrl = PUBLIC;
+  t.after(() => rig.app.close());
+  fo.onAsk = async (_args, n) => reply(`kiki-${n}`, "complete", { response: TEXTED });
+  await organized(rig);
+  rig.app.updateSettings({ autoText: true });
+  const root = one<{ root_file_id: string }>(rig.db, "SELECT root_file_id FROM workspaces WHERE active = 1")!.root_file_id;
+  rig.drive.addFile("thoughts.txt", root, "text/plain", "NOTES\nTitle: Garden ideas\nPlant tomatoes in May.");
+  rig.app.refreshInventory();
+  await rig.app.settle();
+  const note = (await rig.app.view()).notifications.find((n) => n.purpose === "find")!;
+  const link = /Answer here: (\S+)/.exec(note.text ?? "")![1]!;
+  const port = 30_000 + Math.floor(Math.random() * 20_000);
+  const server = createHttpServer(rig.app, { ...loadConfig({ PORT: String(port), KIKI_MODE: "mock" }), publicUrl: PUBLIC }, { google: null, fo: null }, "/nonexistent");
+  await new Promise<void>((r) => server.listen(port, "127.0.0.1", () => r()));
+  t.after(() => new Promise<void>((r) => (server.closeAllConnections(), server.close(() => r()))));
+  return { rig, fo, note, port, path: new URL(link).pathname, host: new URL(PUBLIC).host, state: replyState(rig.app.ctx, note.taskId)! };
+}
+
+test("\"where does it go?\" asks for a place on the page, not a yes", async (t) => {
+  const s = await askedWhere(t);
+  assert.match(s.note.text ?? "", /Please tap the link to tell her/);
+  const page = await request(s.port, { path: s.path, host: s.host });
+  assert.match(page.text, /Where should it go\?/);
+  assert.match(page.text, /Leave it where it is/);
+  assert.doesNotMatch(page.text, /Yes, go ahead/);
+});
+
+test("a yes to \"where does it go?\" keeps the question open, and the page says what Kiki needs", async (t) => {
+  const s = await askedWhere(t);
+  const decision = { requestId: s.state.requestId, planId: s.state.planId, contentHash: s.state.contentHash, decision: "approved", userReply: "Yes, go ahead", actor: "account_holder", presentedExactProposal: true };
+  s.fo.onAsk = async (args) => reply(args.conversationId!, "complete", { response: "KIKI-DECISION: " + JSON.stringify(decision) });
+  await s.rig.app.reply(s.note.taskId, "Yes, go ahead");
+  await s.rig.app.settle();
+  assert.equal(replyState(s.rig.app.ctx, s.note.taskId)?.status, "waiting");
+  const page = await request(s.port, { path: s.path, host: s.host });
+  assert.match(page.text, /Kiki needs to know where it goes/);
+  assert.match(page.text, /Where should it go\?/, "and you can still answer");
+});
+
+test("a question a plain yes left stuck before this fix is reopened when Kiki starts", async (t) => {
+  const s = await askedWhere(t);
+  run(s.rig.db, "UPDATE kv SET value = ? WHERE key = ?", JSON.stringify({ ...s.state, status: "stale", text: "Yes, go ahead", source: "relayed_by_fo" }), `notify.reply.${s.note.taskId}`);
+  assert.match((await request(s.port, { path: s.path, host: s.host })).text, /settled/);
+  s.rig.app.recover();
+  const page = await request(s.port, { path: s.path, host: s.host });
+  assert.match(page.text, /Where should it go\?/);
+  assert.match(page.text, /Kiki needs to know where it goes/);
+});

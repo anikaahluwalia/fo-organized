@@ -12,7 +12,7 @@ import { kvGet, kvSet, one, type PlanRow } from "../db.ts";
 import { notFound } from "../errors.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
-import { LINK_ONLY, LINK_OR_TEXT, notifyText, replyState, replyWindowMs } from "./notify.ts";
+import { isQuestion, LINK_ONLY, LINK_ONLY_WHERE, LINK_OR_TEXT, LINK_OR_TEXT_WHERE, notifyText, unplacedNotes, replyState, replyWindowMs } from "./notify.ts";
 import { replyToTask } from "./outreach.ts";
 
 const key = (token: string) => `answer.link.${createHash("sha256").update(token).digest("hex")}`;
@@ -72,8 +72,14 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   const taskId = requestFor(ctx, token);
   const task = getTask(ctx.db, taskId);
   // The text as Fo sent it, without its own link (you're on that page).
-  const proposal = (notifyText(ctx, taskId) ?? "").replace(/\s*Answer here: \S+\s*$/, "").replace(LINK_ONLY, "").replace(LINK_OR_TEXT, "").trim();
+  let proposal = (notifyText(ctx, taskId) ?? "").replace(/\s*Answer here: \S+\s*$/, "");
+  for (const line of [LINK_ONLY, LINK_OR_TEXT, LINK_ONLY_WHERE, LINK_OR_TEXT_WHERE]) proposal = proposal.replace(line, "");
+  proposal = proposal.trim();
   const status = settled(ctx, taskId);
+  const state = replyState(ctx, taskId);
+  const plan = state ? one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId) : null;
+  // Kiki's word on your last answer, if it didn't settle anything (a yes to "where does it go?").
+  const note = notice ?? state?.note;
   const question = task?.state === "needs_user_input" && task.question ? task.question.replace(/^\W*KIKI-(DECISION|STATUS)\s*:.*$/gim, "").trim() : null;
   const body = status
     ? `<section class="status">
@@ -84,18 +90,10 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
 </section>
 <details><summary>The proposal</summary><pre>${esc(proposal)}</pre></details>`
     : `<h1>Kiki</h1><p class="muted">Your answer goes to Fo, and Fo texts you what happens.</p>
-${notice ? `<p class="note">${esc(notice)}</p>` : ""}
+${note ? `<p class="note">${esc(note)}</p>` : ""}
 ${question ? `<div class="ask"><strong>Fo asks:</strong><br>${esc(question)}</div>` : ""}
 <pre>${esc(proposal)}</pre>
-<form method="post">
-  <div class="row">
-    <button name="answer" value="Yes, go ahead" class="primary">Yes, go ahead</button>
-    <button name="answer" value="No, leave it as it is">No</button>
-  </div>
-  <label for="other">Or say what you'd like: a change, or a question</label>
-  <textarea id="other" name="other" rows="3" placeholder="Put the licence in Business, skip the second one…"></textarea>
-  <button name="answer" value="other">Send to Fo</button>
-</form>`;
+${plan && isQuestion(ctx, plan) ? whereForm(unplacedNotes(plan)) : decideForm}`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kiki</title>
 <style>
 :root{--bg:#fff7f9;--ink:#3a2620;--muted:#7a6460;--line:#f0d5dc;--accent:#3a2620;--ok:#2f7d4f}
@@ -111,10 +109,37 @@ label{display:block;font-size:14px;color:var(--muted);margin:0 0 6px}textarea{wi
 .note{border:1px solid var(--line);border-radius:12px;padding:12px}
 .status{text-align:center;padding:48px 8px 32px}.status h1{font-size:24px;margin:0 0 8px}.status p{margin:0 auto;max-width:34ch;color:var(--muted)}.status .next{margin-top:16px;color:var(--ink);font-weight:600}
 .check{width:56px;height:56px;margin:0 auto 16px;border-radius:50%;background:var(--ok);color:var(--bg);font-size:30px;line-height:56px}
+.label{font-weight:600;margin:0 0 10px}.place{display:block;width:100%;text-align:left;margin:0 0 8px;border-radius:12px;border-color:var(--line)}
 details{border-top:1px solid var(--line);padding-top:12px}summary{color:var(--muted);font-size:14px;cursor:pointer;margin:0 0 12px}
 </style></head><body><main>
 ${body}
 </main></body></html>`;
+}
+
+const decideForm = `<form method="post">
+  <div class="row">
+    <button name="answer" value="Yes, go ahead" class="primary">Yes, go ahead</button>
+    <button name="answer" value="No, leave it as it is">No</button>
+  </div>
+  <label for="other">Or say what you'd like: a change, or a question</label>
+  <textarea id="other" name="other" rows="3" placeholder="Put the licence in Business, skip the second one…"></textarea>
+  <button name="answer" value="other">Send to Fo</button>
+</form>`;
+
+/** "Where does this go?" has no yes: a place that fits, one you type, or leaving it where it is. */
+function whereForm(files: { name: string; options: string[] }[]): string {
+  const one = files.length === 1;
+  const places = one ? files[0]!.options.slice(0, 3) : [];
+  return `<form method="post">
+  <p class="label">${one ? "Where should it go?" : "Where should they go?"}</p>
+  ${places.map((p) => `<button name="answer" value="${esc(`Put it in ${p}`)}" class="place">${esc(p)}</button>`).join("\n  ")}
+  <label for="other">${places.length ? "Or type a project or folder" : "Type a project or folder"}</label>
+  <textarea id="other" name="other" rows="2" placeholder="${one ? "Work, or Projects/Kitchen…" : "Put the timesheet in Work, the receipt in Kitchen…"}"></textarea>
+  <div class="row">
+    <button name="answer" value="other" class="primary">Send to Fo</button>
+    <button name="answer" value="${one ? "Leave it where it is" : "Leave them where they are"}">${one ? "Leave it where it is" : "Leave them"}</button>
+  </div>
+</form>`;
 }
 
 /**
