@@ -1,0 +1,42 @@
+# Step 3: Fo brings the proposal to you
+
+**Accepted when** Fo explains the exact proposal; your answer inside Kiki (approve, decline, adjust, question) comes back linked to it; anything unbound, stale or ambiguous approves nothing.
+
+## How it works now
+
+1. **Kiki sends Fo the exact proposal.** This happens through "Have Fo ask me" on any proposal, or automatically with "Text me when Kiki finds something new" on. The proposal is numbered like Kiki's own steps, each step has its reason, and files Kiki couldn't place are listed with the places that fit. File names, folder names and document facts are inert: each becomes one line, no line breaks of any kind, and none of Kiki's protocol markers in any spelling ([`server/domain/inert.ts`](../../server/domain/inert.ts)).
+2. **Fo's question shows in Kiki, and you answer there.** Your answer goes back on the same Fo conversation, never into a turn Fo is still working on. For now you always answer in Kiki: a text reply starts a separate Fo conversation that can't be tied to the request (Lukas, Wajo).
+3. **Fo reports your decision as a bound `KIKI-DECISION`.** It's tied to the request, the plan and its content hash, and it can be approved, declined, changes requested, or clarification. An approval counts only if all of these hold:
+   - it's Fo's reply to your latest answer in Kiki;
+   - it quotes your words;
+   - your words are a plain, unconditional yes.
+
+   "Not sure", "maybe later" and "yes, but…" never approve. Approve in Kiki is always one click away.
+4. **Changes you ask for become a new version.** For example, "skip the Bright Floors quote", "the Northside invoice is for the kitchen", or "put the licence in Business". Kiki reads your own words ([`server/domain/adjust.ts`](../../server/domain/adjust.ts)), makes version N+1 and sends it to the same conversation, where it needs its own decision. The version you answered can't be approved any more.
+5. **A file Kiki can't place becomes a question.** With nothing else to file, Kiki proposes "Where does … go?". It shows in Needs a look and goes to Fo with texts on. You answer, or type where it goes in the app, and that becomes a proposal. "Leave it" closes the question for good.
+
+## Measured (2026-10-18, Claude `claude-opus-5-5`)
+
+Turning your answer into changes ([`scripts/eval/adjust-set.ts`](../../scripts/eval/adjust-set.ts): 15 answers covering skip, rename, keep names, move, place an unplaced file, step numbers, questions, plain yes and no, "later", and asks Kiki can't do):
+
+| | Changes found | Invented | Kind right | Unsupported asks flagged |
+| --- | --- | --- | --- | --- |
+| Claude | **19/19** | **0** | 15/15 | 15/15 |
+| Mock (rehearsals) | 19/19 | 0 | 15/15 | 15/15 |
+
+Run it: `node --env-file=.env --disable-warning=ExperimentalWarning scripts/eval-adjust.ts --live`.
+
+## Findings settled
+
+Every finding filed under Step 3, and about 30 more that automated reviews found, was reproduced with a test first. They're all in `test/repro/S3*.test.ts`, which now runs with the suite:
+
+- marker imitation through names and facts, including Unicode line separators and look-alike markers;
+- approvals that slipped through: before any answer, quoting words you didn't say, older than Fo's newest reply, or hedged;
+- "Text me a summary" sending nothing, and a failed text showing as still sending;
+- the pairing code staying on screen;
+- unplaced files that only got a note;
+- an expired request being a dead end, and a restart leaving a request stuck;
+- raw decision lines shown to you;
+- quote updates never brought to Fo.
+
+Where a reproduction test pinned an earlier design (approval by text reply, an old line format, a separate placement protocol), its mechanism was updated and what it protects was kept. The test files say so.

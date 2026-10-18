@@ -8,7 +8,7 @@
 const BREAKS = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/g;
 
 /** Kiki's markers, in any spelling Fo might read as the same thing (dash counts, spacing, case, look-alikes after NFKC). */
-export const MARKERS = /-{2,}\s*(?:BEGIN|END)\s+APPROVED\s+BODY\s*-{2,}|\bKIKI\s*[-_\u2010-\u2015]?\s*(?:STATUS|DECISION)\b\s*:?/gi;
+export const MARKERS = /-{2,}\s*(?:BEGIN|END)\s+APPROVED\s+BODY\s*-{2,}|\bKIKI\s*[-_\u2010-\u2015]?\s*(?:STATUS|DECISION)\s*:/gi;
 
 /** One plain line: no line breaks or control characters, no protocol markers, bounded length. */
 export function inert(s: string | null | undefined, max = 300): string {
