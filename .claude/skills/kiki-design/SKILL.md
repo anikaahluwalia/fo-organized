@@ -23,7 +23,7 @@ The character, her states and her motion are specified in `docs/KIKI-DESIGN.md`;
 
 ## Layout
 
-- Order (main column): the workspace, a plan waiting for the user, Needs a look, files, finished plans (collapsed), the index, activity. Kiki and the decisions sit in the side column on desktop and come first and last on a phone.
+- One column at every width, same order: the status strip (Kiki, her state, the one next action), the plan (Approve in its sticky footer), With Fo, Needs a look, the index, then Files, History and Settings collapsed.
 - Works at 390px wide with no horizontal scroll; long file names and paths wrap.
 - Kiki's expression follows persisted state only, never a timer; respect reduced motion.
 - Every control has a label; status changes are announced (`aria-live`); focus is visible.

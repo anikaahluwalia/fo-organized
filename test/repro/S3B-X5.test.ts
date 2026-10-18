@@ -75,6 +75,6 @@ test("a failed text about a proposal you then applied in the app doesn't keep as
   assert.equal((await rig.app.view()).plans.find((p) => p.id === plan.id)?.status, "applied");
 
   const card = await decisionsCard(rig);
-  assert.match(card, /Done: \d+ of \d+ changes verified in Drive/);
+  assert.match(card, /\d+ of \d+ changes applied and verified in Drive\./);
   assert.doesNotMatch(card, /Want me to file it in Projects\/Flooring\/Invoices\? Reply "go ahead" and I'll do it/, `the card still shows the old text asking for "go ahead": ${card}`);
 });

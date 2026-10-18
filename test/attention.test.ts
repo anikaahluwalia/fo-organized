@@ -47,11 +47,13 @@ test("attention: dates running out, counted from the document, and quiet once a 
   const items = findAttention({ today: "2026-10-17", docs, busyDocIds: new Set() });
   const quote = items.find((i) => i.key.startsWith("expiring:q:"));
   assert.ok(quote);
-  assert.equal(quote.title, "Quote Q-1042 from Oakline Flooring Co. is valid until 2026-10-28");
-  assert.match(quote.detail ?? "", /in 11 days/);
+  assert.equal(quote.title, "Quote Q-1042 from Oakline Flooring Co. expires 2026-10-28, in 11 days");
+  assert.equal(quote.detail, null, "the title says it all");
   assert.equal(quote.askDocId, "q");
-  assert.ok(items.some((i) => i.key.startsWith("expiring:lic:")), "a licence 75 days out is worth mentioning");
-  assert.ok(!findAttention({ today: "2026-08-01", docs, busyDocIds: new Set() }).some((i) => i.key.startsWith("expiring:lic:")), "but not five months out");
+  assert.ok(!items.some((i) => i.key.startsWith("expiring:lic:")), "a licence 75 days out isn't worth mentioning yet");
+  const soon = findAttention({ today: "2026-12-10", docs, busyDocIds: new Set() }).find((i) => i.key.startsWith("expiring:lic:"));
+  assert.equal(soon?.title, "Licence BL-2026-0193 from City of Riverton expires 2026-12-31, in 21 days", "but it is within 30 days");
+  assert.equal(findAttention({ today: "2026-12-30", docs, busyDocIds: new Set() }).find((i) => i.key.startsWith("expiring:lic:"))?.title, "Licence BL-2026-0193 from City of Riverton expires 2026-12-31, tomorrow");
   const later = findAttention({ today: "2026-11-02", docs, busyDocIds: new Set() });
   assert.equal(later.find((i) => i.docIds.includes("q"))?.kind, "expired");
   // Accepted, superseded, or already being asked about: no nagging.
@@ -72,8 +74,8 @@ test("attention: unclear quotes, from one contractor or several, are pointed out
   const two = findAttention({ today: "2026-12-01", docs: [doc("a", QUOTE), doc("b", BRIGHT), doc("inv", DEPOSIT)], busyDocIds: new Set() });
   const undecided = two.find((i) => i.kind === "undecided");
   assert.ok(undecided);
-  assert.equal(undecided.title, "Flooring: quotes from 2 contractors, and no price is accepted yet");
-  assert.match(undecided.detail ?? "", /There's already an invoice for Q-1042\. Mark the one you went with as accepted\./);
+  assert.equal(undecided.title, "Flooring: no quote accepted yet");
+  assert.equal(undecided.detail, "Bright Floors Ltd. $6,980.00. Oakline Flooring Co. $8,450.00. Q-1042 already has an invoice.");
   assert.ok(!findAttention({ today: "2026-12-01", docs: [doc("a", QUOTE, { acceptedAt: "x" }), doc("b", BRIGHT)], busyDocIds: new Set() }).some((i) => i.kind === "undecided"));
 });
 
@@ -84,7 +86,7 @@ test("the demo folder: Kiki points out the open decisions, then a missing quote 
   let items = attentionItems(rig.app.ctx, ws.id, "2026-10-17");
   assert.deepEqual(
     items.map((i) => i.kind),
-    ["expiring", "expiring", "undecided"],
+    ["expiring", "undecided"],
   );
   assert.ok((await rig.app.view()).attention.length >= 1, "shown in the app");
 

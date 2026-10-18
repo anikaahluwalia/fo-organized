@@ -50,15 +50,16 @@ Respect prefers-reduced-motion. Never wiggle approval controls. Keep a readable 
 
 ## Page design
 
-Build one calm, responsive page, not a dense admin dashboard. Desktop: request and checklist in the main area; Kiki and the next decision in a companion panel. Mobile: Kiki and current status above the checklist, with the approval card inline.
+Build one calm page, not a dense admin dashboard: a single 720px column at every width, in the same order on desktop and phone. Sections are divided by a rule; only the plan and a message draft are boxed.
 
-Suggested hierarchy:
-1. Paper Chase / With Kiki + Fo
-2. Kiki and one honest status sentence
-3. Paste a document request
-4. Checklist: found / missing / needs review
-5. Exact-message approval card
-6. Evidence and activity, expandable
+Order:
+1. Header: Kiki, and the Live or Mock badges
+2. Status strip: Kiki, one honest status sentence, the one next action
+3. The plan, with Approve in its sticky footer
+4. With Fo: message drafts and what came back
+5. Needs a look
+6. The project index
+7. Files, History and Settings, collapsed
 
 White canvas, pale pink cards, restrained cream accents, dark readable text, rounded corners, generous spacing. Use a system sans-serif font. No floating sparkles, confetti loops, gradient-heavy glass panels, or fabricated metrics.
 

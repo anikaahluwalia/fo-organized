@@ -1,5 +1,5 @@
 // S4-3: a collapsed plan counts a skipped step as unverified.
-// "Skip this" on a step excludes it. After the plan is applied, its card collapses to one line
+// "Skip this file" on a step excludes it. After the plan is applied, its History row is one line
 // that should count only the steps that were meant to run. The web components are compiled from
 // web/src with the repo's own bundler (rolldown, which Vite uses) and rendered with React.
 import { test, type TestContext } from "node:test";
@@ -18,7 +18,7 @@ const EXTENSION_LIB = "../../extension/lib.js";
 const { buildModel } = (await import(EXTENSION_LIB)) as { buildModel: (view: AppView) => { done: { label: string } | null } };
 
 interface WebApp {
-  PlanCard: (props: { plan: PlanView; act: FakeAct }) => unknown;
+  HistoryRow: (props: { plan: PlanView; act: FakeAct }) => unknown;
   Decisions: (props: { view: AppView; act: FakeAct }) => unknown;
   renderToStaticMarkup: (element: unknown) => string;
   createElement: (type: unknown, props: unknown) => unknown;
@@ -30,7 +30,7 @@ interface FakeAct {
   setError: (e: string | null) => void;
 }
 
-/** web/src/App.tsx compiled as the browser gets it, with PlanCard and Decisions exposed for the test. */
+/** web/src/App.tsx compiled as the browser gets it, with HistoryRow and Decisions exposed for the test. */
 async function webApp(): Promise<WebApp> {
   const entry = "kiki-web-test-entry";
   const bundle = await rolldown({
@@ -43,9 +43,9 @@ async function webApp(): Promise<WebApp> {
         resolveId: (id) => (id === entry ? id : null),
         load: (id) =>
           id === entry
-            ? `export { Decisions, PlanCard } from ${JSON.stringify(APP)};\nexport { renderToStaticMarkup } from "react-dom/server";\nexport { createElement } from "react";`
+            ? `export { Decisions, HistoryRow } from ${JSON.stringify(APP)};\nexport { renderToStaticMarkup } from "react-dom/server";\nexport { createElement } from "react";`
             : null,
-        transform: (code, id) => (id === APP ? { code: `${code}\nexport { Decisions, PlanCard };` } : null),
+        transform: (code, id) => (id === APP ? { code: `${code}\nexport { Decisions, HistoryRow };` } : null),
       },
     ],
   });
@@ -86,12 +86,13 @@ async function appliedWithOneSkipped(t: TestContext): Promise<{ rig: TestRig; pl
   return { rig, plan, view };
 }
 
-test("the collapsed card of an applied plan doesn't count the step you skipped as unverified", async (t) => {
+test("the History row of an applied plan doesn't count the step you skipped as unverified", async (t) => {
   const { plan } = await appliedWithOneSkipped(t);
   const web = await webApp();
-  const card = text(web.renderToStaticMarkup(web.createElement(web.PlanCard, { plan, act: idleAct })));
-  assert.match(card, /Show the 9 steps/, "the card is collapsed");
-  assert.match(card, /8 of 8 changes verified in Drive/, `the collapsed line reads: "${/\d+ of \d+ changes verified in Drive/.exec(card)?.[0]}"`);
+  const row = text(web.renderToStaticMarkup(web.createElement(web.HistoryRow, { plan, act: idleAct })));
+  assert.match(row, /Show steps/, "the row is collapsed");
+  assert.doesNotMatch(row, /IMG_2041\.pdf/, "no steps until you ask for them");
+  assert.match(row, /Applied and verified 8 of 8 /, `the row reads: "${row}"`);
 });
 
 test("after Skip this, the plan's summary counts only the moves that will happen", async (t) => {
@@ -100,10 +101,10 @@ test("after Skip this, the plan's summary counts only the moves that will happen
   assert.match(plan.summary, /move or rename 3 files/, `the summary says: "${plan.summary}"`);
 });
 
-test("evidence: the Decisions panel and the side panel already count only the steps meant to run", async (t) => {
+test("evidence: the strip and the side panel already count only the steps meant to run", async (t) => {
   const { view } = await appliedWithOneSkipped(t);
   const web = await webApp();
   const decisions = text(web.renderToStaticMarkup(web.createElement(web.Decisions, { view, act: idleAct })));
-  assert.match(decisions, /Done: 8 of 8 changes verified in Drive/);
+  assert.match(decisions, /8 of 8 changes applied and verified in Drive\./);
   assert.match(buildModel(view).done?.label ?? "", /Done: 8 of 8 changes verified/);
 });

@@ -68,10 +68,10 @@ function daysBetween(fromIso: string, toIso: string): number {
 
 const sentence = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
 
-const inDays = (n: number) => (n === 0 ? "That's today." : n === 1 ? "That's tomorrow." : `That's in ${n} days.`);
+const inDays = (n: number) => (n === 0 ? "today" : n === 1 ? "tomorrow" : `in ${n} days`);
 
-/** How far ahead a date is worth mentioning. */
-const WINDOW_DAYS: Partial<Record<DocType, number>> = { quote: 14, licence: 90, permit: 90, contract: 60 };
+/** How far ahead a date is worth mentioning: a quote's two weeks, anything else's 30 days. */
+const WINDOW_DAYS: Partial<Record<DocType, number>> = { quote: 14 };
 
 const ORDER: AttentionKind[] = ["missing", "expired", "which_current", "duplicate", "expiring", "undecided", "unreadable"];
 
@@ -160,8 +160,8 @@ export function findAttention(input: { today: string; docs: AttentionDoc[]; busy
         key: `expiring:${d.docId}:${until}`,
         kind: "expiring",
         project: d.project,
-        title: `${label(d)} is valid until ${until}`,
-        detail: [inDays(days), counted].filter(Boolean).join(" "),
+        title: `${label(d)} expires ${until}, ${inDays(days)}`,
+        detail: null,
         evidence,
         docIds: [d.docId],
         askDocId: isQuote ? d.docId : null,
@@ -206,10 +206,13 @@ export function findAttention(input: { today: string; docs: AttentionDoc[]; busy
       key: `undecided:${project}:${sorted.map((q) => q.docId).join(",")}`,
       kind: "undecided",
       project,
-      title: `${project}: quotes from ${contractors.size} contractors, and no price is accepted yet`,
-      detail: `${sorted.map((q) => `${q.facts.issuer.value ?? "Unknown"} ${q.facts.total.value === null ? "" : money(q.facts.total.value, q.facts.total.currency)} (${q.facts.reference.value ?? q.fileName})`.replace(/\s+\(/, " (")).join(" · ")}.${
-        invoiced.length === 1 ? ` There's already an invoice for ${invoiced[0]!.facts.reference.value}.` : ""
-      } Mark the one you went with as accepted.`,
+      title: `${project}: no quote accepted yet`,
+      detail: [
+        ...sorted.map((q) => sentence([q.facts.issuer.value ?? q.facts.reference.value ?? q.fileName, q.facts.total.value === null ? null : money(q.facts.total.value, q.facts.total.currency)].filter(Boolean).join(" "))),
+        invoiced.length === 1 ? `${invoiced[0]!.facts.reference.value} already has an invoice.` : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
       evidence: null,
       docIds: sorted.map((q) => q.docId),
       askDocId: null,

@@ -1,30 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AppView, AttentionItemView, NotificationView, PlanView } from "../../shared/api.ts";
+import type { AppView, LessonView, NotificationView, OpView, PlanView } from "../../shared/api.ts";
 import { getState, newId, post, time } from "./api.ts";
 import { Kiki } from "./Kiki.tsx";
 import { AskContractor, AskForCopy, OutreachCard, UpdateCard } from "./Contractor.tsx";
 import { ExtensionPairing } from "./ExtensionPairing.tsx";
 
-const KIKI_STATE_NAMES: Record<string, string> = {
-  idle: "Idle",
-  reading: "Reading",
-  organizing: "Organizing",
-  needs_approval: "Needs your approval",
-  waiting: "Waiting for someone",
-  needs_clarification: "Needs clarification",
-  verified: "Verified",
-  error: "Error",
-};
-
+/** A step's state, shown only once it isn't waiting for approval (the plan's chip says that). */
 const OP_STATE: Record<string, string> = {
-  pending: "Proposed",
   running: "Applying…",
-  verified: "Applied and verified",
+  verified: "Verified",
   failed: "Failed",
   stale: "Stopped: changed since preview",
   skipped: "Didn't run",
   uncertain: "Uncertain: checking Drive",
-  excluded: "Excluded",
 };
 
 const PLAN_STATUS: Record<string, string> = {
@@ -38,6 +26,9 @@ const PLAN_STATUS: Record<string, string> = {
   superseded: "Replaced by a newer version",
   discarded: "Set aside",
 };
+
+/** How long a finished plan, or a text about it, stays the news in the strip. */
+const RECENT_MS = 30 * 60_000;
 
 function useAction(refresh: () => Promise<void>) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -60,52 +51,48 @@ function useAction(refresh: () => Promise<void>) {
   return { busy, error, run, setError };
 }
 
+type Act = ReturnType<typeof useAction>;
+
 function Badge({ kind, children }: { kind: "live" | "mock" | "demo" | "problem" | "plain"; children: React.ReactNode }) {
   return <span className={`badge ${kind === "plain" ? "" : `badge--${kind}`}`}>{children}</span>;
 }
 
-function Integrations({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+const connectGoogle = (act: Act, gmail = false) =>
+  act.run(gmail ? "connect-gmail" : "connect-google", async () => {
+    const r = await post<{ authorizationUrl: string }>("/api/google/connect", gmail ? { gmail: true } : {});
+    window.location.href = r.authorizationUrl;
+  });
+
+function Integrations({ view, act }: { view: AppView; act: Act }) {
   const { drive, fo } = view.integrations;
-  const connect = (name: "google" | "fo") =>
-    act.run(`connect-${name}`, async () => {
-      const r = await post<{ authorizationUrl: string }>(`/api/${name}/connect`);
-      window.location.href = r.authorizationUrl;
-    });
   return (
     <div className="header-tools">
       {drive.mode === "mock" ? (
-        <Badge kind="mock">Google Drive: Mock</Badge>
+        <Badge kind="mock">Mock Drive</Badge>
       ) : drive.connection === "connected" ? (
-        <Badge kind="live">Google Drive: Live{drive.account ? ` · ${drive.account}` : ""}</Badge>
+        <Badge kind="live">Live Drive</Badge>
       ) : drive.connection === "not_configured" ? (
-        <Badge kind="problem">Google Drive: not configured</Badge>
+        <Badge kind="problem">Drive not set up</Badge>
       ) : (
-        <button className="btn btn--small" onClick={() => connect("google")} disabled={act.busy !== null}>
+        <button className="btn btn--small" onClick={() => connectGoogle(act)} disabled={act.busy !== null}>
           Connect Google Drive
         </button>
       )}
-      {drive.mode === "live" && drive.connection === "connected" && drive.gmail === "connected" && <Badge kind="live">Gmail: read-only</Badge>}
-      {drive.mode === "live" && drive.connection === "connected" && drive.gmail === "not_connected" && (
+      {fo.mode === "mock" ? (
+        <Badge kind="mock">Mock Fo</Badge>
+      ) : fo.connection === "connected" ? (
+        <Badge kind="live">Live Fo</Badge>
+      ) : (
         <button
           className="btn btn--small"
-          title="Kiki only searches for attachments from a contractor she asked. She never sends, changes or deletes mail."
           disabled={act.busy !== null}
           onClick={() =>
-            act.run("connect-gmail", async () => {
-              const r = await post<{ authorizationUrl: string }>("/api/google/connect", { gmail: true });
+            act.run("connect-fo", async () => {
+              const r = await post<{ authorizationUrl: string }>("/api/fo/connect");
               window.location.href = r.authorizationUrl;
             })
           }
         >
-          Let Kiki look in Gmail (read-only)
-        </button>
-      )}
-      {fo.mode === "mock" ? (
-        <Badge kind="mock">Fo: Mock</Badge>
-      ) : fo.connection === "connected" ? (
-        <Badge kind="live">Fo: Live</Badge>
-      ) : (
-        <button className="btn btn--small" onClick={() => connect("fo")} disabled={act.busy !== null}>
           Connect Fo
         </button>
       )}
@@ -113,164 +100,220 @@ function Integrations({ view, act }: { view: AppView; act: ReturnType<typeof use
   );
 }
 
-function WorkspaceCard({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+/** No folder yet: the demo folder, or one you paste. */
+function WorkspaceSetup({ view, act }: { view: AppView; act: Act }) {
   const [folder, setFolder] = useState("");
-  const ws = view.workspace;
   const driveReady = view.integrations.drive.mode === "mock" || view.integrations.drive.connection === "connected";
-  if (!ws) {
-    return (
-      <section className="card" aria-labelledby="ws-title">
-        <h2 id="ws-title">Workspace</h2>
-        <p className="lede">Pick the folder Kiki should organize. She won't touch anything outside it.</p>
-        {view.integrations.drive.connection === "not_configured" && (
-          <div className="notice notice--warn" style={{ marginTop: 12 }}>
-            <strong>Google Drive isn't set up yet.</strong>
-            <p>{view.integrations.drive.message}</p>
-          </div>
-        )}
-        <div className="stack" style={{ marginTop: 14 }}>
-          <button className="btn btn--primary" disabled={!driveReady || act.busy !== null} onClick={() => act.run("demo", () => post("/api/workspace/demo"))}>
-            {act.busy === "demo" ? "Setting up…" : "Set up the renovation folder in my Drive"}
-          </button>
-          <p className="hint">Adds the renovation invoices and quotes.</p>
-          <form
-            className="stack"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void act.run("select", () => post("/api/workspace/select", { folder }));
-            }}
-          >
-            <label htmlFor="folder">Or paste a Drive folder link</label>
-            <div className="edit-row">
-              <input id="folder" type="text" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" />
-              <button className="btn" disabled={!driveReady || !folder.trim() || act.busy !== null}>
-                Use this folder
-              </button>
-            </div>
-          </form>
-        </div>
-      </section>
-    );
-  }
   return (
-    <section className="card" aria-labelledby="ws-title">
-      <div className="card-head">
-        <div>
-          <h2 id="ws-title">{ws.name}</h2>
+    <section className="stack" aria-label="Choose a folder">
+      {view.integrations.drive.connection === "not_configured" && (
+        <div className="notice notice--warn">
+          <strong>Google Drive isn't set up yet.</strong>
+          <p>{view.integrations.drive.message}</p>
         </div>
-        <div className="row">
-          <Badge kind={ws.mode === "live" ? "live" : "mock"}>{ws.mode === "live" ? "Live Drive" : "Mock Drive"}</Badge>
-        </div>
-      </div>
+      )}
       <div className="row">
-        {ws.link && (
-          <a className="btn btn--small" href={ws.link} target="_blank" rel="noreferrer">
-            Open in Drive
-          </a>
-        )}
-        <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("refresh", () => post("/api/workspace/refresh"))}>
-          Look again
+        <button className="btn btn--primary" disabled={!driveReady || act.busy !== null} onClick={() => act.run("demo", () => post("/api/workspace/demo"))}>
+          {act.busy === "demo" ? "Setting up…" : "Set up the demo folder"}
         </button>
-        <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run("clear", () => post("/api/workspace/clear"))}>
-          Change folder
-        </button>
-        {ws.mode === "mock" && (
-          <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("stage-invoice", () => post("/api/workspace/stage-revision", { variant: "invoice" }))}>
-            Add an invoice
-          </button>
-        )}
-        <span className="hint">{ws.lastInventoryAt ? `Watching · checked ${time(ws.lastInventoryAt)}` : "Looking…"}</span>
+        <Badge kind="demo">Staged demo files</Badge>
       </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act.run("select", () => post("/api/workspace/select", { folder }));
+        }}
+      >
+        <label htmlFor="folder">Or paste a Drive folder link</label>
+        <div className="edit-row">
+          <input id="folder" type="text" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" />
+          <button className="btn" disabled={!driveReady || !folder.trim() || act.busy !== null}>
+            Use this folder
+          </button>
+        </div>
+        <p className="hint">Kiki works only inside this folder.</p>
+      </form>
     </section>
   );
 }
+
+const docWord = (t: string) => (t === "other" || t === "unknown" ? "Document" : t.charAt(0).toUpperCase() + t.slice(1));
 
 function InventoryCard({ view }: { view: AppView }) {
-  const files = view.inventory.files.filter((f) => f.kind !== "folder");
   if (!view.workspace) return null;
+  const files = view.inventory.files.filter((f) => f.kind !== "folder");
+  // Kiki's own files say so on their row; the rest are either all staged for the demo or not.
+  const allStaged = files.some((f) => f.origin === "staged_demo") && files.every((f) => f.origin === "staged_demo" || f.origin === "created_by_kiki");
+  const mockReading = files.some((f) => f.doc?.readMode === "mock");
   return (
-    <section className="card card--plain" aria-labelledby="inv-title">
-      <div className="card-head">
-        <h2 id="inv-title">Files</h2>
-        <span className="hint">{view.inventory.reading ? `Reading ${view.inventory.reading}…` : `${files.length} files`}</span>
-      </div>
-      <ul className="item-list">
-        {files.map((f) => (
-          <li key={f.fileId} className="item">
-            <div className="item-head">
-              <span className="item-label">{f.name}</span>
-              <span className="row">
-                {f.isNew && <Badge kind="live">New</Badge>}
-                {f.origin === "created_by_kiki" && <Badge kind="plain">Made by Kiki</Badge>}
-                {f.doc && <span className={`chip chip--${f.doc.readStatus === "read" ? "confirmed" : f.doc.readStatus === "failed" || f.doc.readStatus === "unreadable" ? "needs_review" : "not_searched"}`}>{f.doc.readStatus === "read" ? f.doc.docType : f.doc.readStatus}</span>}
-              </span>
-            </div>
-            <p className="hint">{f.path || "Top level"}</p>
-            {f.doc?.readStatus === "read" && (
-              <p>
-                {[f.doc.issuer.value, f.doc.reference.value, f.doc.date.value, f.doc.total.value].filter(Boolean).join(" · ")}
-                {f.doc.readMode === "mock" && <span className="hint"> (mock reading)</span>}
-              </p>
-            )}
-            {f.doc?.readError && <p className="error-text">{f.doc.readError}</p>}
-          </li>
-        ))}
-      </ul>
+    <section>
+      <details>
+        <summary>
+          Files ({files.length}) {allStaged && <Badge kind="demo">Staged demo files</Badge>} {mockReading && <Badge kind="mock">Mock reading</Badge>}{" "}
+          {view.inventory.reading > 0 && <span className="hint">Reading {view.inventory.reading}…</span>}
+        </summary>
+        <ul className="item-list">
+          {files.map((f) => {
+            const d = f.doc;
+            const unreadable = d?.readStatus === "failed" || d?.readStatus === "unreadable";
+            return (
+              <li key={f.fileId} className="item">
+                <div className="item-head">
+                  <span className="item-label">{f.name}</span>
+                  <span className="row">
+                    {f.isNew && <Badge kind="live">New</Badge>}
+                    {f.origin === "created_by_kiki" && <Badge kind="plain">Made by Kiki</Badge>}
+                    {f.origin === "staged_demo" && !allStaged && <Badge kind="demo">Staged demo file</Badge>}
+                    {unreadable && <span className="chip chip--needs_review">Couldn't read</span>}
+                  </span>
+                </div>
+                {d?.readStatus === "read" && <p className="hint">{[docWord(d.docType), d.issuer.value, d.total.value].filter(Boolean).join(", ")}</p>}
+                {f.path && <p className="hint">{f.path}</p>}
+                {d?.readError && <p className="error-text">{d.readError}</p>}
+              </li>
+            );
+          })}
+        </ul>
+      </details>
     </section>
   );
 }
 
-function OpEditor({ planId, seq, name, act }: { planId: string; seq: number; name: string; act: ReturnType<typeof useAction> }) {
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(name);
-  if (!open) {
-    return (
-      <div className="row">
-        <button className="btn btn--quiet btn--small" onClick={() => setOpen(true)}>
-          Rename
-        </button>
-        <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`skip-${seq}`, () => post(`/api/plans/${planId}/revise`, { edits: [{ seq, exclude: true }] }))}>
-          Skip this
-        </button>
-      </div>
-    );
+const joinPath = (path: string, name: string) => (path ? `${path}/${name}` : name);
+
+interface PlanGroup {
+  path: string;
+  /** The step that creates this folder, when the plan makes it. */
+  folder: OpView | null;
+  ops: OpView[];
+}
+
+/** A plan's steps by destination folder, in order of first appearance; new folders are tags on their group. */
+function planGroups(plan: PlanView): { groups: PlanGroup[]; excluded: OpView[] } {
+  const folders = new Map(plan.ops.filter((o) => o.kind === "create_folder" && o.after && o.state !== "excluded").map((o) => [joinPath(o.after!.path, o.after!.name), o]));
+  const groups = new Map<string, PlanGroup>();
+  const excluded: OpView[] = [];
+  for (const op of plan.ops) {
+    if (op.kind === "create_folder") continue;
+    if (op.state === "excluded") {
+      excluded.push(op);
+      continue;
+    }
+    const path = op.after?.path ?? "";
+    const group = groups.get(path) ?? { path, folder: folders.get(path) ?? null, ops: [] };
+    group.ops.push(op);
+    groups.set(path, group);
   }
+  // A new folder shows as its own group only when no group path shows it, or when its step went wrong.
+  for (const [path, op] of folders) {
+    const shown = groups.has(path) || [...groups.keys()].some((g) => g.startsWith(`${path}/`));
+    if (!shown || op.error || (op.state !== "pending" && op.state !== "verified")) if (!groups.has(path)) groups.set(path, { path, folder: op, ops: [] });
+  }
+  for (const g of groups.values()) g.ops.sort((a, b) => Number(b.state === "failed") - Number(a.state === "failed"));
+  return { groups: [...groups.values()], excluded };
+}
+
+function OpState({ op }: { op: OpView }) {
+  const label = OP_STATE[op.state];
+  if (!label) return null;
+  return <span className={`chip ${op.state === "verified" ? "chip--confirmed" : "chip--needs_review"}`}>{label}</span>;
+}
+
+/** Rename a step's file, or leave it out of the plan (a new version either way). */
+function OpEditor({ planId, op, act, onClose }: { planId: string; op: OpView; act: Act; onClose: () => void }) {
+  const [value, setValue] = useState(op.after?.name ?? "");
+  const revise = (key: string, edit: Record<string, unknown>) =>
+    act.run(key, async () => {
+      await post(`/api/plans/${planId}/revise`, { edits: [{ seq: op.seq, ...edit }] });
+      onClose();
+    });
   return (
     <form
-      className="edit-row"
+      className="stack"
       onSubmit={(e) => {
         e.preventDefault();
-        void act.run(`rename-${seq}`, async () => {
-          await post(`/api/plans/${planId}/revise`, { edits: [{ seq, newName: value }] });
-          setOpen(false);
-        });
+        void revise(`rename-${op.seq}`, { newName: value });
       }}
     >
-      <input type="text" value={value} onChange={(e) => setValue(e.target.value)} aria-label="New file name" />
-      <button className="btn btn--small" disabled={!value.trim() || act.busy !== null}>
-        Save
-      </button>
-      <button type="button" className="btn btn--quiet btn--small" onClick={() => setOpen(false)}>
-        Cancel
-      </button>
+      <label htmlFor={`name-${planId}-${op.seq}`}>New name</label>
+      <div className="edit-row">
+        <input id={`name-${planId}-${op.seq}`} type="text" value={value} onChange={(e) => setValue(e.target.value)} />
+        <button className="btn btn--small" disabled={!value.trim() || act.busy !== null}>
+          Save
+        </button>
+      </div>
+      <div className="row">
+        <button type="button" className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => void revise(`skip-${op.seq}`, { exclude: true })}>
+          Skip this file
+        </button>
+        <button type="button" className="btn btn--quiet btn--small" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }
 
-/** For a file Kiki couldn't place: say where it goes, and Kiki adds it to the proposal (a new version). */
-function PlaceEditor({ planId, fileId, options, act }: { planId: string; fileId: string; options: string[]; act: ReturnType<typeof useAction> }) {
+function PlanRow({ plan, op, act }: { plan: PlanView; op: OpView; act: Act | null }) {
+  const [editing, setEditing] = useState(false);
+  const before = op.before;
+  const after = op.after;
+  let lines: React.ReactNode;
+  if (op.kind === "move_rename" && before && after) {
+    const from = before.path ? ` from ${before.path}` : "";
+    lines =
+      before.name === after.name ? (
+        <p>
+          <strong>{after.name}</strong>
+          {from && <span className="hint">{from}</span>}
+        </p>
+      ) : (
+        <>
+          <p className="hint">
+            {before.name}
+            {from}
+          </p>
+          <p>
+            <strong>→ {after.name}</strong>
+          </p>
+        </>
+      );
+  } else if (op.kind === "write_index" && after) {
+    lines = <p>{op.title.startsWith("Create") ? <strong>+ {after.name}</strong> : <><strong>{after.name}</strong> <span className="hint">updated</span></>}</p>;
+  } else {
+    lines = <p>{op.title}</p>;
+  }
+  return (
+    <li className="plan-row">
+      <div>{lines}</div>
+      <div className="row">
+        <OpState op={op} />
+        {act && op.editable && op.state === "pending" && !editing && (
+          <button className="btn btn--quiet btn--small" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        )}
+      </div>
+      {act && editing && <OpEditor planId={plan.id} op={op} act={act} onClose={() => setEditing(false)} />}
+      {op.error && <p className="error-text">{op.error}</p>}
+    </li>
+  );
+}
+
+/** For a file Kiki couldn't place: say where it goes, and Kiki adds it to the plan (a new version). */
+function PlaceEditor({ planId, fileId, options, act }: { planId: string; fileId: string; options: string[]; act: Act }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   if (!open) {
     return (
       <button className="btn btn--quiet btn--small" onClick={() => setOpen(true)}>
-        Say where it goes
+        Choose a folder
       </button>
     );
   }
   return (
     <form
-      className="edit-row"
+      className="stack"
       onSubmit={(e) => {
         e.preventDefault();
         void act.run(`place-${fileId}`, async () => {
@@ -279,142 +322,143 @@ function PlaceEditor({ planId, fileId, options, act }: { planId: string; fileId:
         });
       }}
     >
-      <input type="text" list={`places-${fileId}`} value={value} placeholder='A project or folder, like "Kitchen"' onChange={(e) => setValue(e.target.value)} aria-label="Project or folder" />
-      <datalist id={`places-${fileId}`}>
-        {options.map((o) => (
-          <option key={o} value={o} />
-        ))}
-      </datalist>
-      <button className="btn btn--small" disabled={!value.trim() || act.busy !== null}>
-        Add to the proposal
-      </button>
-      <button type="button" className="btn btn--quiet btn--small" onClick={() => setOpen(false)}>
-        Cancel
-      </button>
+      <label htmlFor={`place-${fileId}`}>Folder</label>
+      <div className="edit-row">
+        <input id={`place-${fileId}`} type="text" list={`places-${fileId}`} value={value} onChange={(e) => setValue(e.target.value)} />
+        <datalist id={`places-${fileId}`}>
+          {options.map((o) => (
+            <option key={o} value={o} />
+          ))}
+        </datalist>
+        <button className="btn btn--small" disabled={!value.trim() || act.busy !== null}>
+          Add
+        </button>
+        <button type="button" className="btn btn--quiet btn--small" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }
 
-/** Plans applied before the latest one: one line each, with their undo. */
-function EarlierChanges({ plans, act }: { plans: PlanView[]; act: ReturnType<typeof useAction> }) {
-  if (!plans.length) return null;
+/** Every step, grouped by the folder it ends up in, then what stays where it is. Read-only without `act`. */
+function PlanSteps({ plan, act }: { plan: PlanView; act: Act | null }) {
+  const { groups, excluded } = planGroups(plan);
+  const placeable = act && plan.status === "proposed" && plan.kind === "organize";
   return (
-    <section className="card" aria-labelledby="earlier-title">
-      <h2 id="earlier-title">Earlier changes</h2>
-      <ul className="plain-list">
-        {plans.map((p) => (
-          <li key={p.id} className="row">
-            <span>
-              <strong>{p.title}</strong> <span className="hint">· {p.counts.verified} of {p.counts.total - p.counts.excluded} verified{p.finishedAt ? ` · ${time(p.finishedAt)}` : ""}</span>
-            </span>
-            {p.canUndo && (
-              <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`undo-${p.id}`, () => post(`/api/plans/${p.id}/undo`))}>
-                Undo…
-              </button>
+    <>
+      {groups.map((g) => (
+        <div key={g.path} className="plan-group">
+          <div className="item-head">
+            <span className="item-label">{g.path || "Top level"}</span>
+            {g.folder && (
+              <span className="row">
+                <span className="chip chip--not_searched">New folder</span>
+                <OpState op={g.folder} />
+              </span>
             )}
-          </li>
-        ))}
-      </ul>
+          </div>
+          {g.folder?.error && <p className="error-text">{g.folder.error}</p>}
+          {g.ops.length > 0 && (
+            <ul className="plain-list">
+              {g.ops.map((op) => (
+                <PlanRow key={op.seq} plan={plan} op={op} act={act} />
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+      {(plan.notes.length > 0 || excluded.length > 0) && (
+        <div className="plan-group">
+          <span className="item-label">Stays where it is</span>
+          <ul className="plain-list">
+            {excluded.map((op) => (
+              <li key={`op-${op.seq}`} className="plan-row">
+                <p>{op.before?.name ?? op.after?.name}</p>
+              </li>
+            ))}
+            {plan.notes.map((n) => (
+              <li key={n.fileId} className="plan-row">
+                <p>{n.name}</p>
+                {placeable && n.unplaced && <PlaceEditor planId={plan.id} fileId={n.fileId} options={n.options} act={act} />}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+}
+
+function planChip(status: PlanView["status"]): string {
+  return `chip chip--${status === "applied" ? "confirmed" : status === "proposed" ? "not_searched" : "needs_review"}`;
+}
+
+/** A plan waiting for you, running, or stopped part-way. Approve sits in its own footer. */
+function PlanCard({ plan, act, fo }: { plan: PlanView; act: Act; fo: AppView["integrations"]["fo"] }) {
+  return (
+    <section className="card" aria-labelledby={`plan-${plan.id}`}>
+      <div className="card-head">
+        <h2 id={`plan-${plan.id}`}>{plan.version > 1 ? `Plan, version ${plan.version}` : "Plan"}</h2>
+        <span className={planChip(plan.status)}>{PLAN_STATUS[plan.status]}</span>
+      </div>
+      {plan.evidence && (
+        <div className="notice notice--info">
+          <strong>{plan.evidence.source}</strong>
+          <p className="quote">“{plan.evidence.statement}”</p>
+          {plan.evidence.candidateReasons.length > 0 && (
+            <details>
+              <summary>Why this file</summary>
+              <p>{plan.evidence.candidateReasons.join(" ")}</p>
+            </details>
+          )}
+        </div>
+      )}
+      {plan.diff && plan.diff.lines.length > 0 && (
+        <div className="notice notice--warn">
+          <strong>What changed</strong>
+          {plan.diff.lines.map((l) => (
+            <p key={l}>{l}</p>
+          ))}
+          <p>Marking it current doesn't accept the price.</p>
+        </div>
+      )}
+      {plan.conflict && (
+        <div className="notice notice--bad">
+          <strong>{plan.conflict}</strong>
+        </div>
+      )}
+      <PlanSteps plan={plan} act={act} />
+      {plan.status === "proposed" && <ApproveBlock plan={plan} act={act} fo={fo} />}
     </section>
   );
 }
 
-function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAction> }) {
-  // A finished, verified plan is a record: one line until you want the steps.
-  const done = plan.status === "applied";
-  const [open, setOpen] = useState(!done);
-  const steps = plan.ops.length;
+function ApproveBlock({ plan, act, fo }: { plan: PlanView; act: Act; fo: AppView["integrations"]["fo"] }) {
+  // One request id per plan version: a double click resolves to the same approval on the server.
+  const requestId = useMemo(() => newId(), [plan.id, plan.contentHash]);
   return (
-    <section className="card card--plain" aria-labelledby={`plan-${plan.id}`}>
-      <div className="card-head">
-        <div>
-          <h2 id={`plan-${plan.id}`}>{plan.title}</h2>
-          <p className="lede">{plan.summary}</p>
-        </div>
-        <span className={`chip chip--${plan.status === "applied" ? "confirmed" : plan.status === "proposed" ? "not_searched" : "needs_review"}`}>
-          {PLAN_STATUS[plan.status]} · v{plan.version}
-        </span>
+    <div className="plan-footer">
+      {plan.counts.total - plan.counts.excluded > 0 && (
+        <button
+          className="btn btn--primary"
+          disabled={act.busy !== null}
+          onClick={() => act.run(`approve-${plan.id}`, () => post(`/api/plans/${plan.id}/approve`, { contentHash: plan.contentHash, clientRequestId: requestId }))}
+        >
+          {act.busy === `approve-${plan.id}` ? "Approving…" : "Approve"}
+        </button>
+      )}
+      <div className="secondary-actions">
+        {fo.connection === "connected" && (
+          <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`ask-fo-${plan.id}`, () => post(`/api/plans/${plan.id}/ask-fo`))}>
+            {act.busy === `ask-fo-${plan.id}` ? "Asking…" : `Have ${fo.mode === "mock" ? "Mock Fo" : "Fo"} ask me`}
+          </button>
+        )}
+        <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`discard-${plan.id}`, () => post(`/api/plans/${plan.id}/discard`))}>
+          Not now
+        </button>
       </div>
-      {plan.evidence && (
-        <div className="notice notice--info" style={{ marginBottom: 12 }}>
-          <strong>{plan.evidence.source}</strong>
-          <p className="quote">“{plan.evidence.statement}”</p>
-          {plan.evidence.candidateReasons.length > 0 && <p className="hint">Why this file: {plan.evidence.candidateReasons.join(" ")}</p>}
-        </div>
-      )}
-      {plan.diff && plan.diff.lines.length > 0 && (
-        <div className="notice notice--warn" style={{ marginBottom: 12 }}>
-          <strong>What changed between the quotes</strong>
-          {plan.diff.lines.map((l) => (
-            <p key={l}>{l}</p>
-          ))}
-          <p className="hint">Marking a quote current doesn't accept its price. You do that separately in the index.</p>
-        </div>
-      )}
-      {plan.conflict && (
-        <div className="notice notice--bad" style={{ marginBottom: 12 }}>
-          <strong>{plan.conflict}</strong>
-        </div>
-      )}
-      {done && (
-        <div className="row">
-          <span className="hint">
-            {plan.counts.verified} of {plan.counts.total - plan.counts.excluded} changes verified in Drive{plan.finishedAt ? ` · ${time(plan.finishedAt)}` : ""}.
-          </span>
-          <button className="btn btn--quiet btn--small" aria-expanded={open} onClick={() => setOpen(!open)}>
-            {open ? "Hide the steps" : `Show the ${steps} step${steps === 1 ? "" : "s"}`}
-          </button>
-        </div>
-      )}
-      {open && (
-        <ol className="item-list">
-          {plan.ops.map((op) => (
-            <li key={op.seq} className="item">
-              <div className="item-head">
-                <span className="item-label">
-                  {op.seq}. {op.title}
-                </span>
-                <span className={`chip chip--${op.state === "verified" ? "confirmed" : op.state === "pending" ? "not_searched" : "needs_review"}`}>{OP_STATE[op.state]}</span>
-              </div>
-              {op.before && op.kind === "move_rename" && (
-                <p>
-                  <span className="hint">From</span> {op.before.path || "Top level"} / <strong>{op.before.name}</strong>
-                </p>
-              )}
-              {op.after && (
-                <p>
-                  <span className="hint">To</span> {op.after.path || "Top level"} / <strong>{op.after.name}</strong>
-                </p>
-              )}
-              {op.kind !== "create_folder" && <p className="hint">{op.reason}</p>}
-              {op.error && <p className="error-text">{op.error}</p>}
-              {op.editable && op.state === "pending" && op.after && <OpEditor planId={plan.id} seq={op.seq} name={op.after.name} act={act} />}
-            </li>
-          ))}
-        </ol>
-      )}
-      {open && plan.notes.length > 0 && (
-        <>
-          <h3>Not moved</h3>
-          <ul className="plain-list">
-            {plan.notes.map((n) => (
-              <li key={n.fileId} className="hint">
-                <strong>{n.name}</strong>: {n.reason}
-                {n.unplaced && plan.status === "proposed" && plan.kind === "organize" && <PlaceEditor planId={plan.id} fileId={n.fileId} options={n.options} act={act} />}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {plan.canUndo && (
-        <div className="row" style={{ marginTop: 12 }}>
-          <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`undo-${plan.id}`, () => post(`/api/plans/${plan.id}/undo`))}>
-            Undo these changes…
-          </button>
-          <span className="hint">Kiki prepares the reversal for you to approve. Nothing is deleted.</span>
-        </div>
-      )}
-    </section>
+    </div>
   );
 }
 
@@ -427,40 +471,26 @@ function textIsCurrent(n: NotificationView, proposedId: string | null, runningId
   // A text or request about a proposal shows only while that proposal is open or running.
   if (n.purpose === "find" || n.purpose === "decide") return Boolean(n.planId && (n.planId === proposedId || n.planId === runningId));
   if (n.state !== "complete") return true;
-  return Date.now() - Date.parse(n.createdAt) < 30 * 60_000;
+  return Date.now() - Date.parse(n.createdAt) < RECENT_MS;
 }
 
-const ATTENTION_CHIP: Record<AttentionItemView["kind"], { label: string; tone: string }> = {
-  missing: { label: "Missing", tone: "chip--missing" },
-  expired: { label: "Expired", tone: "chip--missing" },
-  which_current: { label: "Unclear", tone: "chip--needs_review" },
-  duplicate: { label: "Copy?", tone: "chip--needs_review" },
-  expiring: { label: "Soon", tone: "chip--needs_review" },
-  undecided: { label: "Your call", tone: "chip--not_searched" },
-  unreadable: { label: "Couldn't read", tone: "chip--needs_review" },
-  unplaced: { label: "Where?", tone: "chip--needs_review" },
-};
-
 /** Things Kiki noticed that need a person. Nothing here changes anything by itself. */
-function AttentionCard({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+function AttentionCard({ view, act }: { view: AppView; act: Act }) {
   const [asking, setAsking] = useState<string | null>(null);
-  if (!view.attention.length) return null;
+  // A file the plan on screen lists under "Stays where it is" is asked about there, not twice.
+  const listed = view.plans.filter((p) => p.status === "proposed" && p.kind === "organize").flatMap((p) => p.notes.map((n) => `unplaced:${n.fileId}:`));
+  const items = view.attention.filter((a) => !listed.some((k) => a.key.startsWith(k)));
+  if (!items.length) return null;
   const rows = view.index.flatMap((p) => p.rows);
   return (
-    <section className="card card--plain" aria-labelledby="attention-title">
-      <div className="card-head">
-        <h2 id="attention-title">Needs a look</h2>
-      </div>
+    <section aria-labelledby="attention-title">
+      <h2 id="attention-title">Needs a look</h2>
       <ul className="item-list">
-        {view.attention.map((a) => {
-          const chip = ATTENTION_CHIP[a.kind];
+        {items.map((a) => {
           const row = a.askDocId ? rows.find((r) => r.docId === a.askDocId) : undefined;
           return (
             <li key={a.key} className="item">
-              <div className="item-head">
-                <span className="item-label">{a.title}</span>
-                <span className={`chip ${chip.tone}`}>{chip.label}</span>
-              </div>
+              <span className="item-label">{a.title}</span>
               {a.detail && <p className="hint">{a.detail}</p>}
               {a.evidence && <p className="quote">“{a.evidence}”</p>}
               <div className="row">
@@ -474,7 +504,7 @@ function AttentionCard({ view, act }: { view: AppView; act: ReturnType<typeof us
                     Ask {a.copy.issuer ?? "them"} for a copy
                   </button>
                 )}
-                {a.copy?.asked && <span className="hint">Kiki asked for a copy. The message is with Fo's cards.</span>}
+                {a.copy?.asked && <span className="hint">Asked for a copy.</span>}
                 {row && a.kind === "which_current" && (
                   <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`current-${row.docId}`, () => post(`/api/documents/${row.docId}/current`))}>
                     {row.reference ?? "The latest"} is the current one
@@ -494,128 +524,96 @@ function AttentionCard({ view, act }: { view: AppView; act: ReturnType<typeof us
   );
 }
 
-function IndexCard({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+function IndexCard({ view, act }: { view: AppView; act: Act }) {
   const [asking, setAsking] = useState<string | null>(null);
   if (!view.index.length) return null;
   return (
     <>
-      {view.index.map((p) => (
-        <section key={p.name} className="card card--plain" aria-labelledby={`idx-${p.name}`}>
-          <div className="card-head">
-            <h2 id={`idx-${p.name}`}>{p.name} index</h2>
-            {p.indexFileLink && (
-              <a className="btn btn--small" href={p.indexFileLink} target="_blank" rel="noreferrer">
-                Open index file
-              </a>
-            )}
-          </div>
-          <ul className="item-list">
-            {p.rows.map((r) => (
-              <li key={r.docId} className="item">
-                <div className="item-head">
-                  <span className="item-label">
-                    {r.docType === "invoice" ? "Invoice" : r.docType === "quote" ? "Quote" : r.docType} · {r.issuer ?? "Unknown issuer"} {r.reference ?? ""}
-                  </span>
-                  <span className="row">
-                    {r.total && <span className="chip chip--not_searched">{r.total}</span>}
-                    {r.status === "current" && <span className="chip chip--confirmed">Current</span>}
-                    {r.status === "superseded" && <span className="chip chip--needs_review">Superseded</span>}
-                    {r.latestReceived && r.docType === "quote" && <span className="chip chip--not_searched">Latest received</span>}
-                    {r.acceptedAt && <span className="chip chip--confirmed">Price accepted by you</span>}
-                  </span>
-                </div>
-                <p className="hint">
-                  {r.date ?? "No date"} · {r.folder} / {r.fileName}
-                  {r.supersedes ? ` · replaces ${r.supersedes}` : ""}
-                </p>
-                {r.docType === "quote" && r.status !== "superseded" && (
-                  <div className="row">
-                    {r.canAsk && asking !== r.docId && (
-                      <button className="btn btn--quiet btn--small" onClick={() => setAsking(r.docId)}>
-                        Ask the contractor if this is final
-                      </button>
+      {view.index.map((p) => {
+        const quotesFrom = (issuer: string | null) => (issuer ? p.rows.filter((r) => r.docType === "quote" && r.issuer === issuer).length : 0);
+        return (
+          <section key={p.name} aria-labelledby={`idx-${p.name}`}>
+            <div className="card-head">
+              <h2 id={`idx-${p.name}`}>{p.name} index</h2>
+              {p.indexFileLink && (
+                <a className="btn btn--quiet btn--small" href={p.indexFileLink} target="_blank" rel="noreferrer">
+                  Open in Drive
+                </a>
+              )}
+            </div>
+            <ul className="item-list">
+              {p.rows.map((r) => {
+                const several = quotesFrom(r.issuer) >= 2;
+                return (
+                  <li key={r.docId} className="item">
+                    <div className="item-head">
+                      <span className="item-label">{[`${docWord(r.docType)}${r.reference ? ` ${r.reference}` : ""}`, r.issuer].filter(Boolean).join(", ")}</span>
+                      {r.total && <span>{r.total}</span>}
+                    </div>
+                    {(r.status === "current" || r.status === "superseded" || r.acceptedAt || (r.latestReceived && r.docType === "quote" && several)) && (
+                      <div className="row">
+                        {r.status === "current" && <span className="chip chip--confirmed">Current</span>}
+                        {r.status === "superseded" && <span className="chip chip--needs_review">Superseded</span>}
+                        {r.latestReceived && r.docType === "quote" && several && <span className="chip chip--not_searched">Latest received</span>}
+                        {r.acceptedAt && <span className="chip chip--confirmed">Price accepted by you</span>}
+                      </div>
                     )}
-                    {r.status !== "current" && (
-                      <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`current-${r.docId}`, () => post(`/api/documents/${r.docId}/current`))}>
-                        This is the current one
-                      </button>
+                    <p className="hint">
+                      {[r.date && !r.fileName.startsWith(r.date) ? r.date : null, r.fileName].filter(Boolean).join(", ")}
+                      {r.supersedes ? `, replaces ${r.supersedes}` : ""}
+                    </p>
+                    {r.docType === "quote" && r.status !== "superseded" && (
+                      <div className="row">
+                        {r.canAsk && asking !== r.docId && (
+                          <button className="btn btn--quiet btn--small" onClick={() => setAsking(r.docId)}>
+                            Ask if it's final
+                          </button>
+                        )}
+                        {r.status !== "current" && several && (
+                          <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`current-${r.docId}`, () => post(`/api/documents/${r.docId}/current`))}>
+                            Mark current
+                          </button>
+                        )}
+                        <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`accept-${r.docId}`, () => post(`/api/documents/${r.docId}/accept`, { accepted: !r.acceptedAt }))}>
+                          {r.acceptedAt ? "Withdraw price acceptance" : "Mark price accepted"}
+                        </button>
+                      </div>
                     )}
-                    <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`accept-${r.docId}`, () => post(`/api/documents/${r.docId}/accept`, { accepted: !r.acceptedAt }))}>
-                      {r.acceptedAt ? "Withdraw price acceptance" : "Mark price accepted"}
-                    </button>
-                  </div>
-                )}
-                {asking === r.docId && <AskContractor row={r} view={view} act={act} onDone={() => setAsking(null)} />}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+                    {asking === r.docId && <AskContractor row={r} view={view} act={act} onDone={() => setAsking(null)} />}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        );
+      })}
     </>
   );
 }
 
-function FoUpdates({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+/** Messages Fo is carrying for you, and what Kiki picked up from the replies. */
+function WithFo({ view, act }: { view: AppView; act: Act }) {
   const shown = view.updates.filter((u) => u.status !== "dismissed").slice(0, 4);
   const conversations = view.outreach.filter((o) => o.draft || o.dispatches.length);
   if (!shown.length && !conversations.length) return null;
   return (
-    <>
+    <section className="stack" aria-labelledby="with-fo">
+      <h2 id="with-fo">With Fo</h2>
       {conversations.map((o) => (
         <OutreachCard key={o.documentId} o={o} view={view} act={act} />
       ))}
-      {shown.length > 0 && (
-        <section className="card decision" aria-labelledby="fo-updates">
-          <h2 id="fo-updates">From Fo</h2>
-          {shown.map((u) => (
-            <UpdateCard key={u.id} u={u} view={view} act={act} />
-          ))}
-        </section>
-      )}
-    </>
-  );
-}
-
-/** What Kiki learned from your answers. Each one only shapes a proposal; forgetting it takes it back. */
-function Learned({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
-  if (!view.lessons.length) return null;
-  return (
-    <section className="card decision" aria-labelledby="learned-title">
-      <h2 id="learned-title">What Kiki learned</h2>
-      <p className="hint" style={{ marginTop: 0 }}>From your answers. She still asks before changing anything.</p>
-      <ul className="learned">
-        {view.lessons.map((l) => (
-          <li key={l.id}>
-            <span>
-              {l.text}
-              {l.examples > 1 && <span className="hint"> ({l.examples} times)</span>}
-              {l.auto && <span className="hint" style={{ display: "block" }}>She files these on her own and texts you after.</span>}
-              {!l.auto && l.offered && <span className="hint" style={{ display: "block" }}>Kiki offered to file these on her own.</span>}
-            </span>
-            <span className="learned-actions">
-              {l.kind === "place" && (
-                <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`alone-${l.id}`, () => post(`/api/lessons/${l.id}/alone`, { on: !l.auto }))}>
-                  {l.auto ? "Ask me first" : l.offered ? "Yes, on her own" : "File on her own"}
-                </button>
-              )}
-              <button className="btn btn--small btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`forget-${l.id}`, () => post(`/api/lessons/${l.id}/forget`))}>
-                Forget
-              </button>
-            </span>
-          </li>
-        ))}
-      </ul>
+      {shown.map((u) => (
+        <UpdateCard key={u.id} u={u} view={view} act={act} />
+      ))}
     </section>
   );
 }
 
-function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+function NotifyDecision({ view, act }: { view: AppView; act: Act }) {
   const [preview, setPreview] = useState<{ text: string; contentHash: string } | null>(null);
   const requestId = useMemo(() => newId(), [preview?.contentHash]);
   // Only a summary you asked for, while it's on its way or just sent; otherwise offer a new one.
-  const latest: NotificationView | undefined = view.notifications.find(
-    (n) => n.purpose === "summary" && (n.state !== "complete" || Date.now() - Date.parse(n.createdAt) < 30 * 60_000),
-  );
+  const latest: NotificationView | undefined = view.notifications.find((n) => n.purpose === "summary" && (n.state !== "complete" || Date.now() - Date.parse(n.createdAt) < RECENT_MS));
   const fo = view.integrations.fo;
   const foLabel = fo.mode === "mock" ? "Mock Fo" : "Fo";
 
@@ -654,18 +652,16 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
   }
   if (!preview) {
     return (
-      <button className="btn btn--primary" disabled={act.busy !== null} onClick={() => act.run("notify-preview", async () => setPreview(await post<{ text: string; contentHash: string }>("/api/notify/preview")))}>
+      <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("notify-preview", async () => setPreview(await post<{ text: string; contentHash: string }>("/api/notify/preview")))}>
         Text me a summary
       </button>
     );
   }
   return (
     <div className="stack">
-      <p className="hint">
-        {foLabel} will send you this note. No one else.
-      </p>
+      <p className="hint">Only you get this, from {foLabel}.</p>
       <pre className="message-preview">{preview.text}</pre>
-      <div className="approve-row">
+      <div className="row">
         <button
           className="btn btn--primary"
           disabled={act.busy !== null}
@@ -678,11 +674,9 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
         >
           {act.busy === "notify-send" ? "Sending…" : "Send"}
         </button>
-        <div className="secondary-actions">
-          <button className="btn btn--quiet" onClick={() => setPreview(null)}>
-            Not now
-          </button>
-        </div>
+        <button className="btn btn--quiet" onClick={() => setPreview(null)}>
+          Not now
+        </button>
       </div>
     </div>
   );
@@ -694,10 +688,10 @@ function decideLabel(n: NotificationView, fo: string): string {
   if (r?.status === "approved") return `You told ${fo} "${r.text}". Kiki is applying this version.`;
   if (r?.status === "declined") return `You told ${fo} "${r.text}". Kiki isn't applying it.`;
   if (r?.status === "adjusting") return `You asked for changes: "${r.text}". Kiki is preparing a new version…`;
-  if (r?.status === "revised") return `You asked for changes, and Kiki made version ${r.revision?.version ?? ""}. ${fo} is bringing it to you.`;
+  if (r?.status === "revised") return `Kiki made version ${r.revision?.version ?? ""}. ${fo} is bringing it to you.`;
   if (r?.status === "not_changed") return `Kiki didn't change the proposal. ${r.revision?.note ?? ""}`.trim();
   if (r?.status === "stale") return "This was about an earlier version of the proposal.";
-  if (r?.status === "expired") return "This request expired. Ask again from the proposal.";
+  if (r?.status === "expired") return "This request expired. Ask again from the plan.";
   if (n.state === "failed") return `${fo} couldn't take the proposal.`;
   if (n.state === "uncertain") return `Not sure ${fo} got the proposal.`;
   if (n.state === "needs_user_input") return `${fo} is asking you about this proposal.`;
@@ -706,7 +700,7 @@ function decideLabel(n: NotificationView, fo: string): string {
   return `${fo} is reading the proposal…`;
 }
 
-function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; act: ReturnType<typeof useAction> }) {
+function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; act: Act }) {
   const fo = mock ? "Mock Fo" : "Fo";
   const [answer, setAnswer] = useState("");
   const r = n.reply;
@@ -720,30 +714,27 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
         : r?.status === "stale"
           ? "The proposal changed since Fo asked. Review the new version."
           : n.purpose === "done" && n.outcome === "reported_sent"
-          ? `${fo} texted you that it's done.`
-          : r?.status === "waiting" && n.outcome === "reported_sent"
-            ? `${fo} reports it texted you. Answer here in Kiki: yes, a change, or no.`
+            ? `${fo} texted you that it's done.`
             : r?.status === "expired"
-              ? "This request expired before a decision came back. Use \"Have Fo ask me\" to ask again."
+              ? "This request expired. Ask again from the plan."
               : n.outcome === "reported_sent"
                 ? `${fo} reports it texted you.`
-      : n.state === "failed"
-        ? "The text wasn't sent."
-        : n.state === "uncertain"
-          ? "Not sure the text went out."
-          : n.state === "needs_user_input"
-            ? `${fo} has a question.`
-            : n.outcome === "not_sent"
-              ? `${fo} says it didn't send the text.`
-              : n.state === "working" && n.pollPaused
-                ? `Kiki lost touch with ${fo} while it was texting you.`
-                : n.state === "complete"
-                  ? `${fo} didn't say whether it texted you.`
-                  : `${fo} is texting you…`;
+                : n.state === "failed"
+                  ? "The text wasn't sent."
+                  : n.state === "uncertain"
+                    ? "Not sure the text went out."
+                    : n.state === "needs_user_input"
+                      ? `${fo} has a question.`
+                      : n.outcome === "not_sent"
+                        ? `${fo} says it didn't send the text.`
+                        : n.state === "working" && n.pollPaused
+                          ? `Kiki lost touch with ${fo} while it was texting you.`
+                          : n.state === "complete"
+                            ? `${fo} didn't say whether it texted you.`
+                            : `${fo} is texting you…`;
   return (
-    <div className={`notice ${n.outcome === "reported_sent" || r?.status === "approved" ? "notice--ok" : n.state === "failed" || n.state === "uncertain" ? "notice--bad" : "notice--info"}`} style={{ marginBottom: 14 }}>
+    <div className={`notice ${n.outcome === "reported_sent" || r?.status === "approved" ? "notice--ok" : n.state === "failed" || n.state === "uncertain" ? "notice--bad" : "notice--info"}`}>
       <strong>{label}</strong>
-      {n.text && !decide && <p className="hint">“{n.text}”</p>}
       {(n.question || n.failureDetail) && <p className="message-preview">{n.question ?? n.failureDetail}</p>}
       {n.state === "working" && n.pollPaused && n.pollError && <p>{n.pollError}</p>}
       {r?.clarification && <p>{fo} needs clarification: “{r.clarification}”</p>}
@@ -760,11 +751,10 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
             });
           }}
         >
-          <label htmlFor={`ans-${n.taskId}`}>Answer {fo} about this proposal</label>
-          {decide && <span className="hint">Say yes or no, ask a question, or ask for changes, like "skip the Bright Floors quote".</span>}
-          <textarea id={`ans-${n.taskId}`} style={{ minHeight: 70 }} value={answer} onChange={(e) => setAnswer(e.target.value)} />
+          <label htmlFor={`ans-${n.taskId}`}>Your answer</label>
+          <textarea id={`ans-${n.taskId}`} style={{ minHeight: 70 }} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder={'Yes, no, or a change like "skip the Bright Floors quote"'} />
           <button className="btn btn--primary" disabled={!answer.trim() || act.busy !== null}>
-            Send answer to {fo}
+            Send to {fo}
           </button>
         </form>
       )}
@@ -772,128 +762,174 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
   );
 }
 
-function ApproveBlock({ plan, act, fo }: { plan: PlanView; act: ReturnType<typeof useAction>; fo: AppView["integrations"]["fo"] }) {
-  // One request id per plan version: a double click resolves to the same approval on the server.
-  const requestId = useMemo(() => newId(), [plan.id, plan.contentHash]);
+/** Kiki offered to file a kind of document on her own, and you haven't answered. */
+function LessonOffer({ lesson, act }: { lesson: LessonView; act: Act }) {
+  const [hidden, setHidden] = useState(false);
+  if (hidden) return null;
   return (
-    <div className="stack" style={{ marginBottom: 14 }}>
-      <p>
-        <strong>{plan.title}</strong> (version {plan.version})
-      </p>
-      <p className="lede">{plan.summary}</p>
-      <div className="approve-row">
-        {plan.counts.total - plan.counts.excluded > 0 && (
-          <button
-            className="btn btn--primary"
-            disabled={act.busy !== null}
-            onClick={() => act.run(`approve-${plan.id}`, () => post(`/api/plans/${plan.id}/approve`, { contentHash: plan.contentHash, clientRequestId: requestId }))}
-          >
-            {act.busy === `approve-${plan.id}` ? "Approving…" : "Approve"}
-          </button>
-        )}
-        <div className="secondary-actions">
-          {fo.connection === "connected" && (
-            <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`ask-fo-${plan.id}`, () => post(`/api/plans/${plan.id}/ask-fo`))}>
-              {act.busy === `ask-fo-${plan.id}` ? "Asking…" : `Have ${fo.mode === "mock" ? "Mock Fo" : "Fo"} ask me`}
-            </button>
-          )}
-          <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`discard-${plan.id}`, () => post(`/api/plans/${plan.id}/discard`))}>
-            Not now
-          </button>
-        </div>
-      </div>
+    <div className="row">
+      <span>{lesson.text}</span>
+      <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`alone-${lesson.id}`, () => post(`/api/lessons/${lesson.id}/alone`, { on: true }))}>
+        Yes, on her own
+      </button>
+      <button className="btn btn--quiet btn--small" onClick={() => setHidden(true)}>
+        Not now
+      </button>
     </div>
   );
 }
 
-function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAction> }) {
+/** The strip's one action: what you can do about the state Kiki is in. No hooks of its own. */
+function Decisions({ view, act }: { view: AppView; act: Act }) {
   const proposed = view.plans.find((p) => p.status === "proposed");
-  const applied = view.plans.find((p) => p.status === "applied" || p.status === "partial");
-  const readingDone = view.workspace && view.inventory.files.length > 0 && view.inventory.reading === 0 && !view.busy.reading;
-  const broken = view.plans.find((p) => p.status === "failed" || p.status === "partial" || p.status === "stale");
-  const brokenError = broken?.ops.find((o) => o.error)?.error ?? null;
   const running = view.plans.find((p) => p.status === "approved" || p.status === "executing");
+  const applied = view.plans.find((p) => p.status === "applied" || p.status === "partial");
+  const broken = view.plans.find((p) => p.status === "failed" || p.status === "partial" || p.status === "stale");
+  const readingDone = view.workspace && view.inventory.files.length > 0 && view.inventory.reading === 0 && !view.busy.reading;
+  const text = view.notifications[0];
+  const offer = view.lessons.find((l) => l.offered && !l.auto);
+  const counted = (p: PlanView) => `${p.counts.verified} of ${p.counts.total - p.counts.excluded} changes applied and verified in Drive.`;
+  const undo = (p: PlanView) =>
+    p.canUndo && (
+      <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`undo-${p.id}`, () => post(`/api/plans/${p.id}/undo`))}>
+        Undo…
+      </button>
+    );
 
-  return (
-    <section className="card decision" aria-labelledby="decide-title">
-      <h2 id="decide-title">Decisions</h2>
-      {view.workspace && (
-        <label className="check" style={{ margin: "8px 0 14px" }}>
-          <input
-            type="checkbox"
-            checked={Boolean(view.settings.autoText)}
-            disabled={act.busy !== null}
-            onChange={(e) => act.run("auto-text", () => post("/api/settings", { autoText: e.target.checked }))}
-          />
-          <span>
-            <strong>Text me when Kiki finds something new</strong>
-            <span className="hint" style={{ display: "block" }}>Fo texts you. Reply to the text, or answer here.</span>
-          </span>
-        </label>
-      )}
-      {view.notifications[0] && view.notifications[0].purpose !== "summary" && textIsCurrent(view.notifications[0], proposed?.id ?? null, running?.id ?? null) && (
-        <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} act={act} />
-      )}
-      {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
-      {broken && !proposed && !running && (
-        <div className="notice notice--bad" style={{ marginBottom: 14 }}>
-          <strong>{broken.status === "stale" ? "Something changed since the plan was made." : "Some changes didn't go through."}</strong>
-          {brokenError && <p>{brokenError}</p>}
+  let action: React.ReactNode = null;
+  if (text && text.purpose !== "summary" && textIsCurrent(text, proposed?.id ?? null, running?.id ?? null)) {
+    action = <FoTextStatus n={text} mock={view.integrations.fo.mode === "mock"} act={act} />;
+  } else if (broken && !proposed && !running) {
+    const error = broken.ops.find((o) => o.error)?.error;
+    action = (
+      <>
+        {broken.status === "partial" && <p>Only {counted(broken)}</p>}
+        {error && <p className="error-text">{error}</p>}
+        <div className="row">
           <button
             className="btn btn--small"
-            style={{ marginTop: 8 }}
             disabled={act.busy !== null}
             onClick={() => act.run("retry", () => post(broken.status === "stale" ? `/api/plans/${broken.id}/refresh` : `/api/plans/${broken.id}/resume`))}
           >
             {broken.status === "stale" ? "Refresh the plan" : "Try again"}
           </button>
         </div>
-      )}
-      {view.workspace && !proposed && !running && (
-        <div className="stack">
-          {!readingDone && <p className="lede">Reading files…</p>}
-          <button className="btn" disabled={!readingDone || act.busy !== null} onClick={() => act.run("propose", () => post("/api/plans/organize"))}>
-            {applied ? "Check for anything new" : "Propose a plan"}
-          </button>
-        </div>
-      )}
-      {view.plans
-        .filter((p) => p.status === "proposed")
-        .map((p) => (
-          <ApproveBlock key={p.id} plan={p} act={act} fo={view.integrations.fo} />
-        ))}
-      {running && (
-        <div className="progress">
-          <span className="dot" aria-hidden="true" />
-          <span>
-            Applying {running.counts.verified} of {running.counts.total - running.counts.excluded}…
-          </span>
-        </div>
-      )}
-      {applied && !proposed && !running && (
-        <div className="stack" style={{ marginTop: 14 }}>
-          <div className={`notice ${applied.status === "applied" ? "notice--ok" : "notice--warn"}`}>
-            <strong>
-              {applied.status === "applied" ? "Done" : "Partly done"}: {applied.counts.verified} of {applied.counts.total - applied.counts.excluded} changes verified in Drive.
-            </strong>
-          </div>
+      </>
+    );
+  } else if (running) {
+    action = (
+      <div className="progress">
+        <span className="dot" aria-hidden="true" />
+        <span>
+          Applying {running.counts.verified} of {running.counts.total - running.counts.excluded}…
+        </span>
+      </div>
+    );
+  } else if (applied && !proposed && applied.finishedAt && Date.now() - Date.parse(applied.finishedAt) < RECENT_MS) {
+    action = (
+      <>
+        <p>{applied.status === "partial" ? `Only ${counted(applied)}` : counted(applied)}</p>
+        <div className="row">
           <NotifyDecision view={view} act={act} />
+          {undo(applied)}
         </div>
-      )}
+      </>
+    );
+  } else if (view.workspace && !proposed) {
+    action = (
+      <div className="row">
+        <button className="btn btn--small" disabled={!readingDone || act.busy !== null} onClick={() => act.run("propose", () => post("/api/plans/organize"))}>
+          {applied ? "Check for anything new" : "Propose a plan"}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <>
       {act.error && (
         <p className="error-text" role="alert">
           {act.error}
         </p>
       )}
+      {action}
+      {offer && <LessonOffer key={offer.id} lesson={offer} act={act} />}
+    </>
+  );
+}
+
+/** Kiki, the state she's in, the folder, and the one thing to do next. The page's only live region. */
+function Strip({ view, act }: { view: AppView; act: Act }) {
+  const ws = view.workspace;
+  return (
+    <section className="strip" aria-live="polite">
+      <Kiki state={view.kiki.state} size={72} />
+      <div>
+        <p className="kiki-status">{view.kiki.label}</p>
+        {view.kiki.state === "error" && view.kiki.detail && <p className="hint">{view.kiki.detail}</p>}
+        {ws && (
+          <div className="row hint">
+            <span>
+              {ws.name}, {ws.lastInventoryAt ? `checked ${time(ws.lastInventoryAt)}` : "looking…"}
+            </span>
+            {ws.link && (
+              <a className="btn btn--quiet btn--small" href={ws.link} target="_blank" rel="noreferrer">
+                Open in Drive
+              </a>
+            )}
+            <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run("refresh", () => post("/api/workspace/refresh"))}>
+              Look again
+            </button>
+          </div>
+        )}
+        <Decisions view={view} act={act} />
+      </div>
     </section>
   );
 }
 
-function Activity({ view }: { view: AppView }) {
+/** A finished plan: one line, with its steps a click away. */
+function HistoryRow({ plan, act }: { plan: PlanView; act: Act }) {
+  const [open, setOpen] = useState(false);
   return (
-    <section className="card card--plain">
+    <li className="item">
+      <div className="item-head">
+        <span className="item-label">
+          {plan.title}
+          {plan.finishedAt ? `, ${time(plan.finishedAt)}` : ""}
+        </span>
+        <span className={planChip(plan.status)}>{PLAN_STATUS[plan.status]}</span>
+      </div>
+      <div className="row">
+        <span className="hint">
+          {plan.counts.verified} of {plan.counts.total - plan.counts.excluded}
+        </span>
+        <button className="btn btn--quiet btn--small" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? "Hide steps" : "Show steps"}
+        </button>
+        {plan.canUndo && (
+          <button className="btn btn--quiet btn--small" disabled={act.busy !== null} onClick={() => act.run(`undo-${plan.id}`, () => post(`/api/plans/${plan.id}/undo`))}>
+            Undo…
+          </button>
+        )}
+      </div>
+      {open && <PlanSteps plan={plan} act={null} />}
+    </li>
+  );
+}
+
+function History({ view, act }: { view: AppView; act: Act }) {
+  const finished = view.plans.filter((p) => p.status === "applied" || p.status === "partial").sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""));
+  return (
+    <section>
       <details>
-        <summary>Activity</summary>
+        <summary>History</summary>
+        {finished.length > 0 && (
+          <ul className="item-list">
+            {finished.map((p) => (
+              <HistoryRow key={p.id} plan={p} act={act} />
+            ))}
+          </ul>
+        )}
         <ul className="timeline">
           {view.activity.events.map((e, i) => (
             <li key={i}>
@@ -913,6 +949,89 @@ function Activity({ view }: { view: AppView }) {
             ))}
           </>
         )}
+      </details>
+    </section>
+  );
+}
+
+function Settings({ view, act }: { view: AppView; act: Act }) {
+  const { drive } = view.integrations;
+  const ws = view.workspace;
+  const liveDrive = drive.mode === "live" && drive.connection === "connected";
+  return (
+    <section>
+      <details>
+        <summary>Settings</summary>
+        <ul className="item-list">
+          {ws && (
+            <li className="item">
+              <label className="check">
+                <input type="checkbox" checked={Boolean(view.settings.autoText)} disabled={act.busy !== null} onChange={(e) => act.run("auto-text", () => post("/api/settings", { autoText: e.target.checked }))} />
+                <span>Text me when Kiki finds something new</span>
+              </label>
+            </li>
+          )}
+          <li className="item">
+            <ExtensionPairing paired={view.extension?.paired} pairedAt={view.extension?.pairedAt ?? null} />
+          </li>
+          {liveDrive && drive.account && <li className="item">Google account: {drive.account}</li>}
+          {liveDrive && (drive.gmail === "connected" || drive.gmail === "not_connected") && (
+            <li className="item">
+              {drive.gmail === "connected" ? (
+                <Badge kind="live">Gmail: read-only</Badge>
+              ) : (
+                <button className="btn btn--small" title="Kiki only searches for attachments from a contractor she asked. She never sends, changes or deletes mail." disabled={act.busy !== null} onClick={() => connectGoogle(act, true)}>
+                  Let Kiki look in Gmail (read-only)
+                </button>
+              )}
+            </li>
+          )}
+          {ws && (
+            <li className="item">
+              <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("clear", () => post("/api/workspace/clear"))}>
+                Change folder
+              </button>
+            </li>
+          )}
+          {ws?.mode === "mock" && (
+            <li className="item">
+              <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("stage-invoice", () => post("/api/workspace/stage-revision", { variant: "invoice" }))}>
+                Add a staged demo invoice
+              </button>
+            </li>
+          )}
+          {view.lessons.length > 0 && (
+            <li className="item">
+              <h3>What Kiki learned</h3>
+              <ul className="learned">
+                {view.lessons.map((l) => (
+                  <li key={l.id}>
+                    <span>
+                      {l.text} {l.auto && <Badge kind="plain">Files on her own</Badge>}
+                    </span>
+                    <span className="learned-actions">
+                      {l.kind === "place" && (
+                        <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`alone-${l.id}`, () => post(`/api/lessons/${l.id}/alone`, { on: !l.auto }))}>
+                          {l.auto ? "Ask me first" : l.offered ? "Yes, on her own" : "File on her own"}
+                        </button>
+                      )}
+                      <button className="btn btn--small btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`forget-${l.id}`, () => post(`/api/lessons/${l.id}/forget`))}>
+                        Forget
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          )}
+          {view.signedIn && (
+            <li className="item">
+              <button className="btn btn--small btn--quiet" onClick={() => void post("/api/logout").finally(() => window.location.assign("/login"))}>
+                Sign out
+              </button>
+            </li>
+          )}
+        </ul>
       </details>
     </section>
   );
@@ -948,30 +1067,23 @@ export function App() {
 
   if (!view) return <div className="page">{loadError ? <p className="error-text">Can't reach the Kiki server: {loadError}</p> : <p>Loading…</p>}</div>;
   const livePlans = view.plans.filter((p) => p.status !== "superseded" && p.status !== "discarded");
-  const shownPlans = [...livePlans.filter((p) => p.status === "proposed" || p.status === "approved" || p.status === "executing"), ...livePlans.filter((p) => !["proposed", "approved", "executing"].includes(p.status)).slice(0, 1)];
+  const active = (p: PlanView) => p.status === "proposed" || p.status === "approved" || p.status === "executing";
+  // Plans still open, then the latest finished one if it stopped part-way; applied plans live in History.
+  const shownPlans = [...livePlans.filter(active), ...livePlans.filter((p) => !active(p)).slice(0, 1)].filter((p) => p.status !== "applied");
 
   return (
     <div className="page">
       <header className="header">
         <div className="brand">
-          <Kiki state={view.kiki.state} size={44} />
-          <div>
-            <h1>Kiki</h1>
-            <p>Keeps your Drive organized. Fo keeps you posted.</p>
-          </div>
+          <Kiki state={view.kiki.state} size={28} />
+          <h1>Kiki</h1>
         </div>
         <Integrations view={view} act={act} />
-        {view.signedIn && (
-          <button className="btn btn--small btn--quiet" onClick={() => void post("/api/logout").finally(() => window.location.assign("/login"))}>
-            Sign out
-          </button>
-        )}
       </header>
       {view.integrations.drive.missingScopes.length > 0 && (
         <div className="notice notice--warn toast" role="alert">
-          <strong>Google didn't grant every permission Kiki needs.</strong>
-          <p>On Google's consent screen, tick every box. Disconnect isn't needed: just click Connect Google Drive again.</p>
-          <button className="btn btn--small" onClick={() => act.run("connect-google", async () => { const r = await post<{ authorizationUrl: string }>("/api/google/connect"); window.location.href = r.authorizationUrl; })}>
+          <strong>Google didn't grant every permission. Connect again and tick every box.</strong>
+          <button className="btn btn--small" onClick={() => connectGoogle(act)}>
             Connect Google Drive again
           </button>
         </div>
@@ -981,42 +1093,23 @@ export function App() {
           {flash}
         </div>
       )}
-      <div className="layout">
-        <main className="main">
-          <WorkspaceCard view={view} act={act} />
-          {shownPlans
-            .filter((p) => p.status !== "applied")
-            .map((p) => (
-              <PlanCard key={p.id} plan={p} act={act} />
+      <main className="main">
+        <Strip view={view} act={act} />
+        {!view.workspace && <WorkspaceSetup view={view} act={act} />}
+        {view.workspace && (
+          <>
+            {shownPlans.map((p) => (
+              <PlanCard key={p.id} plan={p} act={act} fo={view.integrations.fo} />
             ))}
-          <AttentionCard view={view} act={act} />
-          <InventoryCard view={view} />
-          {shownPlans
-            .filter((p) => p.status === "applied")
-            .map((p) => (
-              <PlanCard key={p.id} plan={p} act={act} />
-            ))}
-          <EarlierChanges plans={livePlans.filter((p) => ["applied", "partial"].includes(p.status) && !shownPlans.includes(p))} act={act} />
-          <IndexCard view={view} act={act} />
-          <Activity view={view} />
-        </main>
-        <aside className="companion" aria-label="Kiki and decisions">
-          <section className="card kiki-card" aria-live="polite">
-            <Kiki state={view.kiki.state} size={180} />
-            <div>
-              <p className="kiki-state-name">{KIKI_STATE_NAMES[view.kiki.state]}</p>
-              <p className="kiki-status">{view.kiki.label}</p>
-              {view.kiki.detail && <p className="kiki-detail">{view.kiki.detail}</p>}
-            </div>
-          </section>
-          <Decisions view={view} act={act} />
-          <Learned view={view} act={act} />
-          <FoUpdates view={view} act={act} />
-          <div className="companion-extra">
-            <ExtensionPairing paired={view.extension?.paired} pairedAt={view.extension?.pairedAt ?? null} />
-          </div>
-        </aside>
-      </div>
+            <WithFo view={view} act={act} />
+            <AttentionCard view={view} act={act} />
+            <IndexCard view={view} act={act} />
+            <InventoryCard view={view} />
+            <History view={view} act={act} />
+          </>
+        )}
+        <Settings view={view} act={act} />
+      </main>
     </div>
   );
 }

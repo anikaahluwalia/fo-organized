@@ -64,66 +64,29 @@ a {
 /* Layout ------------------------------------------------------------------------------- */
 
 .page {
-  max-width: 1180px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 20px 16px 64px;
 }
 
-.layout {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
+/* One column at every width. Sections are divided by a rule; only the plan and a message draft are boxed. */
 .main {
   display: flex;
   flex-direction: column;
   gap: 20px;
   min-width: 0;
-  order: 2;
 }
-
-.companion {
-  display: contents; /* mobile: its children join the page flow */
+.main > section:not(.card) + section:not(.card) {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
 }
-
-.companion .kiki-card {
-  order: 1;
+.main h2 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
 }
-
-.companion .decision {
-  order: 3;
-}
-
-/* Settings-like cards come last on a phone, after Kiki's decisions. */
-.companion-extra {
-  order: 4;
-  min-width: 0;
-}
-
-@media (min-width: 960px) {
-  .page {
-    padding: 28px 32px 80px;
-  }
-  .layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 380px;
-    align-items: start;
-    gap: 28px;
-  }
-  .main {
-    order: 0;
-  }
-  .companion {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    position: sticky;
-    top: 20px;
-    max-height: calc(100vh - 40px);
-    overflow-y: auto;
-    padding-bottom: 4px;
-  }
+.main h3 {
+  margin: 16px 0 6px;
+  font-size: 0.95rem;
 }
 
 /* Header ------------------------------------------------------------------------------- */
@@ -135,6 +98,8 @@ a {
   justify-content: space-between;
   gap: 12px 20px;
   margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .brand {
@@ -147,12 +112,6 @@ a {
   margin: 0;
   font-size: 1.35rem;
   letter-spacing: -0.01em;
-}
-
-.brand p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
 }
 
 .header-tools {
@@ -175,16 +134,6 @@ a {
 
 .card--plain {
   background: var(--canvas);
-}
-
-.card h2 {
-  margin: 0 0 4px;
-  font-size: 1.1rem;
-}
-
-.card h3 {
-  margin: 16px 0 6px;
-  font-size: 0.95rem;
 }
 
 .card-head {
@@ -219,51 +168,41 @@ a {
   flex: 1;
 }
 
-/* Kiki card ---------------------------------------------------------------------------- */
+/* Status strip ------------------------------------------------------------------------ */
 
-.kiki-card {
+.strip {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
-  background: var(--canvas);
 }
-
-.kiki-card .kiki {
+.strip > .kiki {
   flex: none;
-  width: 120px;
+  width: 72px;
   height: auto;
 }
-
+.strip > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.strip p {
+  margin: 0;
+}
+.strip .row > .notice,
+.strip .row > .stack {
+  flex: 1 1 100%;
+}
 .kiki-status {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
   line-height: 1.35;
 }
-
-.kiki-detail {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.kiki-state-name {
-  margin: 0 0 4px;
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-@media (min-width: 960px) {
-  .kiki-card {
-    flex-direction: column;
-    text-align: center;
-    padding: 24px 20px;
-  }
-  .kiki-card .kiki {
-    width: 180px;
+@media (max-width: 600px) {
+  .strip > .kiki {
+    width: 48px;
   }
 }
 
@@ -620,11 +559,16 @@ select {
   font-size: 0.92rem;
 }
 
+.item-list {
+  gap: 0;
+}
 .item {
-  background: var(--canvas);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.item:first-child {
+  border-top: 0;
+  padding-top: 4px;
 }
 .item-head {
   display: flex;
@@ -689,10 +633,69 @@ select {
   flex-direction: column;
   gap: 12px;
 }
-.decision .secondary-actions {
+.secondary-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* The plan: steps grouped by destination folder, Approve in a footer that stays in reach. */
+.card > .notice {
+  margin-bottom: 12px;
+}
+.plan-group {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.card-head + .plan-group {
+  border-top: 0;
+  padding-top: 0;
+}
+.plan-group > .plain-list {
+  gap: 0;
+  margin-top: 4px;
+}
+.plan-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 2px 12px;
+  padding: 6px 0 6px 14px;
+}
+.plan-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.plan-row > form,
+.plan-row > .error-text {
+  grid-column: 1 / -1;
+}
+.plan-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 8px -20px -20px;
+  padding: 14px 20px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+@media (max-width: 600px) {
+  .plan-footer {
+    margin: 8px -16px -16px;
+    padding: 12px 16px;
+  }
+  .plan-footer > .btn--primary {
+    width: 100%;
+  }
+  .plan-footer > .secondary-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .progress {
@@ -790,23 +793,22 @@ details[open] > summary {
 .notice,
 .signal,
 .turn,
-.layout > *,
-.companion > *,
+.main > *,
 .item-head > *,
-.card-head > *,
-.brand > div {
+.card-head > * {
   min-width: 0;
 }
 .item-label,
 .item p,
-.card h2,
+.item,
+.main h2,
+.main h3,
 .notice p,
 .notice strong,
 .facts dd,
 .kiki-status,
-.kiki-detail,
-.brand p,
-.hint {
+.hint,
+summary {
   overflow-wrap: anywhere;
 }
 .header-tools {
@@ -825,3 +827,12 @@ details[open] > summary {
 .learned li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
 .learned li:first-child { border-top: 0; }
 .learned-actions { display: flex; gap: 6px; flex-shrink: 0; }
+/* A row that starts with a quiet button lines its text up with the text above. */
+.row > .btn--quiet:first-child {
+  padding-left: 0;
+}
+details > .item-list + .timeline {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}

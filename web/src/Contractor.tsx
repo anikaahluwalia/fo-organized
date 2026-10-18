@@ -85,7 +85,7 @@ function DispatchStatus({ d, foLabel, act }: { d: DispatchView; foLabel: string;
   const [ack, setAck] = useState(false);
   const t = d.task;
   const heading: Record<DispatchView["state"], string> = {
-    approved: "Approved. Handing it to Fo…",
+    approved: `Approved. Handing it to ${foLabel}…`,
     dispatching: `Sending to ${foLabel}…`,
     working: `${foLabel} is working on it.`,
     needs_user_input: `${foLabel} has a question.`,
@@ -122,7 +122,7 @@ function DispatchStatus({ d, foLabel, act }: { d: DispatchView; foLabel: string;
         >
           <p>{t.question}</p>
           <textarea style={{ minHeight: 70 }} value={answer} onChange={(e) => setAnswer(e.target.value)} aria-label={`Answer ${foLabel}`} />
-          <p className="hint">Your answer can't change who gets the email or what it says. To change those, edit the message and approve again.</p>
+          <p className="hint">This can't change who gets the email or what it says.</p>
           <div className="row">
             <button className="btn btn--primary" disabled={!answer.trim() || act.busy !== null}>
               Send answer
@@ -139,7 +139,7 @@ function DispatchStatus({ d, foLabel, act }: { d: DispatchView; foLabel: string;
           {t.failureDetail && <p>{t.failureDetail}</p>}
           {!d.reconciledAt ? (
             <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("reconcile", () => post(`/api/dispatches/${d.id}/reconcile`))}>
-              Check with Fo (read-only)
+              Check with {foLabel} (read-only)
             </button>
           ) : (
             <>
@@ -155,7 +155,6 @@ function DispatchStatus({ d, foLabel, act }: { d: DispatchView; foLabel: string;
           )}
         </div>
       )}
-      {d.state === "reported_sent" && <p className="hint">Not independently verified. It doesn't mean they've read it.</p>}
     </div>
   );
 }
@@ -170,7 +169,7 @@ function WatchPanel({ d, foLabel, act }: { d: DispatchView; foLabel: string; act
     <div className="stack" style={{ marginTop: 10 }}>
       <p className="hint">
         {w.state === "watching"
-          ? `Following the ${foLabel} conversation for ${d.recipientName}'s reply${w.lastCheckedAt ? ` · checked ${time(w.lastCheckedAt)}` : ""}.`
+          ? `Waiting for ${d.recipientName}'s reply.${w.lastCheckedAt ? ` Checked ${time(w.lastCheckedAt)}.` : ""}`
           : w.state === "paused"
             ? `Paused: ${w.lastError ?? "reconnect Fo"}.`
             : "Answered and applied. Kiki stopped following this conversation."}
@@ -249,28 +248,22 @@ export function OutreachCard({ o, view, act }: { o: OutreachView; view: AppView;
 
   return (
     <section className="card decision" aria-label={o.title}>
-      <h2>{o.title}</h2>
+      <h3>{o.title}</h3>
       {draft && awaitingApproval && !open && !editing && (
         <div className="stack">
-          <dl className="facts">
-            <dt>To</dt>
-            <dd>
-              {draft.recipientName} &lt;{draft.recipientEmail}&gt;
-            </dd>
-            <dt>Channel</dt>
-            <dd>Email, sent by {foLabel}</dd>
-            <dt>Purpose</dt>
-            <dd>{draft.purpose}</dd>
-            <dt>Subject</dt>
-            <dd>{draft.subject}</dd>
-          </dl>
+          <div>
+            <p>
+              To: {draft.recipientName} &lt;{draft.recipientEmail}&gt;, by email through {foLabel}
+            </p>
+            <p>Subject: {draft.subject}</p>
+          </div>
           <pre className="message-preview">{draft.body}</pre>
-          <p className="hint">No attachments, no file sharing, no other recipients, no commitments. Version {draft.version}.</p>
+          <p className="hint">Nothing attached, shared or promised.{draft.version > 1 ? ` Version ${draft.version}.` : ""}</p>
           {draft.problems.length > 0 && <p className="error-text">{draft.problems.join(" ")}</p>}
           {sentBefore && (
             <label className="check">
               <input type="checkbox" checked={resend} onChange={(e) => setResend(e.target.checked)} />
-              <span>Fo may already have sent a message about this quote. Send another one anyway.</span>
+              <span>{foLabel} may already have sent a message about this quote. Send another one anyway.</span>
             </label>
           )}
           <div className="approve-row">
@@ -356,7 +349,6 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
   const [picked, setChoice] = useState<string | null>(null);
   // A single candidate to confirm is preselected: the question is just yes or no.
   const choice = picked ?? (u.candidates.length === 1 ? u.candidates[0]!.docId : null);
-  const foLabel = view.integrations.fo.mode === "mock" ? "Mock Fo" : "Fo";
   const tone = u.status === "needs_clarification" ? "notice--warn" : u.status === "failed" ? "notice--bad" : u.status === "proposed" || u.status === "resolved" ? "notice--ok" : "notice--info";
   const statusLine: Record<UpdateView["status"], string> = {
     interpreting: "Reading the message…",
@@ -371,12 +363,12 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
     <div className={`notice ${tone}`} style={{ marginBottom: 12 }}>
       <strong>{statusLine[u.status]}</strong>
       <p className="hint">
-        {u.sourceLabel} · {time(u.createdAt)}
-        {u.interpreter === "mock" ? " · mock reading" : ""}
+        {u.sourceLabel}, {time(u.createdAt)}
+        {u.interpreter === "mock" ? " (mock reading)" : ""}
       </p>
       {u.quote ? <p className="quote">“{u.quote}”</p> : <p className="quote">{u.message.replace(/^\(Mock Fo: simulated\. Nothing was sent and nobody was contacted\.\)\n/, "")}</p>}
       {u.statement && <p>{u.statement}</p>}
-      {u.ignoredRequests.length > 0 && <p className="hint">It also asked for things Kiki won't do by herself: {u.ignoredRequests.join("; ")}.</p>}
+      {u.ignoredRequests.length > 0 && <p className="hint">Not acted on: {u.ignoredRequests.join("; ")}.</p>}
       {u.status === "needs_clarification" && (
         <div className="stack" style={{ marginTop: 8 }}>
           {u.question && <p>{u.question}</p>}
@@ -385,14 +377,21 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
               {u.candidates.map((c) => (
                 <label key={c.docId} className="check">
                   <input type="radio" name={`pick-${u.id}`} checked={choice === c.docId} onChange={() => setChoice(c.docId)} />
-                  <span>
-                    <strong>{c.name}</strong> {[c.reference, c.date, c.total].filter(Boolean).join(" · ")}
-                    <span className="hint" style={{ display: "block" }}>
-                      {c.reasons.join(" ")}
-                    </span>
-                  </span>
+                  <span>{[c.name, c.reference, c.date, c.total].filter(Boolean).join(", ")}</span>
                 </label>
               ))}
+              {u.candidates.some((c) => c.reasons.length > 0) && (
+                <details>
+                  <summary>Why these files</summary>
+                  {u.candidates
+                    .filter((c) => c.reasons.length > 0)
+                    .map((c) => (
+                      <p key={c.docId} className="hint">
+                        {c.name}: {c.reasons.join(" ")}
+                      </p>
+                    ))}
+                </details>
+              )}
               <div className="row">
                 <button className="btn btn--primary" disabled={!choice || act.busy !== null} onClick={() => act.run("resolve", () => post(`/api/updates/${u.id}/resolve`, { documentId: choice }))}>
                   {u.candidates.length === 1 ? "Yes, that's it" : "This one"}
@@ -412,9 +411,8 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
                     {a.saved && <span className="chip chip--confirmed">Saved to folder</span>}
                   </div>
                   <p className="hint">
-                    {a.subject || "(no subject)"} · {a.from}
-                    {a.date ? ` · ${time(a.date)}` : ""}
-                    {view.integrations.drive.gmail === "mock" ? " · mock Gmail" : ""}
+                    {[a.subject || "(no subject)", a.from, a.date ? time(a.date) : null].filter(Boolean).join(", ")}
+                    {view.integrations.drive.gmail === "mock" ? " (mock Gmail)" : ""}
                   </p>
                   {!a.saved && (
                     <button className="btn btn--primary btn--small" disabled={act.busy !== null} onClick={() => act.run(`save-att-${a.index}`, () => post(`/api/updates/${u.id}/gmail/save`, { index: a.index }))}>
@@ -471,7 +469,6 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
           Dismiss
         </button>
       )}
-      {u.status === "proposed" && <p className="hint">Review the update under Decisions. {foLabel} reported what the contractor said; Kiki checks the files in Drive.</p>}
     </div>
   );
 }

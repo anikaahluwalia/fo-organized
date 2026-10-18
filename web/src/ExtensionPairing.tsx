@@ -126,13 +126,12 @@ export function ExtensionPairing({ paired: pairedProp, pairedAt: pairedAtProp }:
   const minutesLeft = showing ? Math.max(1, Math.ceil((expiresAt - now) / 60_000)) : 0;
 
   return (
-    <section className="card card--plain" aria-labelledby="extension-pairing-title">
-      <div className="card-head">
-        <h2 id="extension-pairing-title">Chrome side panel</h2>
+    <div>
+      <div className="item-head">
+        <span className="item-label">Chrome side panel</span>
         {paired !== null && <span className={`chip ${paired ? "chip--confirmed" : "chip--not_searched"}`}>{paired ? "Paired" : "Not paired"}</span>}
       </div>
-      <p className="lede">See Kiki and approve her plans from a side panel next to Google Drive.</p>
-      <div aria-live="polite">
+      <div>
         {showing && (
           <div className="notice notice--info" style={{ marginTop: 12 }}>
             <p>Type this code in Kiki's side panel:</p>
@@ -159,7 +158,7 @@ export function ExtensionPairing({ paired: pairedProp, pairedAt: pairedAtProp }:
           </p>
         )}
       </div>
-      <div className="row" style={{ marginTop: 12 }}>
+      <div className="row">
         <button className="btn btn--primary btn--small" disabled={busy !== null} onClick={() => void makeCode()}>
           {busy === "code" ? "Making a code…" : showing ? "Make a new code" : "Pair side panel"}
         </button>
@@ -167,6 +166,6 @@ export function ExtensionPairing({ paired: pairedProp, pairedAt: pairedAtProp }:
           {busy === "unpair" ? "Unpairing…" : "Unpair"}
         </button>
       </div>
-    </section>
+    </div>
   );
 }

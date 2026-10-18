@@ -33,7 +33,7 @@ export function deriveKiki(v: Omit<AppView, "kiki">): KikiView {
   }
   if (dispatches.some((d) => d.state === "needs_user_input")) return { state: "needs_clarification", label: "Fo has a question for you." };
   if (dispatches.some((d) => d.state === "uncertain")) return { state: "needs_clarification", label: "I'm not sure the email went out. Let's check before trying again." };
-  if (live.some((p) => p.status === "stale")) return { state: "needs_clarification", label: "Something changed since you previewed. Let's refresh the plan." };
+  if (live.some((p) => p.status === "stale")) return { state: "needs_clarification", label: "Files changed since the plan was made." };
 
   if (v.busy.executing || live.some((p) => p.status === "executing" || p.status === "approved")) return { state: "organizing", label: "Organizing…" };
   if (v.busy.interpreting || v.updates.some((u) => u.status === "interpreting")) return { state: "reading", label: "Reading Fo's update…" };
@@ -42,7 +42,7 @@ export function deriveKiki(v: Omit<AppView, "kiki">): KikiView {
   if (v.busy.reading || v.inventory.reading > 0) return { state: "reading", label: "Reading your documents…" };
 
   const proposed = live.find((p) => p.status === "proposed");
-  if (proposed) return { state: "needs_approval", label: "I have a plan. Take a look.", detail: proposed.title };
+  if (proposed) return { state: "needs_approval", label: "I have a plan.", detail: proposed.title };
   const unsent = (o: (typeof v.outreach)[number]) => o.draft && !o.dispatches.some((d) => d.version === o.draft!.version && !["failed", "not_sent", "retired"].includes(d.state));
   const draft = v.outreach.find(unsent);
   if (draft?.draft) return { state: "needs_approval", label: `Review the message before Fo sends it to ${draft.draft.recipientName}.` };
