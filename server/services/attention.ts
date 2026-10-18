@@ -1,4 +1,5 @@
-import { all, kvGet, kvSet, logEvent, type DocumentRow, type ProjectRow } from "../db.ts";
+import { all, kvGet, kvSet, logEvent, one, type DocumentRow, type PlanRow, type ProjectRow } from "../db.ts";
+import type { PlanNote } from "../domain/plan.ts";
 import { findAttention, type AttentionItem } from "../domain/attention.ts";
 import { copyMap } from "../domain/duplicates.ts";
 import { badRequest } from "../errors.ts";
@@ -54,7 +55,16 @@ export function attentionItems(ctx: Ctx, wsId: string, today = localToday()): At
     acceptedAt: d.accepted_at,
   }));
   const hidden = dismissed(ctx, wsId);
-  return findAttention({ today, docs, busyDocIds: busyDocs(ctx, wsId) }).filter((i) => !hidden.has(i.key));
+  // Files the open organizing proposal couldn't place: you can say where they go.
+  const open = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE workspace_id = ? AND kind = 'organize' AND status = 'proposed' ORDER BY version DESC LIMIT 1", wsId);
+  const notes = ((open?.details_json ? (JSON.parse(open.details_json) as { notes?: PlanNote[] } | null) : null)?.notes ?? []) as PlanNote[];
+  const unplaced: AttentionItem[] = notes
+    .filter((n) => n.unplaced)
+    .map((n) => {
+      const doc = rows.find((d) => d.file_id === n.fileId);
+      return { key: `unplaced:${n.fileId}:${n.version ?? ""}`, kind: "unplaced" as const, project: null, title: `Where does "${n.name}" go?`, detail: n.reason, evidence: null, docIds: doc ? [doc.id] : [], askDocId: null };
+    });
+  return [...findAttention({ today, docs, busyDocIds: busyDocs(ctx, wsId) }), ...unplaced].filter((i) => !hidden.has(i.key));
 }
 
 /** "Got it": the item stays hidden until the situation changes (its key changes with it). */

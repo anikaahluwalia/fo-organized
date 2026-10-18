@@ -122,10 +122,12 @@ export function foText(n, now = new Date()) {
   } else if (n.purpose === "done" && n.outcome === "reported_sent") {
     label = `${fo} reports it texted you that it's done.`;
     tone = "ok";
+  } else if (r?.status === "stale") {
+    label = "The proposal changed since Fo asked. Review the new version.";
   } else if (r?.status === "waiting" && n.outcome === "reported_sent") {
-    label = `${fo} reports it texted you. Waiting for Fo to relay your decision about this proposal.`;
+    label = `${fo} reports it texted you. Answer in the Kiki app: yes, a change, or no.`;
   } else if (r?.status === "expired") {
-    label = "No linked decision arrived before this request expired. Review the proposal again.";
+    label = "This request expired before a decision came back. Ask again from the Kiki app.";
   } else if (n.outcome === "reported_sent") {
     label = thing === "note" ? `${fo} reports it sent you the note.` : `${fo} reports it texted you.`;
     tone = "ok";
@@ -213,6 +215,7 @@ const ATTENTION_CHIP = {
   expiring: { label: "Soon", tone: "warn" },
   undecided: { label: "Your call", tone: "" },
   unreadable: { label: "Couldn't read", tone: "warn" },
+  unplaced: { label: "Where?", tone: "warn" },
 };
 
 export function buildModel(view, { tab = null, now = new Date() } = {}) {

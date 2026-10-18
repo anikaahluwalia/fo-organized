@@ -27,6 +27,7 @@ import type { Ctx } from "./context.ts";
 import { indexFiles, planDoc, planFiles, refreshOrganizeProposal, savePlanVersion } from "./plans.ts";
 import { docFacts, runInventory, runReading } from "./workspace.ts";
 import { searchEmailedAttachments } from "./attachments.ts";
+import { autoNotifyProposal } from "./notify.ts";
 import { rejectCandidates, revisionCandidates, versionDocs, waitingForRevision } from "./holds.ts";
 import { referenceOnFile, requestOf } from "./outreach.ts";
 import { issuerKey } from "../domain/safety.ts";
@@ -374,7 +375,7 @@ export function proposeVersionUpdate(ctx: Ctx, outcomeId: string, chosenDocId: s
   // Keyed by the documents, not the message: the same answer relayed again or pasted in
   // attaches to the open proposal instead of making an identical second one.
   const seriesId = `version:${asked.id}:${chosen.id}`;
-  savePlanVersion(ctx.db, ws, {
+  const saved = savePlanVersion(ctx.db, ws, {
     kind: "version_update",
     seriesId,
     title: `Update the current ${project.toLowerCase()} quote`,
@@ -393,6 +394,8 @@ export function proposeVersionUpdate(ctx: Ctx, outcomeId: string, chosenDocId: s
   setOutcome(ctx, outcomeId, { status: "proposed", chosen: chosenDocId, series: seriesId, candidates });
   // The regular organizing pass may have proposed filing the same file; this update now owns it.
   refreshOrganizeProposal(ctx);
+  // With texts on, Fo brings it to you like any new proposal.
+  if (saved.created) autoNotifyProposal(ctx, saved.plan);
 }
 
 function proposeConfirmCurrent(ctx: Ctx, outcomeId: string, interp: Outcome): void {
@@ -411,7 +414,7 @@ function proposeConfirmCurrent(ctx: Ctx, outcomeId: string, interp: Outcome): vo
     statement,
   });
   const seriesId = `version:${asked.id}:${asked.id}`;
-  savePlanVersion(ctx.db, ws, {
+  const saved = savePlanVersion(ctx.db, ws, {
     kind: "version_update",
     seriesId,
     title: `Mark ${facts.reference.value ?? "the quote"} as the current ${project.toLowerCase()} quote`,
@@ -421,6 +424,7 @@ function proposeConfirmCurrent(ctx: Ctx, outcomeId: string, interp: Outcome): vo
     source: { outcomeId },
   });
   setOutcome(ctx, outcomeId, { status: "proposed", chosen: asked.id, series: seriesId });
+  if (saved.created) autoNotifyProposal(ctx, saved.plan);
 }
 
 /** The user picks which candidate is the revised quote (or none of them). */

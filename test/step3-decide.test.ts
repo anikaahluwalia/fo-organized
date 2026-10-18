@@ -25,7 +25,7 @@ async function asked() {
 }
 
 async function answer(rig: TestRig, taskId: string, text: string) {
-  rig.app.reply(taskId, text);
+  await rig.app.reply(taskId, text);
   await rig.app.settle();
 }
 

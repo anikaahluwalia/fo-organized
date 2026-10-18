@@ -20,6 +20,8 @@ export interface ProposalItem {
   to: string | null;
   /** Kiki's reason for the move, or why the file stays. */
   why: string | null;
+  /** For a file Kiki couldn't place: folders that already hold this kind of document. */
+  options?: string[];
 }
 
 export const ChangeRequestSchema = z.object({
@@ -54,7 +56,7 @@ Report:
 - unsupported: anything they asked for that isn't one of these changes (deleting files, sharing them, emailing or paying someone), in their words. Kiki can't do those from a proposal.`;
 
 export function itemLine(i: ProposalItem): string {
-  if (i.kind === "unplaced") return `${i.n}. "${inert(i.name)}" stays where it is: ${inert(i.why)}`;
+  if (i.kind === "unplaced") return `${i.n}. "${inert(i.name)}" stays where it is: ${inert(i.why)}${i.options?.length ? ` Places that fit: ${i.options.map((o) => inert(o, 120)).join(", ")}.` : ""}`;
   const what = i.kind === "copy" ? "Set aside the exact copy" : "Move";
   return `${i.n}. ${what} "${inert(i.name)}" to "${inert(i.to)}"${i.why ? ` (${inert(i.why)})` : ""}`;
 }
@@ -136,7 +138,10 @@ export function mockAdjust(items: ProposalItem[], reply: string): ChangeRequest 
     const byType = items.filter((i) => (/\bquotes\b/.test(plain) && /\/Quotes\//.test(`${i.to}/`)) || (/\binvoices\b/.test(plain) && /\/Invoices\//.test(`${i.to}/`)));
     if (byType.length) return byType;
     const said = new Set(distinctive(plain));
-    return items.filter((i) => [...distinctive(i.name), ...distinctive(i.to?.split("/").pop() ?? "")].some((w) => said.has(w) && w !== "quote" && w !== "invoice"));
+    const byName = items.filter((i) => [...distinctive(i.name), ...distinctive(i.to?.split("/").pop() ?? "")].some((w) => said.has(w) && w !== "quote" && w !== "invoice"));
+    // "call it …", "put it …" when there's only one file to talk about.
+    const only = items.length === 1 ? items : movable.length === 1 ? movable : [];
+    return byName.length === 0 && /\b(it|this|this one|that one)\b/.test(plain) ? only : byName;
   };
   const titled = (s: string) => s.trim().replace(/^\w/, (c) => c.toUpperCase());
   const edits: ChangeRequest["edits"] = [];
@@ -167,10 +172,10 @@ export function mockAdjust(items: ProposalItem[], reply: string): ChangeRequest 
       /\buse\s+["“]?(.+?)["”]?\s+as the folder\b/i.exec(clause) ??
       /\bin (?:a |the |my )?folder called\s+["“]?([^"”]+?)["”]?$/i.exec(clause) ??
       /\b(?:is|are) for (?:the |my )?([a-z][\w &-]*?)(?:\s+not\b.*)?$/i.exec(clause) ??
-      /\b(?:goes|go|belongs?|put|file|move)\b.*?\b(?:under|into|in)\s+(?:the |my )?["“]?([A-Za-z][\w &/-]*?)["”]?(?:\s+folder)?(?:\s+instead\b.*)?$/i.exec(clause);
+      /\b(?:goes|go|belongs?|put|file|move)\b.*?\b(?:under|into|in|with)\s+(?:the |my )?["“]?([A-Za-z][\w &/-]*?)["”]?(?:\s+folder)?(?:\s+instead\b.*)?$/i.exec(clause);
     if (place) {
       // The files are named before the destination ("the Northside invoice is for the kitchen").
-      const before = /\buse\b/i.test(place[0]) ? clause : clause.slice(0, place.index);
+      const before = /\buse\b/i.test(place[0]) ? clause : clause.slice(0, place.index + place[0].indexOf(place[1]!));
       const targets = referred(before);
       if (targets.length) add(targets, "move", { place: titled(place[1]!) });
       continue;

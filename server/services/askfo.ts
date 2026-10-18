@@ -67,24 +67,35 @@ export function askThroughFo(ctx: Ctx, planId: string): { taskId: string; create
  * to change, she says so there instead of guessing. Safe to run again: it acts only while the
  * request is still "adjusting", and records the new version before anything is sent.
  */
-export async function handleChangeRequest(ctx: Ctx, taskId: string): Promise<void> {
-  const state = replyState(ctx, taskId);
+export async function handleChangeRequest(ctx: Ctx, taskId: string, opts: { quiet?: boolean } = {}): Promise<void> {
+  let state = replyState(ctx, taskId);
   const task = getTask(ctx.db, taskId);
-  if (!state || state.status !== "adjusting" || !state.text || !task?.conversation_id) return;
+  if (!state || !task?.conversation_id) return;
+  if (opts.quiet) {
+    // Fo reported a clarification: read your latest answer once, and act only if it asks for a change.
+    const answer = state.answers?.at(-1);
+    if (state.status !== "waiting" || !answer || state.interpretedAt === answer.at) return;
+    saveReply(ctx, taskId, { ...state, interpretedAt: answer.at });
+    state = { ...state, interpretedAt: answer.at, text: answer.text };
+  } else if (state.status !== "adjusting") return;
+  if (!state.text) return;
+  const asked = state;
   const conversationId = task.conversation_id;
-  const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId);
+  const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", asked.planId);
   const ws = plan ? one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ? AND active = 1", plan.workspace_id) : undefined;
-  if (!plan || !ws || plan.status !== "proposed" || plan.content_hash !== state.contentHash) {
-    saveReply(ctx, taskId, { ...state, status: "stale" });
+  if (!plan || !ws || plan.status !== "proposed" || plan.content_hash !== asked.contentHash) {
+    if (!opts.quiet) saveReply(ctx, taskId, { ...asked, status: "stale" });
     return;
   }
   const items = proposalItems(ctx, plan);
   // Reading the answer can fail for a passing reason; the job tries again and nothing has changed yet.
-  const request = plan.kind === "organize" ? await ctx.reader.interpretChange(items, state.text) : null;
+  const request = plan.kind === "organize" ? await ctx.reader.interpretChange(items, asked.text!) : null;
+  // Read quietly, only a clear request for a change goes further.
+  if (opts.quiet && (!request || request.kind !== "changes" || Object.keys(validateChanges(items, request).changes).length === 0)) return;
   const followUp = tx(ctx.db, () => {
     const fresh = replyState(ctx, taskId);
     const current = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", plan.id);
-    if (fresh?.status !== "adjusting" || current?.status !== "proposed" || current.content_hash !== state.contentHash) return null;
+    if (fresh?.status !== (opts.quiet ? "waiting" : "adjusting") || current?.status !== "proposed" || current.content_hash !== asked.contentHash) return null;
     const notes: string[] = [];
     let next: PlanRow | null = null;
     if (!request) {

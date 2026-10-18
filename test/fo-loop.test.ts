@@ -223,7 +223,7 @@ async function youAnswerInKiki(rig: Texted, answer: string): Promise<void> {
     reply(args.conversationId!, "complete", {
       response: "KIKI-DECISION: " + JSON.stringify({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash, decision: /no|wait/i.test(answer) ? "declined" : "approved", userReply: answer, actor: "account_holder", presentedExactProposal: true }),
     });
-  rig.app.reply(rig.note.taskId, answer);
+  await rig.app.reply(rig.note.taskId, answer);
   await rig.app.settle();
 }
 
@@ -336,7 +336,7 @@ describe("contractor outreach through Fo", () => {
     assert.equal(rig.fo.asks.length, 1, "nothing else was sent while Fo was working");
     assert.ok(rig.fo.polls.length >= 1 && rig.fo.polls.every((p) => p.conversationId === CONV));
 
-    rig.app.reply(d.task.taskId, "Use anika@example.com.");
+    await rig.app.reply(d.task.taskId, "Use anika@example.com.");
     await rig.app.settle();
     assert.equal(rig.fo.asks.length, 2);
     const answer = rig.fo.asks[1]!;

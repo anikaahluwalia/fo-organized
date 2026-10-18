@@ -28,9 +28,9 @@ export function proposalItems(ctx: Ctx, plan: PlanRow): ProposalItem[] {
   const notes = ((plan.details_json ? (JSON.parse(plan.details_json) as { notes?: PlanNote[] } | null) : null)?.notes ?? []) as PlanNote[];
   const shortcuts = new Set(all<{ file_id: string }>(ctx.db, "SELECT file_id FROM files WHERE workspace_id = ? AND is_shortcut = 1", plan.workspace_id).map((r) => r.file_id));
   for (const note of notes) {
-    // Shortcuts never move, so there's nothing to say about where they'd go.
-    if (note.status !== "left_in_place" || shortcuts.has(note.fileId) || items.some((i) => i.fileId === note.fileId)) continue;
-    items.push({ n: last + items.filter((i) => i.kind === "unplaced").length + 1, fileId: note.fileId, kind: "unplaced", name: note.name, to: null, why: note.reason });
+    // Only files Kiki is asking about (shortcuts never move, and what you've already seen isn't asked again).
+    if (!note.unplaced || shortcuts.has(note.fileId) || items.some((i) => i.fileId === note.fileId)) continue;
+    items.push({ n: last + items.filter((i) => i.kind === "unplaced").length + 1, fileId: note.fileId, kind: "unplaced", name: note.name, to: null, why: note.reason, options: note.options });
   }
   return items;
 }

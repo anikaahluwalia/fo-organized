@@ -23,7 +23,7 @@ import {
   setUserName,
   stopDispatch,
 } from "./services/outreach.ts";
-import { approvePlan, autoPropose, discardPlan, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
+import { approvePlan, autoPropose, discardPlan, placeFile, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
 import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
@@ -80,7 +80,7 @@ export function createApp(deps: AppDeps) {
   // Watches for your reply to Fo's text ("go ahead"), read-only, until it arrives or expires.
   jobs.register("text_reply", async (p) => checkTextReply(ctx, String(p.taskId)));
   // You asked Fo for changes to a proposal: Kiki makes the new version and sends it back to Fo.
-  jobs.register("adjust", async (p) => handleChangeRequest(ctx, String(p.taskId)));
+  jobs.register("adjust", async (p) => handleChangeRequest(ctx, String(p.taskId), { quiet: p.quiet === true }));
   jobs.register("watch", async (p) => watchJob(ctx, String(p.watchId), ctx.watchIntervalSeconds));
   jobs.register("outcome", async (p) => runOutcome(ctx, String(p.outcomeId)));
 
@@ -154,6 +154,7 @@ export function createApp(deps: AppDeps) {
     resumePlan: (planId: string) => resumePlan(ctx, planId),
     proposeUndo: (planId: string) => ({ planId: proposeUndo(ctx, planId) }),
     askThroughFo: (planId: string) => askThroughFo(ctx, planId),
+    placeFile: (planId: string, fileId: string, place: string) => placeFile(ctx, planId, fileId, place),
     acceptQuote,
     notifyPreview: () => notifyPreview(ctx),
     notifySend: (input: { contentHash?: string; clientRequestId?: string }) => notifySend(ctx, input),
@@ -163,9 +164,8 @@ export function createApp(deps: AppDeps) {
     }),
     discardOutreach: (versionId: string) => discardOutreach(ctx, versionId),
     approveAndSend: (versionId: string, input: { contentHash?: string; clientRequestId?: string; confirmResend?: boolean }) => approveAndSend(ctx, versionId, input),
-    reply(taskId: string, answer: string) {
-      void replyToTask(ctx, taskId, answer).catch(() => undefined);
-    },
+    /** Resolves once your answer is on its way to Fo; Fo's reply comes back later. */
+    reply: (taskId: string, answer: string) => replyToTask(ctx, taskId, answer),
     stopDispatch(dispatchId: string) {
       void stopDispatch(ctx, dispatchId).catch(() => undefined);
     },
@@ -204,6 +204,10 @@ export function createApp(deps: AppDeps) {
       run(db, "UPDATE plan_ops SET state = 'uncertain', error = 'Kiki restarted during this step; she will check Drive before doing anything.' WHERE state = 'running'");
       for (const p of db.prepare("SELECT * FROM plans WHERE status IN ('approved', 'executing')").all() as unknown as PlanRow[]) {
         jobs.enqueue("execute_plan", `execute:${p.id}`, { planId: p.id });
+      }
+      // A proposal Fo was bringing you, interrupted mid-call: read where it stands before you answer again.
+      for (const t of db.prepare("SELECT id FROM fo_tasks WHERE kind = 'notify' AND state = 'uncertain' AND conversation_id IS NOT NULL").all() as { id: string }[]) {
+        jobs.enqueue("text_reply", `text_reply:${t.id}`, { taskId: t.id });
       }
       for (const w of db.prepare("SELECT * FROM watches WHERE state = 'watching'").all() as unknown as WatchRow[]) {
         jobs.enqueue("watch", `watch:${w.id}`, { watchId: w.id });

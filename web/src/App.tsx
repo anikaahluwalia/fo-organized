@@ -257,6 +257,44 @@ function OpEditor({ planId, seq, name, act }: { planId: string; seq: number; nam
   );
 }
 
+/** For a file Kiki couldn't place: say where it goes, and Kiki adds it to the proposal (a new version). */
+function PlaceEditor({ planId, fileId, options, act }: { planId: string; fileId: string; options: string[]; act: ReturnType<typeof useAction> }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  if (!open) {
+    return (
+      <button className="btn btn--quiet btn--small" onClick={() => setOpen(true)}>
+        Say where it goes
+      </button>
+    );
+  }
+  return (
+    <form
+      className="edit-row"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void act.run(`place-${fileId}`, async () => {
+          await post(`/api/plans/${planId}/place`, { fileId, place: value });
+          setOpen(false);
+        });
+      }}
+    >
+      <input type="text" list={`places-${fileId}`} value={value} placeholder='A project or folder, like "Kitchen"' onChange={(e) => setValue(e.target.value)} aria-label="Project or folder" />
+      <datalist id={`places-${fileId}`}>
+        {options.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
+      <button className="btn btn--small" disabled={!value.trim() || act.busy !== null}>
+        Add to the proposal
+      </button>
+      <button type="button" className="btn btn--quiet btn--small" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+    </form>
+  );
+}
+
 function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAction> }) {
   // A finished, verified plan is a record: one line until you want the steps.
   const done = plan.status === "applied";
@@ -336,8 +374,9 @@ function PlanCard({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAct
           <h3>Not moved</h3>
           <ul className="plain-list">
             {plan.notes.map((n) => (
-              <li key={n.name} className="hint">
+              <li key={n.fileId} className="hint">
                 <strong>{n.name}</strong>: {n.reason}
+                {n.unplaced && plan.status === "proposed" && plan.kind === "organize" && <PlaceEditor planId={plan.id} fileId={n.fileId} options={n.options} act={act} />}
               </li>
             ))}
           </ul>
@@ -375,6 +414,7 @@ const ATTENTION_CHIP: Record<AttentionItemView["kind"], { label: string; tone: s
   expiring: { label: "Soon", tone: "chip--needs_review" },
   undecided: { label: "Your call", tone: "chip--not_searched" },
   unreadable: { label: "Couldn't read", tone: "chip--needs_review" },
+  unplaced: { label: "Where?", tone: "chip--needs_review" },
 };
 
 /** Things Kiki noticed that need a person. Nothing here changes anything by itself. */
@@ -620,12 +660,14 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
       ? `You replied "${r.text}". Kiki is filing it.`
       : r?.status === "declined"
         ? `You replied "${r.text}". Not filing it.`
-        : n.purpose === "done" && n.outcome === "reported_sent"
+        : r?.status === "stale"
+          ? "The proposal changed since Fo asked. Review the new version."
+          : n.purpose === "done" && n.outcome === "reported_sent"
           ? `${fo} texted you that it's done.`
           : r?.status === "waiting" && n.outcome === "reported_sent"
-            ? `${fo} reports it texted you. Waiting for Fo to relay your decision about this proposal.`
+            ? `${fo} reports it texted you. Answer here in Kiki: yes, a change, or no.`
             : r?.status === "expired"
-              ? "No linked decision arrived before this request expired. Review the proposal again."
+              ? "This request expired before a decision came back. Use \"Have Fo ask me\" to ask again."
               : n.outcome === "reported_sent"
                 ? `${fo} reports it texted you.`
       : n.state === "failed"
@@ -683,13 +725,15 @@ function ApproveBlock({ plan, act, fo }: { plan: PlanView; act: ReturnType<typeo
       </p>
       <p className="lede">{plan.summary}</p>
       <div className="approve-row">
-        <button
-          className="btn btn--primary"
-          disabled={act.busy !== null}
-          onClick={() => act.run(`approve-${plan.id}`, () => post(`/api/plans/${plan.id}/approve`, { contentHash: plan.contentHash, clientRequestId: requestId }))}
-        >
-          {act.busy === `approve-${plan.id}` ? "Approving…" : "Approve"}
-        </button>
+        {plan.counts.total - plan.counts.excluded > 0 && (
+          <button
+            className="btn btn--primary"
+            disabled={act.busy !== null}
+            onClick={() => act.run(`approve-${plan.id}`, () => post(`/api/plans/${plan.id}/approve`, { contentHash: plan.contentHash, clientRequestId: requestId }))}
+          >
+            {act.busy === `approve-${plan.id}` ? "Approving…" : "Approve"}
+          </button>
+        )}
         <div className="secondary-actions">
           {fo.connection === "connected" && (
             <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`ask-fo-${plan.id}`, () => post(`/api/plans/${plan.id}/ask-fo`))}>

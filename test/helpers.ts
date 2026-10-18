@@ -23,9 +23,8 @@ export class FakeFo implements FoClient {
   onAsk: (args: AskArgs, n: number) => Promise<FoReply> = async () => {
     throw new Error("no ask script");
   };
-  onPoll: (args: PollArgs, n: number) => Promise<FoReply> = async () => {
-    throw new Error("no poll script");
-  };
+  /** Unscripted, a conversation has nothing in progress (what Kiki checks before answering into it). */
+  onPoll: (args: PollArgs, n: number) => Promise<FoReply> = async (args) => ({ status: "complete", conversationId: args.conversationId });
 
   async askFo(args: AskArgs): Promise<FoReply> {
     if (args.conversationId && args.newConversation) throw new Error("conversationId and newConversation can't be combined");

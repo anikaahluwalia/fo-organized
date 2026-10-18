@@ -90,10 +90,15 @@ export interface OpView {
 }
 
 export interface NoteView {
+  fileId: string;
   name: string;
   path: string;
   status: "already_organized" | "needs_review" | "left_in_place" | "waiting";
   reason: string;
+  /** Kiki couldn't tell where it goes: you can say. */
+  unplaced: boolean;
+  /** Folders that already hold this kind of document. */
+  options: string[];
 }
 
 export interface QuoteDiffView {
@@ -302,7 +307,7 @@ export interface NotificationView {
 
 export interface AttentionItemView {
   key: string;
-  kind: "missing" | "expired" | "which_current" | "duplicate" | "expiring" | "undecided" | "unreadable";
+  kind: "missing" | "expired" | "which_current" | "duplicate" | "expiring" | "undecided" | "unreadable" | "unplaced";
   project: string | null;
   title: string;
   detail: string | null;

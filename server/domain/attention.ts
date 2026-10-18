@@ -8,7 +8,7 @@ import { sameDocumentKey } from "./duplicates.ts";
  * dates running out, or quotes where it isn't clear which one counts. Every item comes from facts
  * Kiki read, with the line that supports it; nothing here changes anything.
  */
-export type AttentionKind = "missing" | "expired" | "which_current" | "duplicate" | "expiring" | "undecided" | "unreadable";
+export type AttentionKind = "missing" | "expired" | "which_current" | "duplicate" | "expiring" | "undecided" | "unreadable" | "unplaced";
 
 export interface AttentionDoc {
   docId: string;

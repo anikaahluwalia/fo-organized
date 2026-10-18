@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   all,
   isUniqueViolation,
@@ -18,7 +18,7 @@ import {
   type WorkspaceRow,
 } from "../db.ts";
 import { sanitizeName } from "../domain/naming.ts";
-import { buildOrganizePlan, buildUndoPlan, parseRef, planHash, refKey, type PlanDoc, type PlanDraft, type PlanFile, type PlannedOp, type UndoSource } from "../domain/plan.ts";
+import { buildOrganizePlan, buildUndoPlan, parseRef, planHash, refKey, type PlanDoc, type PlanDraft, type PlanFile, type PlannedOp, type PlanNote, type UndoSource } from "../domain/plan.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
 import type { Ctx } from "./context.ts";
 import { docFacts, requireWorkspace } from "./workspace.ts";
@@ -122,6 +122,33 @@ function hashWithExclusions(ops: PlannedOp[], excluded: Set<number>): string {
   return planHash(ops.map((o) => (excluded.has(o.seq) ? { ...o, kind: o.kind, reason: "excluded", newName: `excluded:${o.newName}` } : o)));
 }
 
+/** A proposal's identity: its steps, and the files it asks you about when it has no steps of its own. */
+function proposalHash(ops: PlannedOp[], excluded: Set<number>, questions: PlanNote[]): string {
+  const steps = hashWithExclusions(ops, excluded);
+  if (ops.some((o) => o.kind === "move_rename") || !questions.length) return steps;
+  return createHash("sha256").update(`${steps}|${questions.map((q) => `${q.fileId}@${q.version ?? ""}`).sort().join(",")}`).digest("hex");
+}
+
+/**
+ * Files Kiki couldn't place that you haven't seen yet: a file left in place in a plan you approved
+ * or set aside isn't asked about again, unless it has changed since.
+ */
+function openQuestions(db: Db, ws: WorkspaceRow, draft: PlanDraft): PlanNote[] {
+  const seen = new Set<string>();
+  for (const p of all<PlanRow>(db, "SELECT * FROM plans WHERE workspace_id = ? AND kind = 'organize' AND status IN ('applied', 'partial', 'discarded')", ws.id)) {
+    const notes = ((p.details_json ? (JSON.parse(p.details_json) as { notes?: PlanNote[] } | null) : null)?.notes ?? []) as PlanNote[];
+    for (const n of notes) if (n.unplaced) seen.add(`${n.fileId}@${n.version ?? ""}`);
+  }
+  // What you've already seen stays a plain note: it isn't offered as a question again.
+  for (const n of draft.notes) {
+    if (n.unplaced && seen.has(`${n.fileId}@${n.version ?? ""}`)) {
+      n.unplaced = false;
+      delete n.options;
+    }
+  }
+  return draft.notes.filter((n) => n.unplaced);
+}
+
 /**
  * Stores a proposal. If an open proposal in the same series has exactly the same operations, it
  * is returned unchanged: replaying the same input creates nothing new. Otherwise the open
@@ -130,10 +157,10 @@ function hashWithExclusions(ops: PlannedOp[], excluded: Set<number>): string {
 export function savePlanVersion(
   db: Db,
   ws: WorkspaceRow,
-  input: { kind: PlanKind; seriesId: string; title: string; summary: string; draft: PlanDraft; details: unknown; source: unknown; excluded?: Set<number> },
+  input: { kind: PlanKind; seriesId: string; title: string; summary: string; draft: PlanDraft; details: unknown; source: unknown; excluded?: Set<number>; questions?: PlanNote[] },
 ): { plan: PlanRow; created: boolean } {
   const excluded = input.excluded ?? new Set<number>();
-  const hash = hashWithExclusions(input.draft.ops, excluded);
+  const hash = proposalHash(input.draft.ops, excluded, input.questions ?? []);
   return tx(db, () => {
     const open = one<PlanRow>(db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('proposed', 'approved', 'executing')", input.seriesId);
     if (open && open.content_hash === hash) return { plan: open, created: false };
@@ -257,7 +284,7 @@ export function refreshOrganizeProposal(ctx: Ctx): void {
   const open = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", `organize:${ws.id}`);
   if (!open) return;
   const draft = organizeDraft(ctx.db, ws);
-  if (!draft.ops.some((o) => o.kind === "move_rename")) {
+  if (!draft.ops.some((o) => o.kind === "move_rename") && !openQuestions(ctx.db, ws, draft).length) {
     run(ctx.db, "UPDATE plans SET status = 'superseded', finished_at = ? WHERE id = ?", now(), open.id);
     logEvent(ctx.db, ws.id, "plan", `Kiki withdrew "${open.title}": there's nothing left in it to do.`);
     return;
@@ -300,11 +327,16 @@ function saveOrganize(db: Db, ws: WorkspaceRow, kikiDraft: PlanDraft, requested?
   const edited = Object.keys(edits).some((fileId) => draft.ops.some((o) => o.fileId === fileId));
   const before = one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM plans WHERE series_id = ? AND status = 'applied'", seriesId)!.n;
   const { moves, copies, summary } = organizeSummary(draft.ops, excluded);
+  // Nothing to move, but files Kiki couldn't place: the proposal is a question for you.
+  const unanswered = openQuestions(db, ws, draft);
+  const questions = draft.ops.some((o) => o.kind === "move_rename") ? [] : unanswered;
+  const asking = questions.length > 0;
   return savePlanVersion(db, ws, {
     kind: "organize",
     seriesId,
-    title: organizeTitle(ws.name, before === 0, moves, copies),
-    summary,
+    title: asking ? (questions.length === 1 ? `Where does "${questions[0]!.name}" go?` : `Where do these ${questions.length} documents go?`) : organizeTitle(ws.name, before === 0, moves, copies),
+    summary: asking ? `Kiki couldn't tell where ${questions.length === 1 ? "this document goes" : "these documents go"}. Say where, or leave ${questions.length === 1 ? "it" : "them"} where ${questions.length === 1 ? "it is" : "they are"}.` : summary,
+    questions,
     draft,
     details: { notes: draft.notes, ...(edited ? { edits, revisedFrom: kikiHash } : {}) },
     source: null,
@@ -325,6 +357,16 @@ export function adjustOrganize(ctx: Ctx, planId: string, changes: Edits): { plan
   return { planId: next.id, changed: created };
 }
 
+/** You say where a file Kiki couldn't place goes, in Kiki: the proposal gets a new version that files it there. */
+export function placeFile(ctx: Ctx, planId: string, fileId: string, place: string): { planId: string } {
+  const plan = getPlan(ctx.db, planId);
+  const notes = ((plan.details_json ? (JSON.parse(plan.details_json) as { notes?: PlanNote[] } | null) : null)?.notes ?? []) as PlanNote[];
+  if (!notes.some((n) => n.fileId === fileId && n.unplaced)) throw badRequest("That file isn't one Kiki asked about in this proposal.");
+  const where = (place ?? "").trim();
+  if (!where || where.length > 150 || where.split("/").some((s) => /^\s*\.+\s*$/.test(s))) throw badRequest("Say a project or folder, like \"Kitchen\" or \"School/CS 245\".");
+  return { planId: adjustOrganize(ctx, planId, { [fileId]: { place: where } }).planId };
+}
+
 /** Proposes the organizing changes the latest inventory calls for. Read-only until approved. */
 export function proposeOrganize(ctx: Ctx): { planId: string | null; created: boolean; message: string } {
   const ws = requireWorkspace(ctx.db);
@@ -332,7 +374,7 @@ export function proposeOrganize(ctx: Ctx): { planId: string | null; created: boo
   if (pendingReads(ctx.db, ws.id) > 0) throw conflict("Kiki is still reading some documents. Try again in a moment.");
   const draft = organizeDraft(ctx.db, ws);
   const seriesId = `organize:${ws.id}`;
-  if (draft.ops.length === 0) {
+  if (draft.ops.length === 0 && !openQuestions(ctx.db, ws, draft).length) {
     const open = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", seriesId);
     if (open) run(ctx.db, "UPDATE plans SET status = 'superseded', finished_at = ? WHERE id = ?", now(), open.id);
     logEvent(ctx.db, ws.id, "plan", "Kiki checked the workspace: everything she can place is already organized.");
@@ -353,11 +395,12 @@ export function autoPropose(ctx: Ctx): { plan: PlanRow; created: boolean } | nul
   const seriesId = `organize:${ws.id}`;
   if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('approved', 'executing')", seriesId)) return null;
   const draft = organizeDraft(ctx.db, ws);
-  if (!draft.ops.some((o) => o.kind === "move_rename")) {
+  const questions = openQuestions(ctx.db, ws, draft);
+  if (!draft.ops.some((o) => o.kind === "move_rename") && !questions.length) {
     refreshOrganizeProposal(ctx);
     return null;
   }
-  const hash = hashWithExclusions(draft.ops, new Set());
+  const hash = proposalHash(draft.ops, new Set(), draft.ops.some((o) => o.kind === "move_rename") ? [] : questions);
   // Don't re-propose something the user set aside, or that already failed: they choose to retry.
   if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('discarded', 'failed', 'partial', 'stale') AND content_hash = ?", seriesId, hash)) return null;
   // (What the user undid is already left out of the draft, file by file.)

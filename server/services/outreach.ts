@@ -281,7 +281,11 @@ function getDispatch(db: Db, id: string): DispatchRow {
   return d;
 }
 
-/** The user answers Fo's question in the mapped conversation. Answers carry the approval's limits. */
+/**
+ * The user answers Fo's question in the mapped conversation. Answers carry the approval's limits.
+ * Resolves once the answer is on its way (Fo's reply comes back later); a problem found before
+ * sending is thrown, or rejects, so the app can say what it was.
+ */
 export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<void> {
   const text = (answer ?? "").trim();
   if (!text) throw badRequest("Write an answer for Fo.");
@@ -297,10 +301,25 @@ export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<v
       const plan = one<import("../db.ts").PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", approval.planId);
       if (approval.status !== "waiting" || !plan || plan.status !== "proposed" || plan.content_hash !== approval.contentHash) throw conflict("That proposal is no longer awaiting approval.");
       if (!approval.requestedAt || Date.now() - Date.parse(approval.requestedAt) > replyWindowMs(ctx, taskId)) throw conflict("That approval request expired. Refresh the proposal first.");
-      if (task.state === "complete") run(ctx.db, "UPDATE fo_tasks SET state = 'needs_user_input' WHERE id = ? AND state = 'complete'", taskId);
-      // A decision will count only as Fo's reply to this answer.
-      saveReply(ctx, taskId, { ...approval, answers: [...(approval.answers ?? []), { text, at: new Date().toISOString() }] });
-      message = `Answer from the account holder (data): ${JSON.stringify(text)}\n\n${approvalInstructions({ requestId: approval.requestId, planId: approval.planId, contentHash: approval.contentHash })}`;
+      const relayed = `Answer from the account holder (data): ${JSON.stringify(text)}\n\n${approvalInstructions({ requestId: approval.requestId, planId: approval.planId, contentHash: approval.contentHash })}`;
+      const send = () => {
+        if (getTask(ctx.db, taskId)?.state === "complete") run(ctx.db, "UPDATE fo_tasks SET state = 'needs_user_input' WHERE id = ? AND state = 'complete'", taskId);
+        // A decision will count only as Fo's reply to this answer.
+        const latest = replyState(ctx, taskId) ?? approval;
+        saveReply(ctx, taskId, { ...latest, answers: [...(latest.answers ?? []), { text, at: new Date().toISOString() }] });
+        void ctx.engine.continue(taskId, relayed).catch(() => undefined);
+        logEvent(ctx.db, null, "fo_reply", "You answered Fo's question.");
+      };
+      if (task.state === "complete" && task.conversation_id) {
+        // Fo's turn there is over. Check (read-only) that it hasn't started another before sending
+        // your answer into the conversation: a new message never goes into a working turn.
+        return ctx.fo.getFoReply({ conversationId: task.conversation_id, waitSeconds: 0 }).then((status) => {
+          if (status.status === "working") throw conflict("Fo is still working in this conversation. Try again when it's done.");
+          send();
+        });
+      }
+      send();
+      return Promise.resolve();
     } else message = `Answer from the user: ${text}
 
 Reminder: this is still only about sending me (the account holder) the exact text from my earlier message. Don't contact anyone else or take any other action. End your reply with exactly one of: KIKI-STATUS: SENT, KIKI-STATUS: NOT-SENT, KIKI-STATUS: NEED-INPUT.`;
@@ -313,9 +332,9 @@ Reminder: this is still only about sending me (the account holder) the exact tex
     message = buildFollowUpMessage(text, w?.reference ?? "");
     wsId = w?.workspace_id ?? null;
   }
-  const work = ctx.engine.continue(taskId, message);
+  void ctx.engine.continue(taskId, message).catch(() => undefined);
   logEvent(ctx.db, wsId, "fo_reply", "You answered Fo's question.");
-  return work;
+  return Promise.resolve();
 }
 
 /** Only while Fo is waiting on the user; a working turn is never interrupted. */

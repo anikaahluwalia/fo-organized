@@ -2,10 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { inert } from "../domain/inert.ts";
 import { approvalInstructions, isPlainYes, parseApprovalReport, sameAnswer, type ApprovalBinding } from "../domain/approval.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
-import { all, kvGet, kvSet, logEvent, one, tx, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
+import { all, kvGet, kvSet, logEvent, now, one, run, tx, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
 import type { DocFacts } from "../domain/documents.ts";
 import { money } from "../domain/reconcile.ts";
-import { classifyDispatchReply, newReference, STATUS_LINES, stripStatusLines } from "../domain/outreach.ts";
+import { classifyDispatchReply, newReference, STATUS_LINES } from "../domain/outreach.ts";
 import { AppError, badRequest, conflict } from "../errors.ts";
 import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
@@ -132,6 +132,8 @@ export interface ReplyState {
   revision?: { planId: string | null; version: number | null; note: string | null };
   /** What you answered Fo in Kiki, in order. A decision counts only as Fo's reply to the latest. */
   answers?: { text: string; at: string }[];
+  /** The answer Kiki last read for changes Fo reported only as a clarification (each is read once). */
+  interpretedAt?: string;
 }
 
 const REPLY_WINDOW_MS = 30 * 60_000;
@@ -175,8 +177,20 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   }
   const sentAtMs = Date.parse(state.requestedAt ?? task.created_at);
   const decide = notifyPurpose(ctx, taskId) === "decide";
-  if (!state.requestId || !Number.isFinite(sentAtMs) || Date.now() - sentAtMs > replyWindowMs(ctx, taskId)) {
+  // An answer you gave in time still counts when Fo's report about it lands later.
+  const lastWordMs = Math.max(sentAtMs, ...(state.answers ?? []).map((a) => Date.parse(a.at)).filter(Number.isFinite));
+  if (!state.requestId || !Number.isFinite(sentAtMs) || Date.now() - lastWordMs > replyWindowMs(ctx, taskId)) {
     saveReply(ctx, taskId, { ...state, status: "expired" });
+    return;
+  }
+  if (task.state === "uncertain" && task.conversation_id) {
+    // Kiki stopped while this was with Fo: read where the conversation stands (read-only), so you
+    // can answer Fo's next question. Never resent.
+    try {
+      await ctx.engine.reconcile(taskId, "");
+    } catch {
+      return { rescheduleSeconds: 30 };
+    }
     return;
   }
   if (["asking", "working"].includes(task.state)) return { rescheduleSeconds: 6 };
@@ -188,7 +202,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   if (!answer) return decide ? undefined : { rescheduleSeconds: 6 };
   const answeredAtMs = Date.parse(answer.at);
   let latest: string | null = null;
-  if (task.state === "complete" && task.final_response && Date.parse(task.updated_at) >= answeredAtMs) {
+  if ((task.state === "complete" || task.state === "needs_user_input") && task.final_response && Date.parse(task.updated_at) >= answeredAtMs) {
     // Fo's reply to your latest answer: the newest word, even if the transcript lags behind it.
     latest = task.final_response;
   } else if (task.conversation_id) {
@@ -204,6 +218,9 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     if (!report) continue;
     if (report.decision === "clarification") {
       saveReply(ctx, taskId, { ...state, clarification: report.userReply });
+      // Fo may report a change you asked for as a clarification. Kiki reads your words once: if they
+      // ask for a change she makes the new version; a question just waits for your next answer.
+      if (plan.kind === "organize" && state.interpretedAt !== answer.at) ctx.jobs.enqueue("adjust", `adjust:${taskId}`, { taskId, quiet: true });
       return decide ? undefined : { rescheduleSeconds: 6 };
     }
     if (report.decision === "changes_requested") {
@@ -224,6 +241,10 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     }
     if (reply.verdict === "declined") {
       saveReply(ctx, taskId, { ...state, status: "declined", text: reply.text, source: reply.source, at });
+      // "Leave it" to a question about where files go: set it aside, so it isn't asked again.
+      if (!one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id)) {
+        run(ctx.db, "UPDATE plans SET status = 'discarded', finished_at = ? WHERE id = ? AND status = 'proposed'", now(), plan.id);
+      }
       logEvent(ctx.db, plan.workspace_id, "fo_reply", `You replied "${reply.text}" to Fo's text, so Kiki isn't filing it.`);
       return;
     }
@@ -265,6 +286,15 @@ export function sendDoneText(ctx: Ctx, planId: string): void {
   void ctx.engine.start(taskId, message(text, newReference(), "text")).catch(() => undefined);
 }
 
+/** Fo's reply as you should read it: its own words, without Kiki's status and decision lines. */
+function withoutProtocol(response: string): string {
+  return response
+    .split(/\r?\n/)
+    .filter((l) => !/^\W*KIKI-(DECISION|STATUS)\s*:/i.test(l))
+    .join("\n")
+    .trim();
+}
+
 export function notifyHandler(ctx: Ctx): TaskHandler {
   return {
     onComplete(task, response) {
@@ -272,10 +302,11 @@ export function notifyHandler(ctx: Ctx): TaskHandler {
       const report = state?.requestId ? parseApprovalReport(response, { requestId: state.requestId, planId: state.planId, contentHash: state.contentHash }) : null;
       if (report) {
         ctx.jobs.enqueue("text_reply", `text_reply:${task.id}`, { taskId: task.id });
-        // Fo's own words back to you (its answer, its question), without the protocol lines.
-        const said = response.split(/\r?\n/).filter((l) => !/^\W*KIKI-(DECISION|STATUS)\s*:/i.test(l)).join("\n").trim();
-        return { question: report.decision === "clarification" ? said || "Fo needs you to clarify your answer." : null };
+        return { question: report.decision === "clarification" ? withoutProtocol(response) || "Fo needs you to clarify your answer." : null };
       }
+      // Fo's reply to an answer you gave in Kiki, with no decision in it: show what Fo said (its
+      // answer, its next question) and keep waiting. A status line there doesn't mean anything was sent.
+      if (state?.requestId && state.status === "waiting" && (state.answers?.length ?? 0) > 0) return { question: withoutProtocol(response) || "Fo replied without a decision. Answer again, or decide here in Kiki." };
       const c = classifyDispatchReply(response);
       if (c === "sent") {
         if (notifyPurpose(ctx, task.id) === "find" && replyState(ctx, task.id)?.status === "waiting") {
@@ -284,7 +315,9 @@ export function notifyHandler(ctx: Ctx): TaskHandler {
         return { question: null };
       }
       if (c === "not_sent") return { question: null };
-      return { question: stripStatusLines(response) || response };
+      // Fo's own words, never Kiki's protocol lines (a decision line that couldn't be matched included).
+      const said = withoutProtocol(response);
+      return { question: said || (/^\W*KIKI-DECISION\s*:/im.test(response) ? "Fo replied, but its report couldn't be matched to this proposal." : null) };
     },
     onStateChange(task) {
       if (replyState(ctx, task.id)?.status === "waiting" && ["complete", "needs_user_input"].includes(task.state)) {
@@ -334,6 +367,14 @@ function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; fresh: Pl
 
 function findSummary(ctx: Ctx, plan: PlanRow): string {
   const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
+  // Nothing to move, only files Kiki couldn't place: ask where they go.
+  if (!one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id)) {
+    const notes = ((plan.details_json ? (JSON.parse(plan.details_json) as { notes?: { name: string; unplaced?: boolean }[] } | null) : null)?.notes ?? []).filter((n) => n.unplaced);
+    const which = notes.length === 1 ? `"${inert(notes[0]!.name)}"` : `${notes.length} documents`;
+    return `Kiki: she can't tell where ${which} in "${inert(ws.name)}" should go. Answer in Kiki: tell her a project or folder, or say to leave ${notes.length === 1 ? "it" : "them"} where ${notes.length === 1 ? "it is" : "they are"}.`;
+  }
+  // A quote update from a contractor's answer isn't a new document: say what changes.
+  if (plan.kind === "version_update") return `Kiki: ${inert(plan.title)} in "${inert(ws.name)}". ${inert(plan.summary, 400)} Answer in Kiki to say yes, ask for a change, or say no.`;
   const { fresh, refiled, copies } = filingMoves(ctx, plan.id);
   const extras = [
     refiled ? `rename or move ${refiled} document${refiled === 1 ? "" : "s"} already filed` : null,
@@ -358,8 +399,9 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
 export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   if (!autoTextEnabled(ctx)) return;
   // Renaming what's already filed, or setting copies aside, is housekeeping, not something new:
-  // it waits in the app, no text.
-  if (filingMoves(ctx, plan.id).fresh.length === 0 && !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND kind = 'set_status' AND state <> 'excluded'", plan.id)) return;
+  // it waits in the app, no text. A question about where a new file goes is worth one.
+  const asking = !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id);
+  if (!asking && filingMoves(ctx, plan.id).fresh.length === 0 && !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND kind = 'set_status' AND state <> 'excluded'", plan.id)) return;
   // One text per distinct proposal, even if it gets re-saved as a new version.
   if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
   kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);

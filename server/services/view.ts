@@ -217,7 +217,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       approvedAt: p.approved_at,
       finishedAt: p.finished_at,
       ops: ops.map((o) => opView(o, p, docLabels)),
-      notes: (details.notes ?? []).map((n) => ({ name: n.name, path: n.path, status: n.status, reason: n.reason })),
+      notes: (details.notes ?? []).map((n) => ({ fileId: n.fileId, name: n.name, path: n.path, status: n.status, reason: n.reason, unplaced: Boolean(n.unplaced), options: n.options ?? [] })),
       diff: details.diff ? { lines: details.diff.lines, total: details.diff.total ? { from: details.diff.total.from, to: details.diff.total.to, delta: details.diff.total.delta } : null } : null,
       evidence: ev
         ? {
@@ -392,7 +392,12 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
     planId: notifyPlanId(ctx, t.id),
     reply: (() => {
       const r = replyState(ctx, t.id);
-      return r ? { status: r.status, text: r.text, source: r.source, ...(r.clarification ? { clarification: r.clarification } : {}), ...(r.revision ? { revision: r.revision } : {}) } : null;
+      if (!r) return null;
+      // Waiting on a proposal that has since changed (you edited it, or it was applied): the answer
+      // would be refused, so it isn't shown as waiting for you, even before Kiki's next check.
+      const plan = r.status === "waiting" ? one<PlanRow>(db, "SELECT status, content_hash FROM plans WHERE id = ?", r.planId) : null;
+      const status = r.status === "waiting" && (!plan || plan.status !== "proposed" || plan.content_hash !== r.contentHash) ? ("stale" as const) : r.status;
+      return { status, text: r.text, source: r.source, ...(r.clarification ? { clarification: r.clarification } : {}), ...(r.revision ? { revision: r.revision } : {}) };
     })(),
     mode: t.mode,
     state: t.state,

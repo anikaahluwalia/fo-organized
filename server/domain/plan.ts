@@ -3,7 +3,7 @@ import type { OpKind } from "../db.ts";
 import type { DocFacts } from "./documents.ts";
 import { deduplicateName, indexFileName, projectFolderPath, proposedName, SUPERSEDED_FOLDER, targetFolder } from "./naming.ts";
 import { copyMap, DUPLICATES_FOLDER } from "./duplicates.ts";
-import { assignCollections, choosePlace, isFiledPath, KIKI_ROOTS, type Destination } from "./collections.ts";
+import { assignCollections, choosePlace, isFiledPath, KIKI_ROOTS, kikiCollections, userFolders, type Destination } from "./collections.ts";
 
 export interface PlanFile {
   fileId: string;
@@ -56,6 +56,11 @@ export interface PlanNote {
   path: string;
   status: "already_organized" | "needs_review" | "left_in_place" | "waiting";
   reason: string;
+  /** Kiki read it but couldn't tell where it goes: the user can say. With the file's version then. */
+  unplaced?: boolean;
+  version?: string | null;
+  /** Folders that already hold this kind of document, offered when Kiki asks where it goes. */
+  options?: string[];
 }
 
 export interface PlanDraft {
@@ -156,6 +161,15 @@ class Folders {
   dependencies(ref: Ref): number[] {
     return "op" in ref ? [ref.op] : [];
   }
+}
+
+/** Folders that already hold this kind of document (a collection's type folder, the user's folders), to offer. */
+function placesThatFit(facts: DocFacts, files: PlanFile[]): string[] {
+  const has = new Set(files.filter((f) => f.isFolder && !f.isShortcut).map((f) => (f.path ? `${f.path}/${f.name}` : f.name)));
+  const typed = kikiCollections(files)
+    .map((c) => targetFolder({ ...facts, project: { value: c, quote: null, quoteFound: null } }, files))
+    .filter((p): p is string => p !== null && has.has(p));
+  return [...typed, ...userFolders(files).map((u) => u.path)].slice(0, 4);
 }
 
 /** Why a document goes where it goes, citing what that rests on; null when its label already says it. */
@@ -300,14 +314,16 @@ export function buildOrganizePlan(input: {
     const facts = dest?.kind === "kiki" ? { ...doc.facts, project: { value: dest.name, quote: null, quoteFound: null } } : doc.facts;
     const folder = !dest || facts.docType === "unknown" ? null : dest.kind === "user" ? dest.path : targetFolder(facts, input.files);
     if (chosen && !folder) {
-      notes.push({ ...at, status: "left_in_place", reason: `You asked for "${chosen}", but Kiki couldn't tell which folder that is. Say its full path, like "School/CS 245".` });
+      notes.push({ ...at, status: "left_in_place", reason: `You asked for "${chosen}", but Kiki couldn't tell which folder that is. Say its full path, like "School/CS 245".`, unplaced: true, version: file.version });
       continue;
     }
     if (!folder || !dest) {
+      const unknown = facts.docType === "unknown";
       notes.push({
         ...at,
-        status: facts.docType === "unknown" ? "needs_review" : "left_in_place",
-        reason: facts.docType === "unknown" ? "Kiki couldn't tell what kind of document this is." : `This ${describeFacts(facts)} doesn't say which project or folder it belongs to, so Kiki is leaving it where it is.`,
+        status: unknown ? "needs_review" : "left_in_place",
+        reason: unknown ? "Kiki couldn't tell what kind of document this is." : `This ${describeFacts(facts)} doesn't say which project or folder it belongs to, so Kiki is leaving it where it is.`,
+        ...(unknown ? {} : { unplaced: true, version: file.version, options: placesThatFit(facts, input.files) }),
       });
       continue;
     }

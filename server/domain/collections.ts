@@ -113,6 +113,11 @@ export function kikiCollections(files: Folder[]): string[] {
 export function choosePlace(place: string, files: Folder[]): Destination | null {
   const wanted = place.trim().replace(/^\/+|\/+$/g, "");
   if (!wanted || wanted.split("/").some((s) => /^\s*\.+\s*$/.test(s))) return null;
+  // A path inside Kiki's own folders ("Projects/Flooring/Invoices") names that collection.
+  const [root, collection] = wanted.split("/");
+  if (KIKI_ROOTS.includes(root!) && collection) {
+    return { kind: "kiki", how: "choice", name: kikiCollections(files).find((c) => c.toLowerCase() === collection.toLowerCase()) ?? collection, path: null, because: place };
+  }
   const full = (f: Folder) => (f.path ? `${f.path}/${f.name}` : f.name);
   const theirs = files.filter((f) => f.isFolder && !f.isShortcut && !KIKI_ROOTS.includes(full(f).split("/")[0]!) && !KIKI_INTERNAL.has(f.name));
   const lower = wanted.toLowerCase();
