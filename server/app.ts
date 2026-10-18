@@ -34,7 +34,7 @@ import { saveEmailedAttachment, searchEmailedAttachments } from "./services/atta
 import { dismissAttention } from "./services/attention.ts";
 import { proposeMarkCurrent } from "./services/current.ts";
 import { dismissOutcome, followUp, pasteReply, pickUpArrivals, pickUpCopies, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
-import { activeWorkspace, createDemoWorkspace, requireWorkspace, runInventory, runReading, selectWorkspace, stageRevisedQuote } from "./services/workspace.ts";
+import { activeWorkspace, createDemoWorkspace, requireWorkspace, retryFailedReads, runInventory, runReading, selectWorkspace, stageRevisedQuote } from "./services/workspace.ts";
 
 export interface AppDeps {
   db: Db;
@@ -168,6 +168,7 @@ export function createApp(deps: AppDeps) {
     },
     refreshInventory() {
       const ws = requireWorkspace(db);
+      retryFailedReads(db, ws.id);
       jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
     },
     proposeOrganize: () => proposeOrganize(ctx),
@@ -237,6 +238,7 @@ export function createApp(deps: AppDeps) {
         jobs.enqueue("watch", `watch:${w.id}`, { watchId: w.id });
       }
       const ws = activeWorkspace(db);
+      if (ws) retryFailedReads(db, ws.id);
       if (ws) jobs.enqueue("read", `read:${ws.id}`, { workspaceId: ws.id });
       // An open proposal that never reached Fo (made while Kiki ran older code, or texts were off):
       // with texts on, Fo brings it now. Each proposal is texted at most once.

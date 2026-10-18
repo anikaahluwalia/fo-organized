@@ -69,6 +69,15 @@ export function recordFile(db: Db, wsId: string, f: DriveFile, path: string, ori
   if (f.mimeType !== FOLDER_MIME && f.mimeType !== SHORTCUT_MIME && origin !== "created_by_kiki") ensureDocument(db, wsId, f);
 }
 
+/**
+ * Files Kiki couldn't read get another try: when she starts (a setting may have been fixed, like the
+ * Claude key) and when you ask her to look again. Not on every look, so a file that can't be read
+ * doesn't cost a Claude call every few seconds.
+ */
+export function retryFailedReads(db: Db, wsId: string): number {
+  return run(db, "UPDATE documents SET read_status = 'pending', read_error = NULL, updated_at = ? WHERE workspace_id = ? AND read_status = 'failed'", now(), wsId);
+}
+
 function ensureDocument(db: Db, wsId: string, f: DriveFile): void {
   const existing = one<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ? AND file_id = ?", wsId, f.id);
   if (!existing) {
