@@ -4,7 +4,7 @@ import path from "node:path";
 import type { App } from "./app.ts";
 import type { Config } from "./config.ts";
 import { AppError, badRequest, notFound } from "./errors.ts";
-import { cookieValue, endSession, LoginLimiter, loginPage, passwordMatches, safeNext, SESSION_COOKIE, sessionCookie, sessionValid, startSession } from "./auth.ts";
+import { cookieValue, endSession, LoginLimiter, loginPage, passwordGeneration, passwordMatches, safeNext, SESSION_COOKIE, sessionCookie, sessionValid, startSession } from "./auth.ts";
 import { createPairingCode, extensionStatus, pairExtension, unpairAll, verifyExtensionToken } from "./extension.ts";
 import { answerPage, submitAnswer } from "./services/answerlink.ts";
 import { receiveFoEvent, verifyFoWebhook } from "./services/fowebhook.ts";
@@ -89,6 +89,9 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   const publicHost = config.publicUrl && new URL(config.publicUrl).host !== appHost ? new URL(config.publicUrl).host : null;
   const secure = config.appOrigin.startsWith("https://");
   const limiter = new LoginLimiter();
+  // Which password is in use: a new one ends every session and side-panel pairing made under the old.
+  const auth = config.password ? passwordGeneration(app.db, config.password) : null;
+  if (auth?.changed) unpairAll(app.db);
   // Where a sign-in attempt comes from: online, the address the proxy in front of Kiki saw (the
   // last one it added); here, the connection's own.
   const clientOf = (req: http.IncomingMessage) =>
@@ -297,16 +300,17 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
       }
 
       if (config.password) {
+        // same-origin on every sign-in page (the form, and after a wrong password), so its post carries
+        // this site's origin, not "null" (which any sandboxed page can send).
         const page = (status: number, body: string, headers: Record<string, string> = {}) => {
-          res.writeHead(status, { ...SECURITY_HEADERS, ...headers, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+          res.writeHead(status, { ...SECURITY_HEADERS, "Referrer-Policy": "same-origin", ...headers, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
           res.end(body);
         };
         const session = cookieValue(req.headers.cookie, SESSION_COOKIE);
         // Only this site's own pages post here (a browser always says where a form came from).
         const crossSite = (origin !== undefined && !allowedOrigins.has(origin)) || !["same-origin", "none", undefined].includes(req.headers["sec-fetch-site"] as string | undefined);
         if (url.pathname === "/login") {
-          // same-origin, so the form's post carries this site's origin (not "null", which any sandboxed page can send).
-          if (method === "GET") return page(200, loginPage(safeNext(url.searchParams.get("next"))), { "Referrer-Policy": "same-origin" });
+          if (method === "GET") return page(200, loginPage(safeNext(url.searchParams.get("next"))));
           if (method !== "POST") return send(405, { error: "Method not allowed." });
           // Another site can't sign you in, or make you wait by trying wrong passwords from your browser.
           if (crossSite) return send(403, { error: "Cross-site requests aren't allowed." });
@@ -321,7 +325,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
           }
           limiter.succeeded(from);
           endSession(app.db, session);
-          const started = startSession(app.db, config.password);
+          const started = startSession(app.db, auth!.generation);
           return page(303, "", { Location: next, "Set-Cookie": sessionCookie(started.token, started.maxAgeSeconds, secure) });
         }
         // Signing out: the app's own request (JSON, from this site), like any other action.
@@ -334,7 +338,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
         // Everything else needs you signed in. Only the side panel's own API calls don't: they carry
         // its token, checked below (an Origin header alone proves nothing).
         const sidePanelApi = fromExtension && url.pathname.startsWith("/api/") && !url.pathname.endsWith("/oauth/callback");
-        if (!sidePanelApi && !sessionValid(app.db, session, config.password)) {
+        if (!sidePanelApi && !sessionValid(app.db, session, auth!.generation)) {
           if (url.pathname.startsWith("/api/")) return send(401, { error: "Sign in to Kiki first.", code: "login" });
           return page(302, "", { Location: `/login?next=${encodeURIComponent(safeNext(url.pathname + url.search))}` });
         }

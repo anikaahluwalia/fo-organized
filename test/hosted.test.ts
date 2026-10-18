@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { configProblems, loadConfig } from "../server/config.ts";
 import { createHttpServer } from "../server/http.ts";
-import { LoginLimiter, safeNext, sessionValid, startSession } from "../server/auth.ts";
+import { LoginLimiter, safeNext } from "../server/auth.ts";
+import { createPairingCode, extensionStatus, pairExtension } from "../server/extension.ts";
 import { makeRig } from "./helpers.ts";
 
 const ORIGIN = "https://kiki.example";
@@ -148,15 +149,41 @@ test("an Origin header claiming to be the side panel proves nothing: the app, it
   assert.equal((await request(s.port, { path: "/api/state", origin: fake })).status, 401, "its API calls need its token");
 });
 
-test("a new password signs every session out", () => {
+test("a new password signs every session out and ends side-panel pairings; the password is kept only as a slow salted hash", async (t) => {
   const rig = makeRig();
-  try {
-    const { token } = startSession(rig.db, PASSWORD);
-    assert.equal(sessionValid(rig.db, token, PASSWORD), true);
-    assert.equal(sessionValid(rig.db, token, "a different password"), false);
-  } finally {
-    rig.app.close();
-  }
+  t.after(() => rig.app.close());
+  const start = async (password: string) => {
+    const port = 30_000 + Math.floor(Math.random() * 20_000);
+    const server = createHttpServer(rig.app, loadConfig({ PORT: String(port), KIKI_MODE: "mock", APP_ORIGIN: ORIGIN, KIKI_PASSWORD: password }), { google: null, fo: null }, "/nonexistent");
+    await new Promise<void>((r) => server.listen(port, "127.0.0.1", () => r()));
+    t.after(() => new Promise<void>((r) => (server.closeAllConnections(), server.close(() => r()))));
+    return port;
+  };
+  const first = await start(PASSWORD);
+  const signedIn = await request(first, { method: "POST", path: "/login", body: `password=${encodeURIComponent(PASSWORD)}`, origin: ORIGIN });
+  const cookie = String(signedIn.headers["set-cookie"] ?? "").split(";")[0] ?? "";
+  assert.equal((await request(first, { path: "/api/state", cookie })).status, 200);
+  const pairing = createPairingCode(rig.db);
+  pairExtension(rig.db, "chrome-extension://" + "a".repeat(32), pairing.code);
+  assert.equal(extensionStatus(rig.db).paired, true);
+  const stored = String((rig.db.prepare("SELECT value FROM kv WHERE key = 'auth.password'").get() as { value: string }).value);
+  assert.ok(!stored.includes(PASSWORD) && /"salt"/.test(stored), "salted hash, not the password");
+
+  const second = await start("a brand new password");
+  assert.equal((await request(second, { path: "/api/state", cookie })).status, 401, "signed out");
+  assert.equal(extensionStatus(rig.db).paired, false, "side panel unpaired");
+  // The same password again keeps sessions (a restart doesn't sign anyone out).
+  const again = await request(second, { method: "POST", path: "/login", body: "password=a+brand+new+password", origin: ORIGIN });
+  const fresh = String(again.headers["set-cookie"] ?? "").split(";")[0] ?? "";
+  const third = await start("a brand new password");
+  assert.equal((await request(third, { path: "/api/state", cookie: fresh })).status, 200);
+});
+
+test("after a wrong password, the page you're on still signs you in", async (t) => {
+  const s = await online(t);
+  const wrong = await s.signIn("not the password");
+  assert.equal(wrong.res.status, 401);
+  assert.equal(wrong.res.headers["referrer-policy"], "same-origin", "so the retry carries this site's origin, not null");
 });
 
 test("another site can't post the sign-in form, even as a sandboxed page (\"Origin: null\") or by Sec-Fetch-Site", async (t) => {
@@ -187,9 +214,12 @@ test("listening beyond this machine needs a password, online or not", () => {
   assert.deepEqual(configProblems(loadConfig({ HOST: "127.0.0.1" })), []);
 });
 
-test("a lockout still running isn't dropped when the table gets big", () => {
+test("a lockout still running, or a count still adding up, isn't dropped when the table gets big", () => {
   const l = new LoginLimiter();
   for (let i = 0; i < 10; i++) l.failed("locked", 1000);
+  for (let i = 0; i < 9; i++) l.failed("counting", 1000);
   for (let i = 0; i < 10_001; i++) l.failed(`other-${i}`, 1000);
   assert.ok(l.waitMs("locked", 1001) > 0);
+  l.failed("counting", 1002);
+  assert.ok(l.waitMs("counting", 1003) > 0, "its tenth wrong password still locks it");
 });

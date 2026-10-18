@@ -91,6 +91,10 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   const status = settled(ctx, taskId);
   const state = replyState(ctx, taskId);
   const plan = state ? one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId) : null;
+  // The proposal stays on the page only while the request is fresh (from your last answer): an old
+  // link, in a message history or a screenshot, says where things stand but not what was in it.
+  const lastAt = Math.max(...[state?.at, state?.requestedAt, ...(state?.answers ?? []).map((a) => a.at)].map((t) => (t ? Date.parse(t) : 0)));
+  const recent = Date.now() - lastAt <= replyWindowMs(ctx, taskId);
   // Kiki's word on your last answer, if it didn't settle anything (a yes to "where does it go?").
   const note = notice ?? state?.note;
   const question = task?.state === "needs_user_input" && task.question ? task.question.replace(/^\W*KIKI-(DECISION|STATUS)\s*:.*$/gim, "").trim() : null;
@@ -101,7 +105,7 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   <p>${esc(status.text)}</p>
   ${status.next ? `<p class="next">${esc(status.next)}</p>` : ""}
 </section>
-${status.done ? `<details><summary>The proposal</summary>${plan ? cards(ctx, plan) : `<pre>${esc(proposal)}</pre>`}</details>` : ""}`
+${status.done && recent ? `<details><summary>The proposal</summary>${plan ? cards(ctx, plan) : `<pre>${esc(proposal)}</pre>`}</details>` : ""}`
     : `<h1>Kiki</h1><p class="muted">Your answer goes to Fo, and Fo texts you what happens.</p>
 ${note ? `<p class="note">${esc(note)}</p>` : ""}
 ${question ? `<div class="ask"><strong>Fo asks:</strong><br>${esc(question)}</div>` : ""}

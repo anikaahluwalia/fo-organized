@@ -251,3 +251,13 @@ test("once a link has expired, its page no longer shows the proposal", async (t)
   assert.match(page.text, /This link expired/);
   assert.doesNotMatch(page.text, /Every step|N-5602/);
 });
+
+test("an answered link that's gone quiet says where things stand, but not what was in the proposal", async (t) => {
+  const s = await setup(t);
+  const state = replyState(s.rig.app.ctx, s.note.taskId)!;
+  const old = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+  run(s.rig.db, "UPDATE kv SET value = ? WHERE key = ?", JSON.stringify({ ...state, status: "declined", text: "No", at: old, requestedAt: old, answers: [{ text: "No", at: old }] }), `notify.reply.${s.note.taskId}`);
+  const page = await request(s.port, { path: new URL(s.link!).pathname, host: new URL(PUBLIC).host });
+  assert.match(page.text, /Nothing changes/);
+  assert.doesNotMatch(page.text, /The proposal|N-5602/);
+});
