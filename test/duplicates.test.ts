@@ -37,7 +37,10 @@ test("an exact copy dropped into the folder is set aside next to the original, n
   assert.equal(move.after?.path, "Projects/Flooring/Quotes/Duplicates");
   assert.equal(move.after?.name, CLEAN, "same clear name, in its own folder");
   assert.match(move.reason, /exact copy/);
-  assert.equal((await rig.app.view()).notifications.length, 0, "housekeeping isn't texted");
+  // A copy you just added is news to you: one text says what it is.
+  const texts = (await rig.app.view()).notifications;
+  assert.equal(texts.length, 1);
+  assert.match(texts[0]!.text ?? "", /"scan_0012 \(1\)\.pdf" is an exact copy of what's already filed/);
 
   rig.app.approvePlan(plan.id, { contentHash: plan.contentHash, clientRequestId: "dup-1" });
   await rig.app.settle();

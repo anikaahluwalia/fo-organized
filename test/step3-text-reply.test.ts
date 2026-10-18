@@ -70,3 +70,23 @@ test("a text from before Kiki's question isn't taken as an answer", async (t) =>
   assert.equal(s.fo.asks.some((a) => a.message.includes("answered this by text")), false);
   assert.equal(status(s, s.plan.id), "proposed");
 });
+
+test("dropping a copy and a file Kiki can't place gets you one text about both", async (t) => {
+  const fo = new FakeFo();
+  const rig = makeRig({ fo });
+  rig.app.ctx.watchIntervalSeconds = 3600;
+  t.after(() => rig.app.close());
+  fo.onAsk = async (_args, n) => reply(`kiki-${n}`, "complete", { response: TEXTED });
+  await organized(rig);
+  rig.app.updateSettings({ autoText: true });
+  const root = one<{ root_file_id: string }>(rig.db, "SELECT root_file_id FROM workspaces WHERE active = 1")!.root_file_id;
+  const filed = [...rig.drive.files.values()].find((f) => f.name === "2026-09-28 Quote - Oakline Flooring Co. - Q-1042.pdf")!;
+  rig.drive.addFile("quote again.pdf", root, "application/pdf", filed.content as Buffer);
+  rig.drive.addFile("thoughts.txt", root, "text/plain", "NOTES\nTitle: Garden ideas\nPlant tomatoes in May.");
+  rig.app.refreshInventory();
+  await rig.app.settle();
+  const texts = (await rig.app.view()).notifications.filter((n) => n.purpose === "find");
+  assert.equal(texts.length, 1, "one text");
+  assert.match(texts[0]!.text ?? "", /"quote again\.pdf" is an exact copy/);
+  assert.match(texts[0]!.text ?? "", /can't tell where "thoughts\.txt" goes/);
+});

@@ -373,11 +373,19 @@ function describeDoc(f: DocFacts | null): string {
 const alreadyFiled = (path: string | null) => /^(Projects|Renovations)(\/|$)/.test(path ?? "");
 
 /** New documents to file, documents already filed that would be renamed or moved, and exact copies set aside. */
-function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; fresh: PlanOpRow[]; refiled: number; copies: number } {
+function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; fresh: PlanOpRow[]; refiled: number; copies: number; freshCopies: PlanOpRow[] } {
   const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state <> 'excluded' ORDER BY seq", planId);
   const filing = moves.filter((o) => !(o.new_path && inDuplicatesFolder(o.new_path)));
   const fresh = filing.filter((o) => !alreadyFiled(o.pre_path));
-  return { filing, fresh, refiled: filing.length - fresh.length, copies: moves.length - filing.length };
+  // A copy still loose in the folder is one you just added, not old housekeeping.
+  const freshCopies = moves.filter((o) => o.new_path && inDuplicatesFolder(o.new_path) && !alreadyFiled(o.pre_path));
+  return { filing, fresh, refiled: filing.length - fresh.length, copies: moves.length - filing.length, freshCopies };
+}
+
+/** Files the proposal asks you about: Kiki read them but couldn't tell where they go. */
+function openQuestionNames(plan: PlanRow): string[] {
+  const notes = ((plan.details_json ? (JSON.parse(plan.details_json) as { notes?: { name: string; unplaced?: boolean }[] } | null) : null)?.notes ?? []);
+  return notes.filter((n) => n.unplaced).map((n) => n.name);
 }
 
 function findSummary(ctx: Ctx, plan: PlanRow): string {
@@ -390,7 +398,16 @@ function findSummary(ctx: Ctx, plan: PlanRow): string {
   }
   // A quote update from a contractor's answer isn't a new document: say what changes.
   if (plan.kind === "version_update") return `Kiki: ${inert(plan.title)} in "${inert(ws.name)}". ${inert(plan.summary, 400)} Reply to this text, or answer in Kiki: yes, a change, or no.`;
-  const { fresh, refiled, copies } = filingMoves(ctx, plan.id);
+  const { fresh, refiled, copies, freshCopies } = filingMoves(ctx, plan.id);
+  const questions = openQuestionNames(plan);
+  const asks = questions.length
+    ? ` She can't tell where ${questions.length === 1 ? `"${inert(questions[0]!)}" goes` : `${questions.length} documents go`}: tell her a project or folder, or say to leave ${questions.length === 1 ? "it" : "them"}.`
+    : "";
+  const answer = " Reply to this text, or answer in Kiki: yes, a change, or no.";
+  if (!fresh.length && freshCopies.length) {
+    const which = freshCopies.length === 1 ? `"${inert(freshCopies[0]!.pre_name)}" is an exact copy` : `${freshCopies.length} files you added are exact copies`;
+    return `Kiki: ${which} of what's already filed in "${inert(ws.name)}". Want me to set ${freshCopies.length === 1 ? "it" : "them"} aside in Duplicates? Nothing is deleted.${asks}${answer}`;
+  }
   const extras = [
     refiled ? `rename or move ${refiled} document${refiled === 1 ? "" : "s"} already filed` : null,
     copies ? `set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}` : null,
@@ -400,9 +417,10 @@ function findSummary(ctx: Ctx, plan: PlanRow): string {
     const op = fresh[0]!;
     const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
     const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
-    return `Kiki: ${inert(describeDoc(facts))} just landed in "${inert(ws.name)}". Want me to file it in ${inert(op.new_path)}?${also} Reply to this text, or answer in Kiki: yes, a change, or no.`;
+    return `Kiki: ${inert(describeDoc(facts))} just landed in "${inert(ws.name)}". Want me to file it in ${inert(op.new_path)}?${also}${asks}${answer}`;
   }
-  return `Kiki: ${fresh.length} new documents in "${inert(ws.name)}" are ready to file.${also} Reply to this text, or answer in Kiki: yes, a change, or no.`;
+  if (!fresh.length && questions.length) return `Kiki: new in "${inert(ws.name)}".${asks}${also}${answer}`;
+  return `Kiki: ${fresh.length} new documents in "${inert(ws.name)}" are ready to file.${also}${asks}${answer}`;
 }
 
 /** Complete scope is supplied to Fo and the account holder, including renames and version changes. */
@@ -421,8 +439,9 @@ export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   if (!autoTextEnabled(ctx)) return;
   // Renaming what's already filed, or setting copies aside, is housekeeping, not something new:
   // it waits in the app, no text. A question about where a new file goes is worth one.
-  const asking = !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id);
-  if (!asking && filingMoves(ctx, plan.id).fresh.length === 0 && !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND kind = 'set_status' AND state <> 'excluded'", plan.id)) return;
+  const moves = filingMoves(ctx, plan.id);
+  const news = moves.fresh.length > 0 || moves.freshCopies.length > 0 || openQuestionNames(plan).length > 0;
+  if (!news && !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND kind = 'set_status' AND state <> 'excluded'", plan.id)) return;
   // One text per distinct proposal, even if it gets re-saved as a new version.
   if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
   kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);
