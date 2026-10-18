@@ -34,7 +34,7 @@ test("undoing a plan that filed three collections brings every index it wrote ba
 
   const nimbusIndex = [...rig.drive.files.values()].find((f) => f.name === "Nimbus launch - document index (kept by Kiki).csv");
   assert.ok(nimbusIndex, "the Nimbus launch index is still in Drive (nothing is deleted)");
-  const content = await rig.drive.readContent(await rig.drive.getFile(nimbusIndex.id), 2_000_000);
+  const content = await rig.drive.readContent(await rig.drive.getFile(nimbusIndex.id));
   assert.equal(content.kind, "text");
   const text = content.kind === "text" ? content.text : "";
   assert.ok(!text.includes(filedName), `after the undo, the Nimbus launch index still lists the report as "${filedName}" in its filed folder:\n${text}`);

@@ -131,7 +131,9 @@ export interface ReplyState {
   /** After you asked for changes: the version Kiki made from them, or why she couldn't. */
   revision?: { planId: string | null; version: number | null; note: string | null };
   /** What you answered Fo in Kiki, in order. A decision counts only as Fo's reply to the latest. */
-  answers?: { text: string; at: string }[];
+  answers?: { text: string; at: string; via?: string }[];
+  /** Text conversations Kiki already asked Fo to read for this request. */
+  textsChecked?: string[];
   /** The answer Kiki last read for changes Fo reported only as a clarification (each is read once). */
   interpretedAt?: string;
 }
@@ -198,7 +200,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   // For now you answer in Kiki (a text reply can't be tied to this request yet), so a decision
   // counts only as Fo's reply to the latest answer Kiki relayed. Nothing before it, nothing in
   // another conversation, and never something Fo reports without an answer from you.
-  const answer = state.answers?.at(-1);
+  let answer = state.answers?.at(-1);
   if (!answer) return decide ? undefined : { rescheduleSeconds: 6 };
   const answeredAtMs = Date.parse(answer.at);
   let latest: string | null = null;
@@ -216,6 +218,12 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   for (const turn of latest ? [{ text: latest }] : []) {
     const report = parseApprovalReport(turn.text, binding);
     if (!report) continue;
+    if (answer.via && !answer.text) {
+      // You answered by text: your words are what Fo quotes from it (Fo can read texts; Kiki can't).
+      answer = { ...answer, text: report.userReply };
+      state.answers = [...state.answers!.slice(0, -1), answer];
+      saveReply(ctx, taskId, state);
+    }
     if (report.decision === "clarification") {
       saveReply(ctx, taskId, { ...state, clarification: report.userReply });
       // Fo may report a change you asked for as a clarification. Kiki reads your words once: if they
@@ -323,6 +331,10 @@ export function notifyHandler(ctx: Ctx): TaskHandler {
       return { question: said || (/^\W*KIKI-DECISION\s*:/im.test(response) ? "Fo replied, but its report couldn't be matched to this proposal." : null) };
     },
     onStateChange(task) {
+      // While a proposal waits for you, a text you send Fo is watched for (it lands in its own conversation).
+      if (replyState(ctx, task.id)?.status === "waiting" && ["complete", "needs_user_input"].includes(task.state)) {
+        ctx.jobs.enqueue("text_watch", `text_watch:${task.id}`, { taskId: task.id }, 20);
+      }
       if (replyState(ctx, task.id)?.status === "waiting" && ["complete", "needs_user_input"].includes(task.state)) {
         ctx.jobs.enqueue("text_reply", `text_reply:${task.id}`, { taskId: task.id }, 4);
       }
@@ -345,7 +357,7 @@ export function autoTextEnabled(ctx: Ctx): boolean {
 export function setAutoText(ctx: Ctx, on: boolean): void {
   kvSet(ctx.db, AUTO_TEXT, on ? "1" : undefined);
   const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE active = 1");
-  logEvent(ctx.db, ws?.id ?? null, "settings", on ? "You turned on texts from Fo when Kiki finds something new. You answer them here in Kiki." : "You turned off Fo's texts about new finds.");
+  logEvent(ctx.db, ws?.id ?? null, "settings", on ? "You turned on texts from Fo when Kiki finds something new. Reply to the text, or answer here in Kiki." : "You turned off Fo's texts about new finds.");
 }
 
 function describeDoc(f: DocFacts | null): string {
@@ -374,10 +386,10 @@ function findSummary(ctx: Ctx, plan: PlanRow): string {
   if (!one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id)) {
     const notes = ((plan.details_json ? (JSON.parse(plan.details_json) as { notes?: { name: string; unplaced?: boolean }[] } | null) : null)?.notes ?? []).filter((n) => n.unplaced);
     const which = notes.length === 1 ? `"${inert(notes[0]!.name)}"` : `${notes.length} documents`;
-    return `Kiki: she can't tell where ${which} in "${inert(ws.name)}" should go. Answer in Kiki: tell her a project or folder, or say to leave ${notes.length === 1 ? "it" : "them"} where ${notes.length === 1 ? "it is" : "they are"}.`;
+    return `Kiki: she can't tell where ${which} in "${inert(ws.name)}" should go. Reply to this text, or answer in Kiki: tell her a project or folder, or say to leave ${notes.length === 1 ? "it" : "them"} where ${notes.length === 1 ? "it is" : "they are"}.`;
   }
   // A quote update from a contractor's answer isn't a new document: say what changes.
-  if (plan.kind === "version_update") return `Kiki: ${inert(plan.title)} in "${inert(ws.name)}". ${inert(plan.summary, 400)} Answer in Kiki to say yes, ask for a change, or say no.`;
+  if (plan.kind === "version_update") return `Kiki: ${inert(plan.title)} in "${inert(ws.name)}". ${inert(plan.summary, 400)} Reply to this text, or answer in Kiki: yes, a change, or no.`;
   const { fresh, refiled, copies } = filingMoves(ctx, plan.id);
   const extras = [
     refiled ? `rename or move ${refiled} document${refiled === 1 ? "" : "s"} already filed` : null,
@@ -388,14 +400,20 @@ function findSummary(ctx: Ctx, plan: PlanRow): string {
     const op = fresh[0]!;
     const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
     const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
-    return `Kiki: ${inert(describeDoc(facts))} just landed in "${inert(ws.name)}". Want me to file it in ${inert(op.new_path)}?${also} Answer in Kiki to say yes, ask for a change, or say no.`;
+    return `Kiki: ${inert(describeDoc(facts))} just landed in "${inert(ws.name)}". Want me to file it in ${inert(op.new_path)}?${also} Reply to this text, or answer in Kiki: yes, a change, or no.`;
   }
-  return `Kiki: ${fresh.length} new documents in "${inert(ws.name)}" are ready to file.${also} Answer in Kiki to say yes, ask for a change, or say no.`;
+  return `Kiki: ${fresh.length} new documents in "${inert(ws.name)}" are ready to file.${also} Reply to this text, or answer in Kiki: yes, a change, or no.`;
 }
 
 /** Complete scope is supplied to Fo and the account holder, including renames and version changes. */
 export function newFindText(ctx: Ctx, plan: PlanRow): string {
   return `${findSummary(ctx, plan)}\n\nProposed changes (version ${plan.version}):\n${proposalLines(ctx, plan)}\nNothing is deleted. You can answer Fo naturally, ask a question, ask for changes, or decline.`;
+}
+
+/** The request that has Fo text you a proposal (and only you), with the binding for your answer. */
+export function textedProposal(ctx: Ctx, plan: PlanRow, binding: ApprovalBinding, lead?: string): { body: string; request: string } {
+  const body = `${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`;
+  return { body, request: message(body, newReference(), "text") + "\n\n" + approvalInstructions(binding) };
 }
 
 /** Standing permission, texts to the account holder only: one text per new proposal. */

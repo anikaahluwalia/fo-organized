@@ -15,5 +15,5 @@ test("probe: the autoText setting event is in the activity list S3A-X2 checks", 
   await rig.app.stageRevision("invoice");
   await rig.app.settle();
   const events = (await rig.app.view()).activity.events.map((e) => e.message);
-  assert.ok(events.some((m) => /You answer them here in Kiki/.test(m)), "the event is visible, so S3A-X2's events assertion is effective");
+  assert.ok(events.some((m) => /Reply to the text, or answer here in Kiki/.test(m)), "the event is visible, so S3A-X2's events assertion is effective");
 });

@@ -794,7 +794,7 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
           />
           <span>
             <strong>Text me when Kiki finds something new</strong>
-            <span className="hint" style={{ display: "block" }}>Fo texts you, and you answer here in Kiki.</span>
+            <span className="hint" style={{ display: "block" }}>Fo texts you. Reply to the text, or answer here.</span>
           </span>
         </label>
       )}

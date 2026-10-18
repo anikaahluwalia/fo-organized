@@ -26,6 +26,7 @@ import {
 import { approvePlan, autoPropose, discardPlan, placeFile, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
 import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
 import { refreshPlan } from "./services/refresh.ts";
+import { watchTextReplies } from "./services/textreply.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
@@ -81,6 +82,8 @@ export function createApp(deps: AppDeps) {
   // Watches for your reply to Fo's text ("go ahead"), read-only, until it arrives or expires.
   jobs.register("text_reply", async (p) => checkTextReply(ctx, String(p.taskId)));
   // You asked Fo for changes to a proposal: Kiki makes the new version and sends it back to Fo.
+  // A text you send Fo while a proposal waits: Kiki has Fo read it and report your decision.
+  jobs.register("text_watch", async (p) => watchTextReplies(ctx, String(p.taskId)));
   jobs.register("adjust", async (p) => handleChangeRequest(ctx, String(p.taskId), { quiet: p.quiet === true }));
   jobs.register("watch", async (p) => watchJob(ctx, String(p.watchId), ctx.watchIntervalSeconds));
   jobs.register("outcome", async (p) => runOutcome(ctx, String(p.outcomeId)));

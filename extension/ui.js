@@ -247,7 +247,7 @@ function organizeView(h, m, ui, act) {
           "label",
           { class: "toggle" },
           h("input", { type: "checkbox", data: { key: "autotext" }, checked: m.autoText.on, disabled: Boolean(ui.busy), events: { change: (e) => act.setAutoText(e.currentTarget.checked) } }),
-          h("span", {}, h("strong", { text: "Text me when Kiki finds something new" }), h("small", { text: "Fo texts you, and you answer here in Kiki." })),
+          h("span", {}, h("strong", { text: "Text me when Kiki finds something new" }), h("small", { text: "Fo texts you. Reply to the text, or answer here." })),
         )
       : null,
   ];
