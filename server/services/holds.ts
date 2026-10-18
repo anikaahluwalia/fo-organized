@@ -1,6 +1,7 @@
 import { all, kvGet, kvSet, one, type Db, type DispatchRow, type DocumentRow, type FileRow, type OutcomeRow, type WatchRow } from "../db.ts";
 import type { Outcome } from "../domain/outcome.ts";
 import { findRevisionCandidates, type Candidate, type VersionDoc } from "../domain/reconcile.ts";
+import { copyMap } from "../domain/duplicates.ts";
 import { docFacts } from "./workspace.ts";
 
 /** Read quotes that are in the folder right now. */
@@ -35,7 +36,15 @@ export function revisionCandidates(db: Db, o: OutcomeRow, docs: VersionDoc[] = v
   const asked = docs.find((x) => x.docId === d.document_id);
   if (!asked) return [];
   const rejected = rejectedCandidates(db, o.id);
-  return findRevisionCandidates(asked, docs, d.created_at).filter((c) => !rejected.has(c.docId));
+  const files = new Map(all<FileRow>(db, "SELECT * FROM files WHERE workspace_id = ? AND present = 1", w.workspace_id).map((f) => [f.file_id, f]));
+  const copies = copyMap(
+    docs.flatMap((x) => {
+      const f = files.get(x.fileId);
+      return f ? [{ docId: x.docId, fileId: x.fileId, name: f.name, path: f.path, contentKey: f.version, createdTime: f.created_time }] : [];
+    }),
+  );
+  const sameAsAsked = (c: Candidate) => copies.get(c.docId) === asked.docId || copies.get(asked.docId) === c.docId || (copies.has(c.docId) && copies.get(c.docId) === copies.get(asked.docId));
+  return findRevisionCandidates(asked, docs, d.created_at).filter((c) => !rejected.has(c.docId) && !sameAsAsked(c) && !copies.has(c.docId));
 }
 
 function workspaceOf(db: Db, o: OutcomeRow): string {

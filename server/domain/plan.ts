@@ -3,6 +3,7 @@ import type { OpKind } from "../db.ts";
 import type { DocFacts } from "./documents.ts";
 import { deduplicateName, indexFileName, projectFolderPath, proposedName, SUPERSEDED_FOLDER, targetFolder } from "./naming.ts";
 import { issuerKey } from "./safety.ts";
+import { copyMap, DUPLICATES_FOLDER } from "./duplicates.ts";
 
 export interface PlanFile {
   fileId: string;
@@ -232,6 +233,15 @@ export function buildOrganizePlan(input: {
   }
 
   const docs = [...input.docs].sort((a, b) => a.fileId.localeCompare(b.fileId));
+  // Exact copies (same content): Kiki files one and sets the others aside next to it.
+  const copyOf = copyMap(
+    docs.flatMap((d) => {
+      const f = fileById.get(d.fileId);
+      return f && d.readStatus === "read" && !f.isFolder && !f.isShortcut ? [{ docId: d.docId, fileId: f.fileId, name: f.name, path: f.path, contentKey: f.version, createdTime: f.createdTime }] : [];
+    }),
+  );
+  const resolved = new Map<string, { targetPath: string; name: string }>();
+  const setAside: PlanDoc[] = [];
   for (const doc of docs) {
     const file = fileById.get(doc.fileId);
     if (!file || file.isFolder || indexIds.has(file.fileId)) continue;
@@ -246,6 +256,10 @@ export function buildOrganizePlan(input: {
     }
     if (doc.readStatus !== "read" || !doc.facts) {
       notes.push({ ...at, status: "needs_review", reason: doc.readError ?? "Kiki couldn't read this file, so she won't guess where it goes." });
+      continue;
+    }
+    if (copyOf.has(doc.docId)) {
+      setAside.push(doc);
       continue;
     }
     let facts = doc.facts;
@@ -273,6 +287,7 @@ export function buildOrganizePlan(input: {
     const suggested = proposedName(facts, file.name, file.mimeType);
     const name = suggested ?? file.name;
     if (file.path === targetPath && file.name === name) {
+      resolved.set(doc.docId, { targetPath, name });
       notes.push({ ...at, status: "already_organized", reason: "Already in the right folder with a clear name." });
       continue;
     }
@@ -291,7 +306,27 @@ export function buildOrganizePlan(input: {
     const why = supplierNote ? [`${label}.`, supplierNote] : [`${label}, ${facts.project.value!.toLowerCase()}.`];
     if (!suggested) why.push("Keeps its name (not enough details to rename).");
     if (facts.aiDirectedText.length) why.push("Contains instructions aimed at AI tools; ignored.");
+    resolved.set(doc.docId, { targetPath, name });
     moves.push({ file, doc, targetPath, name, reason: why.join(" ") });
+  }
+
+  for (const doc of setAside) {
+    const file = fileById.get(doc.fileId)!;
+    const keeperId = copyOf.get(doc.docId)!;
+    const keeperFile = fileById.get(docs.find((d) => d.docId === keeperId)!.fileId)!;
+    // Next to where the kept copy is (or is going), under the same clear name.
+    const keeper = resolved.get(keeperId) ?? { targetPath: keeperFile.path, name: keeperFile.name };
+    const targetPath = keeper.targetPath ? `${keeper.targetPath}/${DUPLICATES_FOLDER}` : DUPLICATES_FOLDER;
+    const at = { fileId: file.fileId, name: file.name, path: file.path };
+    if (file.path === targetPath && file.name === keeper.name) {
+      notes.push({ ...at, status: "already_organized", reason: `An exact copy of "${keeper.name}", already set aside.` });
+      continue;
+    }
+    if ((file.path !== targetPath && !file.canMove) || (file.name !== keeper.name && !file.canRename)) {
+      notes.push({ ...at, status: "needs_review", reason: `An exact copy of "${keeper.name}", but Drive says Kiki can't move or rename it.` });
+      continue;
+    }
+    moves.push({ file, doc, targetPath, name: keeper.name, reason: `An exact copy of "${keeper.name}" (same content). Kiki sets copies aside instead of deleting anything.` });
   }
 
   const taken = takenNames(input.files, new Set(moves.map((m) => m.file.fileId)));
@@ -302,8 +337,13 @@ export function buildOrganizePlan(input: {
 
   const moveSeqs: number[] = [];
   for (const m of moves) {
-    const parentRef = folders.ensure(m.targetPath);
     const name = claimName(taken, m.targetPath, m.name);
+    // Numbered because another file has the same name, and already exactly there: nothing to do.
+    if (name === m.file.name && m.targetPath === m.file.path) {
+      notes.push({ fileId: m.file.fileId, name: m.file.name, path: m.file.path, status: "already_organized", reason: "Already in the right folder; it's numbered because another file has the same name." });
+      continue;
+    }
+    const parentRef = folders.ensure(m.targetPath);
     ops.push({
       seq: ops.length + 1,
       kind: "move_rename",

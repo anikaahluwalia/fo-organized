@@ -2,6 +2,7 @@ import { all, type Db, type DocumentRow, type FileRow, type ProjectRow } from ".
 import type { DocFacts } from "../domain/documents.ts";
 import { join } from "../domain/plan.ts";
 import { money } from "../domain/reconcile.ts";
+import { copyMap } from "../domain/duplicates.ts";
 
 const STATUS_LABEL: Record<string, string> = {
   current: "Current (identified)",
@@ -32,7 +33,10 @@ export function projectIndexRows(db: Db, project: ProjectRow): IndexRow[] {
     project.id,
   );
   const files = new Map(all<FileRow>(db, "SELECT * FROM files WHERE workspace_id = ? AND present = 1", project.workspace_id).map((f) => [f.file_id, f]));
-  const out: IndexRow[] = rows.map((r) => ({ doc: r, file: files.get(r.file_id)!, facts: JSON.parse(r.facts_json!) as DocFacts, latestReceived: false }));
+  const copies = copyMap(rows.map((r) => ({ docId: r.id, fileId: r.file_id, name: files.get(r.file_id)!.name, path: files.get(r.file_id)!.path, contentKey: files.get(r.file_id)!.version, createdTime: files.get(r.file_id)!.created_time })));
+  const out: IndexRow[] = rows
+    .filter((r) => !copies.has(r.id))
+    .map((r) => ({ doc: r, file: files.get(r.file_id)!, facts: JSON.parse(r.facts_json!) as DocFacts, latestReceived: false }));
   const newest = new Map<string, IndexRow>();
   for (const row of out.filter((r) => r.facts.docType === "quote")) {
     const key = (row.facts.issuer.value ?? "").toLowerCase();

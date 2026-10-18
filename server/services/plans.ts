@@ -23,6 +23,7 @@ import { badRequest, conflict, notFound } from "../errors.ts";
 import type { Ctx } from "./context.ts";
 import { docFacts, requireWorkspace } from "./workspace.ts";
 import { heldFileIds } from "./holds.ts";
+import { inDuplicatesFolder } from "../domain/duplicates.ts";
 
 export function getPlan(db: Db, id: string): PlanRow {
   const plan = one<PlanRow>(db, "SELECT * FROM plans WHERE id = ?", id);
@@ -210,14 +211,21 @@ function saveOrganize(db: Db, ws: WorkspaceRow, draft: PlanDraft): { plan: PlanR
   const seriesId = `organize:${ws.id}`;
   const before = one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM plans WHERE series_id = ? AND status = 'applied'", seriesId)!.n;
   const folders = countBy(draft.ops, "create_folder");
-  const moves = countBy(draft.ops, "move_rename");
-  const summary = [folders ? `create ${folders} folder${folders === 1 ? "" : "s"}` : null, moves ? `move or rename ${moves} file${moves === 1 ? "" : "s"}` : null, countBy(draft.ops, "write_index") ? "update the project index" : null]
+  const copies = draft.ops.filter((o) => o.kind === "move_rename" && o.newPath !== null && inDuplicatesFolder(o.newPath)).length;
+  const moves = countBy(draft.ops, "move_rename") - copies;
+  const summary = [
+    folders ? `create ${folders} folder${folders === 1 ? "" : "s"}` : null,
+    moves ? `move or rename ${moves} file${moves === 1 ? "" : "s"}` : null,
+    copies ? `set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}` : null,
+    countBy(draft.ops, "write_index") ? "update the project index" : null,
+  ]
     .filter(Boolean)
     .join(", ");
   return savePlanVersion(db, ws, {
     kind: "organize",
     seriesId,
-    title: before > 0 ? (moves === 1 ? "File the new document" : "File the new documents") : "Organize the renovation paperwork",
+    title:
+      before === 0 ? "Organize the renovation paperwork" : moves === 0 ? `Set aside ${copies === 1 ? "a duplicate copy" : "duplicate copies"}` : moves === 1 ? "File the new document" : "File the new documents",
     summary: `Kiki would ${summary}.`,
     draft,
     details: { notes: draft.notes },

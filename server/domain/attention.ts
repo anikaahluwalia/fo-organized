@@ -1,13 +1,14 @@
 import type { DocFacts, DocType } from "./documents.ts";
 import { money } from "./reconcile.ts";
 import { issuerKey } from "./safety.ts";
+import { sameDocumentKey } from "./duplicates.ts";
 
 /**
  * Things in the folder that need a person's look: a document others refer to that isn't there,
  * dates running out, or quotes where it isn't clear which one counts. Every item comes from facts
  * Kiki read, with the line that supports it; nothing here changes anything.
  */
-export type AttentionKind = "missing" | "expired" | "which_current" | "expiring" | "undecided" | "unreadable";
+export type AttentionKind = "missing" | "expired" | "which_current" | "duplicate" | "expiring" | "undecided" | "unreadable";
 
 export interface AttentionDoc {
   docId: string;
@@ -62,16 +63,40 @@ const inDays = (n: number) => (n === 0 ? "That's today." : n === 1 ? "That's tom
 /** How far ahead a date is worth mentioning. */
 const WINDOW_DAYS: Partial<Record<DocType, number>> = { quote: 14, licence: 90, permit: 90, contract: 60 };
 
-const ORDER: AttentionKind[] = ["missing", "expired", "which_current", "expiring", "undecided", "unreadable"];
+const ORDER: AttentionKind[] = ["missing", "expired", "which_current", "duplicate", "expiring", "undecided", "unreadable"];
 
 export function findAttention(input: { today: string; docs: AttentionDoc[]; busyDocIds: Set<string> }): AttentionItem[] {
   const items: AttentionItem[] = [];
-  const read = input.docs.filter((d): d is AttentionDoc & { facts: DocFacts } => d.readStatus === "read" && d.facts !== null);
+  const all = input.docs.filter((d): d is AttentionDoc & { facts: DocFacts } => d.readStatus === "read" && d.facts !== null);
+
+  // Different files that read as the same document. Pointed out, never moved: one may be a signed copy.
+  const alike = new Map<string, (AttentionDoc & { facts: DocFacts })[]>();
+  for (const d of all) {
+    const k = sameDocumentKey(d.facts);
+    if (k) alike.set(k, [...(alike.get(k) ?? []), d]);
+  }
+  const shadowed = new Set<string>();
+  for (const group of alike.values()) {
+    if (group.length < 2) continue;
+    for (const d of group.slice(1)) shadowed.add(d.docId);
+    items.push({
+      key: `duplicate:${group.map((d) => d.docId).sort().join(",")}`,
+      kind: "duplicate",
+      project: group[0]!.project,
+      title: `${group.length} files look like the same ${label(group[0]!)}`,
+      detail: `${group.map((d) => `"${d.fileName}"`).join(" and ")} have the same reference, date and total, but their content differs. If one is a signed copy, keep both; otherwise you can remove the extra one in Drive.`,
+      evidence: null,
+      docIds: group.map((d) => d.docId),
+      askDocId: null,
+    });
+  }
+  // Everything below looks at each document once.
+  const read = all.filter((d) => !shadowed.has(d.docId));
   const quotes = read.filter((d) => d.facts.docType === "quote" && d.versionStatus !== "superseded");
 
   // A document others name that isn't in the folder (one item per missing reference).
-  const present = new Set(read.map((d) => norm(d.facts.reference.value)).filter(Boolean));
-  const replaced = new Set(read.map((d) => norm(d.facts.revision.revisesReference)).filter(Boolean));
+  const present = new Set(all.map((d) => norm(d.facts.reference.value)).filter(Boolean));
+  const replaced = new Set(all.map((d) => norm(d.facts.revision.revisesReference)).filter(Boolean));
   const missing = new Map<string, { docType: DocType; reference: string; quote: string | null; by: (AttentionDoc & { facts: DocFacts })[] }>();
   for (const d of read) {
     for (const r of d.facts.refersTo ?? []) {

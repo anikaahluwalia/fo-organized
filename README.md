@@ -37,6 +37,18 @@ Connect Google Drive and Fo from the top of the page, then set up the renovation
 
 Fo signs in with your Wajo account from the app (OAuth with dynamic client registration and PKCE). Google and Fo tokens stay in `.data/` on this machine.
 
+## Demo script (about 5 minutes)
+
+Uses a dedicated test folder, never real business documents. Everything below also runs with `npm run start:mock`, labelled Mock.
+
+1. **Messy folder.** Connect Google Drive and Fo, then press "Set up the renovation folder". Kiki adds five badly named PDFs (`scan_0012.pdf`, `invoice final FINAL.pdf`, …) to a new "Renovation paperwork" folder and reads them.
+2. **Plan and approve.** Kiki proposes `Renovations/Flooring/Quotes` and `/Invoices`, readable names, and a reason for each move. Approve it: she creates the folders, moves and renames the files, checks each change in Drive (9 of 9 verified) and writes the Flooring index. Open the folder in Drive to show the result.
+3. **Needs a look.** Kiki points out that Oakline's quote is valid for 11 more days, the business licence expires at year end, and two contractors quoted flooring with no price accepted.
+4. **A new invoice arrives.** Turn on "Text me when Kiki finds something new", then drag `demo-files/Northside invoice Oct 17.pdf` into the Drive folder. Kiki notices it, recognizes the supplier, proposes where it goes, and Fo texts you. Reply "go ahead" (or approve in the app) and she files it.
+5. **Is this the final quote?** In the index, press "Ask Oakline Flooring Co. if it's final", confirm they agreed to hear from your assistant, and approve the exact email. Fo sends it; Kiki follows that Fo conversation.
+6. **The answer.** When the contractor replies "No, use the revised quote I emailed today", Kiki looks for it in the folder, then in Gmail if you've allowed it (read-only), and proposes filing the revision as current with the old quote in `Quotes/Superseded`, showing the price and scope changes (−$470, 5-inch planks, carpet removal added). Approve, then open Drive.
+7. **Recovery.** If two files could be the revision, Kiki asks which one and never guesses. Replaying any step makes no duplicates, and Undo reverses a plan after its own approval.
+
 ## How it stays trustworthy
 
 - **Read-only first.** Inventory and reading never change anything. Only an approved plan does.

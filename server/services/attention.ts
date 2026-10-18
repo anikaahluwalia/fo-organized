@@ -1,5 +1,6 @@
 import { all, kvGet, kvSet, logEvent, type DocumentRow, type ProjectRow } from "../db.ts";
 import { findAttention, type AttentionItem } from "../domain/attention.ts";
+import { copyMap } from "../domain/duplicates.ts";
 import { badRequest } from "../errors.ts";
 import type { Ctx } from "./context.ts";
 import { waitingForRevision } from "./holds.ts";
@@ -33,12 +34,16 @@ function busyDocs(ctx: Ctx, wsId: string): Set<string> {
 
 export function attentionItems(ctx: Ctx, wsId: string, today = localToday()): AttentionItem[] {
   const projects = new Map(all<ProjectRow>(ctx.db, "SELECT * FROM projects WHERE workspace_id = ?", wsId).map((p) => [p.id, p.name]));
-  const docs = all<DocumentRow & { f_name: string }>(
+  const rows = all<DocumentRow & { f_name: string; f_path: string; f_version: string | null; f_created: string | null }>(
     ctx.db,
-    `SELECT d.*, f.name AS f_name FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
+    `SELECT d.*, f.name AS f_name, f.path AS f_path, f.version AS f_version, f.created_time AS f_created FROM documents d
+       JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
      WHERE d.workspace_id = ? AND f.present = 1`,
     wsId,
-  ).map((d) => ({
+  );
+  // An exact copy is the same document: it counts once (the organize plan sets copies aside).
+  const copies = copyMap(rows.filter((d) => d.read_status === "read").map((d) => ({ docId: d.id, fileId: d.file_id, name: d.f_name, path: d.f_path, contentKey: d.f_version, createdTime: d.f_created })));
+  const docs = rows.filter((d) => !copies.has(d.id)).map((d) => ({
     docId: d.id,
     fileName: d.f_name,
     project: d.project_id ? (projects.get(d.project_id) ?? null) : null,

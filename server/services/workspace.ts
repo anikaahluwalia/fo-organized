@@ -297,7 +297,8 @@ export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
   const worker = async () => {
     for (let doc = queue.shift(); doc; doc = queue.shift()) {
       if (doc.read_status === "read") {
-        upgraded += (await upgradeFacts(ctx, doc)) ? 1 : 0;
+        // Not `upgraded += await ...`: that reads the count before awaiting and loses the other workers' updates.
+        if (await upgradeFacts(ctx, doc)) upgraded++;
         continue;
       }
       run(ctx.db, "UPDATE documents SET read_status = 'reading', updated_at = ? WHERE id = ?", now(), doc.id);

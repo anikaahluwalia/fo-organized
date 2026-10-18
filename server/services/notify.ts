@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { inDuplicatesFolder } from "../domain/duplicates.ts";
 import { all, kvGet, kvSet, logEvent, one, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
 import type { DocFacts } from "../domain/documents.ts";
 import { money } from "../domain/reconcile.ts";
@@ -278,21 +279,31 @@ function describeDoc(f: DocFacts | null): string {
 }
 
 /** What Fo texts: what Kiki found, where she'd put it, and how to say yes. */
+/** Moves that file a document, as opposed to setting an exact copy aside. */
+function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; copies: number } {
+  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' ORDER BY seq", planId);
+  const filing = moves.filter((o) => !(o.new_path && inDuplicatesFolder(o.new_path)));
+  return { filing, copies: moves.length - filing.length };
+}
+
 export function newFindText(ctx: Ctx, plan: PlanRow): string {
   const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
-  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' ORDER BY seq", plan.id);
-  if (moves.length === 1) {
-    const op = moves[0]!;
+  const { filing, copies } = filingMoves(ctx, plan.id);
+  const also = copies ? ` (Kiki would also set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}; nothing is deleted.)` : "";
+  if (filing.length === 1) {
+    const op = filing[0]!;
     const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
     const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
-    return `Kiki: ${describeDoc(facts)} just landed in "${ws.name}". Want me to file it in ${op.new_path}? Reply "go ahead" and I'll do it.`;
+    return `Kiki: ${describeDoc(facts)} just landed in "${ws.name}". Want me to file it in ${op.new_path}?${also} Reply "go ahead" and I'll do it.`;
   }
-  return `Kiki: ${moves.length} new documents in "${ws.name}" are ready to file. Reply "go ahead" and I'll file them.`;
+  return `Kiki: ${filing.length} new documents in "${ws.name}" are ready to file.${also} Reply "go ahead" and I'll file them.`;
 }
 
 /** Standing permission, texts to the account holder only: one text per new proposal. */
 export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   if (!autoTextEnabled(ctx)) return;
+  // Setting copies aside is housekeeping, not news: it waits in the app, no text.
+  if (filingMoves(ctx, plan.id).filing.length === 0) return;
   // One text per distinct proposal, even if it gets re-saved as a new version.
   if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
   kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);

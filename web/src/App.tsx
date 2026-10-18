@@ -342,6 +342,7 @@ const ATTENTION_CHIP: Record<AttentionItemView["kind"], { label: string; tone: s
   missing: { label: "Missing", tone: "chip--missing" },
   expired: { label: "Expired", tone: "chip--missing" },
   which_current: { label: "Unclear", tone: "chip--needs_review" },
+  duplicate: { label: "Copy?", tone: "chip--needs_review" },
   expiring: { label: "Soon", tone: "chip--needs_review" },
   undecided: { label: "Your call", tone: "chip--not_searched" },
   unreadable: { label: "Couldn't read", tone: "chip--needs_review" },

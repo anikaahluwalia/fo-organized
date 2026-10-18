@@ -285,7 +285,7 @@ export interface NotificationView {
 
 export interface AttentionItemView {
   key: string;
-  kind: "missing" | "expired" | "which_current" | "expiring" | "undecided" | "unreadable";
+  kind: "missing" | "expired" | "which_current" | "duplicate" | "expiring" | "undecided" | "unreadable";
   project: string | null;
   title: string;
   detail: string | null;
