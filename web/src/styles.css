@@ -777,3 +777,40 @@ details[open] > summary {
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+/* Long file names and paths wrap instead of pushing the page wider than the screen. */
+.card,
+.item,
+.notice,
+.signal,
+.turn,
+.layout > *,
+.companion > *,
+.item-head > *,
+.card-head > *,
+.brand > div {
+  min-width: 0;
+}
+.item-label,
+.item p,
+.card h2,
+.notice p,
+.notice strong,
+.facts dd,
+.kiki-status,
+.kiki-detail,
+.brand p,
+.hint {
+  overflow-wrap: anywhere;
+}
+.header-tools {
+  min-width: 0;
+}
+@media (max-width: 600px) {
+  .card {
+    padding: 16px;
+  }
+  .row {
+    gap: 6px;
+  }
+}
