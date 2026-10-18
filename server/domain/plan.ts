@@ -3,7 +3,7 @@ import type { OpKind } from "../db.ts";
 import type { DocFacts } from "./documents.ts";
 import { deduplicateName, indexFileName, projectFolderPath, proposedName, SUPERSEDED_FOLDER, targetFolder } from "./naming.ts";
 import { copyMap, DUPLICATES_FOLDER } from "./duplicates.ts";
-import { assignCollections, isFiledPath, KIKI_ROOTS, type Destination } from "./collections.ts";
+import { assignCollections, choosePlace, isFiledPath, KIKI_ROOTS, type Destination } from "./collections.ts";
 
 export interface PlanFile {
   fileId: string;
@@ -160,6 +160,7 @@ class Folders {
 
 /** Why a document goes where it goes, citing what that rests on; null when its label already says it. */
 function placementReason(dest: Destination): string | null {
+  if (dest.how === "choice") return dest.kind === "user" ? `Into your "${dest.path}" folder, as you asked.` : `${dest.name}, as you asked.`;
   if (dest.how === "supplier") return dest.because;
   if (dest.kind === "user") return `Into your "${dest.path}" folder: it says "${dest.because}".`;
   if (dest.how === "title") return `Goes with ${dest.name}: its title is "${dest.because}".`;
@@ -226,6 +227,8 @@ export function buildOrganizePlan(input: {
   indexFiles: Record<string, { fileId: string; version: string | null } | null>;
   /** Files whose filing the user undid (and that haven't changed since): left where they are. */
   undone?: Set<string>;
+  /** Where the user said a file goes ("Kitchen", "Taxes"), by file id: it overrides Kiki's choice. */
+  places?: Map<string, string>;
 }): PlanDraft {
   const ops: PlannedOp[] = [];
   const notes: PlanNote[] = [];
@@ -277,7 +280,8 @@ export function buildOrganizePlan(input: {
       notes.push({ ...at, status: "needs_review", reason: doc.readError ?? "Kiki couldn't read this file, so she won't guess where it goes." });
       continue;
     }
-    if (input.undone?.has(file.fileId)) {
+    const chosen = input.places?.get(file.fileId);
+    if (!chosen && input.undone?.has(file.fileId)) {
       notes.push({ ...at, status: "left_in_place", reason: "You undid moving this, so Kiki leaves it here unless it changes." });
       continue;
     }
@@ -285,16 +289,20 @@ export function buildOrganizePlan(input: {
       setAside.push(doc);
       continue;
     }
-    if (isFiledPath(file.path)) {
+    if (!chosen && isFiledPath(file.path)) {
       // Still counts for keeping its collection's index in Drive.
       const collection = placeOf(file.path);
       if (collection && !collection.startsWith("user:")) projects.add(collection);
       notes.push({ ...at, status: "already_organized", reason: `Filed in ${file.path}. Kiki leaves filed documents where they are.` });
       continue;
     }
-    const dest = destinations.get(doc.docId);
+    const dest = chosen ? choosePlace(chosen, input.files) : destinations.get(doc.docId);
     const facts = dest?.kind === "kiki" ? { ...doc.facts, project: { value: dest.name, quote: null, quoteFound: null } } : doc.facts;
     const folder = !dest || facts.docType === "unknown" ? null : dest.kind === "user" ? dest.path : targetFolder(facts, input.files);
+    if (chosen && !folder) {
+      notes.push({ ...at, status: "left_in_place", reason: `You asked for "${chosen}", but Kiki couldn't tell which folder that is. Say its full path, like "School/CS 245".` });
+      continue;
+    }
     if (!folder || !dest) {
       notes.push({
         ...at,

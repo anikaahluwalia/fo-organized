@@ -89,6 +89,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   route("POST", "/api/plans/:id/discard", ([id]) => app.discardPlan(id!));
   route("POST", "/api/plans/:id/resume", ([id]) => app.resumePlan(id!));
   route("POST", "/api/plans/:id/undo", ([id]) => app.proposeUndo(id!));
+  route("POST", "/api/plans/:id/ask-fo", ([id]) => app.askThroughFo(id!));
   route("POST", "/api/documents/:id/accept", ([id], b) => app.acceptQuote(id!, b.accepted === true));
   route("POST", "/api/documents/:id/outreach", ([id], b) =>
     app.createOutreachDraft(id!, { contractorName: str(b, "contractorName"), contractorEmail: str(b, "contractorEmail"), consent: b.consent === true }),

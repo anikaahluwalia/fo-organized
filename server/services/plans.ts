@@ -176,7 +176,7 @@ function pendingReads(db: Db, wsId: string): number {
   )!.n;
 }
 
-function organizeDraft(db: Db, ws: WorkspaceRow): PlanDraft {
+function organizeDraft(db: Db, ws: WorkspaceRow, places: Map<string, string> = new Map()): PlanDraft {
   // So are quotes that could be the revision Kiki is following up on.
   const held = heldFileIds(db, ws.id);
   // Files a pending quote update will move are that plan's business, not this one's.
@@ -202,7 +202,22 @@ function organizeDraft(db: Db, ws: WorkspaceRow): PlanDraft {
   const docs = all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id)
     .filter((d) => !reserved.has(d.file_id) && !held.has(d.file_id))
     .map(planDoc);
-  return buildOrganizePlan({ rootId: ws.root_file_id, files, docs, indexFiles: indexFiles(db, ws.id), undone });
+  return buildOrganizePlan({ rootId: ws.root_file_id, files, docs, indexFiles: indexFiles(db, ws.id), undone, places });
+}
+
+/** What an organizing plan would do, counting only the steps that will run. */
+function organizeSummary(ops: PlannedOp[], excluded: Set<number>): { moves: number; copies: number; summary: string } {
+  const live = ops.filter((o) => !excluded.has(o.seq));
+  const folders = countBy(live, "create_folder");
+  const copies = live.filter((o) => o.kind === "move_rename" && o.newPath !== null && inDuplicatesFolder(o.newPath)).length;
+  const moves = countBy(live, "move_rename") - copies;
+  const parts = [
+    folders ? `create ${folders} folder${folders === 1 ? "" : "s"}` : null,
+    moves ? `move or rename ${moves} file${moves === 1 ? "" : "s"}` : null,
+    copies ? `set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}` : null,
+    countBy(live, "write_index") ? "update the project index" : null,
+  ].filter(Boolean);
+  return { moves, copies, summary: parts.length ? `Kiki would ${parts.join(", ")}.` : "Kiki would change nothing." };
 }
 
 /** What an organizing plan does, for any kind of workspace. */
@@ -214,7 +229,26 @@ function organizeTitle(workspace: string, first: boolean, moves: number, copies:
 }
 
 /** Edits the user made to a proposal, by file, so a fresh version of it keeps them. */
-type Edits = Record<string, { newName?: string; exclude?: boolean }>;
+export type Edits = Record<string, { newName?: string; exclude?: boolean; keepName?: boolean; place?: string }>;
+
+/** A name the user typed keeps the file's extension when they leave it off. */
+function withExtension(typed: string, current: string | null): string {
+  const ext = /\.[A-Za-z0-9]{2,5}$/.exec(current ?? "")?.[0];
+  return ext && !typed.toLowerCase().endsWith(ext.toLowerCase()) ? `${typed}${ext}` : typed;
+}
+
+/** A folder or index that only served skipped moves is skipped too: nothing would go there. */
+function settleExclusions(ops: PlannedOp[], excluded: Set<number>): void {
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const o of ops) {
+      if (excluded.has(o.seq) || (o.kind !== "create_folder" && o.kind !== "write_index")) continue;
+      const users = o.kind === "create_folder" ? ops.filter((d) => d.dependsOn.includes(o.seq)) : ops.filter((d) => o.dependsOn.includes(d.seq) && d.kind === "move_rename");
+      if (users.length > 0 && users.every((d) => excluded.has(d.seq))) (excluded.add(o.seq), (grew = true));
+    }
+  }
+}
 
 /** Re-checks an open organizing proposal against the current state: withdraw it if nothing is left to do. */
 export function refreshOrganizeProposal(ctx: Ctx): void {
@@ -231,48 +265,64 @@ export function refreshOrganizeProposal(ctx: Ctx): void {
   saveOrganize(ctx.db, ws, draft);
 }
 
-function saveOrganize(db: Db, ws: WorkspaceRow, draft: PlanDraft): { plan: PlanRow; created: boolean } {
+/**
+ * Saves Kiki's draft as the organizing proposal, with the user's edits on it: the ones already on
+ * the open proposal, plus any just asked for. Kiki's draft is the one without edits; when it hasn't
+ * changed since the user's edits and nothing new is asked, their version stays as it is.
+ */
+function saveOrganize(db: Db, ws: WorkspaceRow, kikiDraft: PlanDraft, requested?: Edits): { plan: PlanRow; created: boolean } {
   const seriesId = `organize:${ws.id}`;
   // You edited the proposal and nothing in the folder changed since: keep your version.
   const open = one<PlanRow>(db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", seriesId);
   const openDetails = open?.details_json ? (JSON.parse(open.details_json) as { revisedFrom?: string; edits?: Edits } | null) : null;
-  const kikiHash = hashWithExclusions(draft.ops, new Set());
-  if (open && openDetails?.revisedFrom === kikiHash) return { plan: open, created: false };
-  // Something changed: Kiki's new draft, with your edits carried over to the files they were about.
-  const edits = openDetails?.edits ?? {};
+  const kikiHash = hashWithExclusions(kikiDraft.ops, new Set());
+  if (!requested && open && openDetails?.revisedFrom === kikiHash) return { plan: open, created: false };
+  // Kiki's draft, with your edits carried over to the files they were about.
+  const edits: Edits = { ...(openDetails?.edits ?? {}) };
+  for (const [fileId, e] of Object.entries(requested ?? {})) edits[fileId] = { ...edits[fileId], ...e };
+  const places = new Map(Object.entries(edits).flatMap(([fileId, e]) => (e.place ? [[fileId, e.place] as [string, string]] : [])));
+  const draft = places.size ? organizeDraft(db, ws, places) : kikiDraft;
   const excluded = new Set<number>();
   for (const op of draft.ops) {
     const e = op.kind === "move_rename" && op.fileId ? edits[op.fileId] : undefined;
     if (!e) continue;
+    if (e.keepName && op.pre && !e.newName) {
+      op.newName = op.pre.name;
+      op.reason = `${op.reason} You chose to keep its name.`;
+    }
     if (e.newName) {
-      op.newName = e.newName;
+      op.newName = withExtension(e.newName, op.newName);
       op.reason = `${op.reason} You chose this name.`;
     }
     if (e.exclude) excluded.add(op.seq);
   }
+  settleExclusions(draft.ops, excluded);
   const edited = Object.keys(edits).some((fileId) => draft.ops.some((o) => o.fileId === fileId));
   const before = one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM plans WHERE series_id = ? AND status = 'applied'", seriesId)!.n;
-  const folders = countBy(draft.ops, "create_folder");
-  const copies = draft.ops.filter((o) => o.kind === "move_rename" && o.newPath !== null && inDuplicatesFolder(o.newPath)).length;
-  const moves = countBy(draft.ops, "move_rename") - copies;
-  const summary = [
-    folders ? `create ${folders} folder${folders === 1 ? "" : "s"}` : null,
-    moves ? `move or rename ${moves} file${moves === 1 ? "" : "s"}` : null,
-    copies ? `set aside ${copies} exact cop${copies === 1 ? "y" : "ies"}` : null,
-    countBy(draft.ops, "write_index") ? "update the project index" : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const { moves, copies, summary } = organizeSummary(draft.ops, excluded);
   return savePlanVersion(db, ws, {
     kind: "organize",
     seriesId,
     title: organizeTitle(ws.name, before === 0, moves, copies),
-    summary: `Kiki would ${summary}.`,
+    summary,
     draft,
     details: { notes: draft.notes, ...(edited ? { edits, revisedFrom: kikiHash } : {}) },
     source: null,
     excluded,
   });
+}
+
+/**
+ * Changes the open organizing proposal the way the user asked (through Fo, in their own words):
+ * the result is a new version that needs its own decision. Returns it, and whether anything changed.
+ */
+export function adjustOrganize(ctx: Ctx, planId: string, changes: Edits): { planId: string; changed: boolean } {
+  const plan = getPlan(ctx.db, planId);
+  if (plan.kind !== "organize" || plan.status !== "proposed") throw conflict("Only an open organizing proposal can be changed this way.", "stale_plan");
+  const ws = requireWorkspace(ctx.db);
+  if (plan.workspace_id !== ws.id) throw conflict("That proposal belongs to a folder Kiki isn't working on now.", "stale_plan");
+  const { plan: next, created } = saveOrganize(ctx.db, ws, organizeDraft(ctx.db, ws), changes);
+  return { planId: next.id, changed: created };
 }
 
 /** Proposes the organizing changes the latest inventory calls for. Read-only until approved. */
@@ -372,7 +422,7 @@ export function revisePlan(ctx: Ctx, planId: string, edits: { seq: number; newNa
     kind: plan.kind,
     seriesId: plan.series_id,
     title: plan.title,
-    summary: plan.summary,
+    summary: plan.kind === "organize" ? organizeSummary(ops, excluded).summary : plan.summary,
     draft: { ops, notes: details?.notes ?? [] },
     details,
     source: plan.source_json ? JSON.parse(plan.source_json) : null,

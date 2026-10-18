@@ -24,6 +24,7 @@ import {
   stopDispatch,
 } from "./services/outreach.ts";
 import { approvePlan, autoPropose, discardPlan, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
+import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
@@ -78,6 +79,8 @@ export function createApp(deps: AppDeps) {
   });
   // Watches for your reply to Fo's text ("go ahead"), read-only, until it arrives or expires.
   jobs.register("text_reply", async (p) => checkTextReply(ctx, String(p.taskId)));
+  // You asked Fo for changes to a proposal: Kiki makes the new version and sends it back to Fo.
+  jobs.register("adjust", async (p) => handleChangeRequest(ctx, String(p.taskId)));
   jobs.register("watch", async (p) => watchJob(ctx, String(p.watchId), ctx.watchIntervalSeconds));
   jobs.register("outcome", async (p) => runOutcome(ctx, String(p.outcomeId)));
 
@@ -150,6 +153,7 @@ export function createApp(deps: AppDeps) {
     discardPlan: (planId: string) => discardPlan(ctx, planId),
     resumePlan: (planId: string) => resumePlan(ctx, planId),
     proposeUndo: (planId: string) => ({ planId: proposeUndo(ctx, planId) }),
+    askThroughFo: (planId: string) => askThroughFo(ctx, planId),
     acceptQuote,
     notifyPreview: () => notifyPreview(ctx),
     notifySend: (input: { contentHash?: string; clientRequestId?: string }) => notifySend(ctx, input),

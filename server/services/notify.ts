@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { oneLine } from "../domain/adjust.ts";
 import { approvalInstructions, parseApprovalReport, type ApprovalBinding } from "../domain/approval.ts";
 import { inDuplicatesFolder } from "../domain/duplicates.ts";
 import { all, kvGet, kvSet, logEvent, one, tx, type DocumentRow, type PlanOpRow, type PlanRow, type WorkspaceRow } from "../db.ts";
@@ -9,6 +10,7 @@ import { AppError, badRequest, conflict } from "../errors.ts";
 import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { approvePlan } from "./plans.ts";
+import { proposalLines } from "./proposal.ts";
 import { requireWorkspace } from "./workspace.ts";
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -84,13 +86,13 @@ export function notifyText(ctx: Ctx, taskId: string): string | null {
   return kvGet(ctx.db, `notify.text.${taskId}`) ?? null;
 }
 
-export function notifyPurpose(ctx: Ctx, taskId: string): "find" | "done" | "summary" {
-  return (kvGet(ctx.db, `notify.purpose.${taskId}`) as "find" | "done" | "summary" | undefined) ?? "summary";
+export function notifyPurpose(ctx: Ctx, taskId: string): "find" | "done" | "summary" | "decide" {
+  return (kvGet(ctx.db, `notify.purpose.${taskId}`) as "find" | "done" | "summary" | "decide" | undefined) ?? "summary";
 }
 
 // Approving by replying to Fo's text ---------------------------------------------------------
 
-export type ReplyStatus = "waiting" | "approved" | "declined" | "expired" | "stale" | "failed";
+export type ReplyStatus = "waiting" | "approved" | "declined" | "expired" | "stale" | "failed" | "adjusting" | "revised" | "not_changed";
 export interface ReplyState {
   status: ReplyStatus;
   text: string | null;
@@ -102,9 +104,18 @@ export interface ReplyState {
   requestId?: string;
   requestedAt?: string;
   clarification?: string;
+  /** After you asked for changes: the version Kiki made from them, or why she couldn't. */
+  revision?: { planId: string | null; version: number | null; note: string | null };
 }
 
 const REPLY_WINDOW_MS = 30 * 60_000;
+/** A proposal Fo brings you in Kiki waits for your answer there, as long as the proposal itself is unchanged. */
+const DECIDE_WINDOW_MS = 7 * 24 * 3600_000;
+
+/** How long an answer to this request counts: a text reply soon after, an answer in Kiki for days. */
+export function replyWindowMs(ctx: Ctx, taskId: string): number {
+  return notifyPurpose(ctx, taskId) === "decide" ? DECIDE_WINDOW_MS : REPLY_WINDOW_MS;
+}
 export function replyState(ctx: Ctx, taskId: string): ReplyState | null {
   const raw = kvGet(ctx.db, `notify.reply.${taskId}`);
   return raw ? (JSON.parse(raw) as ReplyState) : null;
@@ -118,7 +129,7 @@ export function notifyPlanId(ctx: Ctx, taskId: string): string | null {
   return row ? row.key.replace(/^notify\.(done|plan)\./, "") : null;
 }
 
-function saveReply(ctx: Ctx, taskId: string, state: ReplyState): void {
+export function saveReply(ctx: Ctx, taskId: string, state: ReplyState): void {
   kvSet(ctx.db, `notify.reply.${taskId}`, JSON.stringify(state));
 }
 
@@ -137,7 +148,8 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     return;
   }
   const sentAtMs = Date.parse(state.requestedAt ?? task.created_at);
-  if (!state.requestId || !Number.isFinite(sentAtMs) || Date.now() - sentAtMs > REPLY_WINDOW_MS) {
+  const decide = notifyPurpose(ctx, taskId) === "decide";
+  if (!state.requestId || !Number.isFinite(sentAtMs) || Date.now() - sentAtMs > replyWindowMs(ctx, taskId)) {
     saveReply(ctx, taskId, { ...state, status: "expired" });
     return;
   }
@@ -162,7 +174,14 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     if (!report) continue;
     if (report.decision === "clarification") {
       saveReply(ctx, taskId, { ...state, clarification: report.userReply });
-      return { rescheduleSeconds: 6 };
+      return decide ? undefined : { rescheduleSeconds: 6 };
+    }
+    if (report.decision === "changes_requested") {
+      // Never an approval: Kiki makes a new version from your words, and it goes back to Fo.
+      saveReply(ctx, taskId, { ...state, status: "adjusting", text: report.userReply, source: "relayed_by_fo", at: new Date().toISOString() });
+      ctx.jobs.enqueue("adjust", `adjust:${taskId}`, { taskId });
+      logEvent(ctx.db, plan.workspace_id, "fo_reply", `You asked for changes through Fo: "${report.userReply}". Kiki is preparing a new version.`);
+      return;
     }
     const reply = { verdict: report.decision, text: report.userReply, source: "relayed_by_fo" as const };
     const at = new Date().toISOString();
@@ -185,6 +204,8 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     logEvent(ctx.db, plan.workspace_id, "approved", `You replied "${reply.text}" to Fo's text. Kiki is filing it now.`);
     return;
   }
+  // Fo is waiting for your answer in Kiki: it comes back through Kiki, so there's nothing to poll.
+  if (decide && task.state === "needs_user_input") return;
   return { rescheduleSeconds: 6 };
 }
 
@@ -284,23 +305,14 @@ function findSummary(ctx: Ctx, plan: PlanRow): string {
     const op = fresh[0]!;
     const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : undefined;
     const facts = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
-    return `Kiki: ${describeDoc(facts)} just landed in "${ws.name}". Want me to file it in ${op.new_path}?${also} Reply "go ahead" and I'll do it.`;
+    return `Kiki: ${oneLine(describeDoc(facts))} just landed in "${oneLine(ws.name)}". Want me to file it in ${oneLine(op.new_path)}?${also} Reply "go ahead" and I'll do it.`;
   }
-  return `Kiki: ${fresh.length} new documents in "${ws.name}" are ready to file.${also} Reply "go ahead" and I'll file them.`;
+  return `Kiki: ${fresh.length} new documents in "${oneLine(ws.name)}" are ready to file.${also} Reply "go ahead" and I'll file them.`;
 }
 
 /** Complete scope is supplied to Fo and the account holder, including renames and version changes. */
 export function newFindText(ctx: Ctx, plan: PlanRow): string {
-  const ops = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state <> 'excluded' ORDER BY seq", plan.id);
-  const changes = ops.map((op) => {
-    if (op.kind === "move_rename") return `Move "${op.pre_name}" from "${op.pre_path || "workspace folder"}" to "${op.new_path}/${op.new_name}".`;
-    if (op.kind === "create_folder") return `Create folder "${op.folder_path}".`;
-    if (op.kind === "write_index") return `Update index "${op.folder_path}/${op.new_name}".`;
-    const doc = op.doc_id ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", op.doc_id) : null;
-    const file = doc ? one<{ name: string }>(ctx.db, "SELECT name FROM files WHERE workspace_id = ? AND file_id = ?", plan.workspace_id, doc.file_id) : null;
-    return `Mark "${file?.name ?? "document"}" as ${op.target_status}. ${op.reason}`;
-  });
-  return `${findSummary(ctx, plan)}\n\nProposed changes (version ${plan.version}):\n${changes.map((c) => "- " + c).join("\n")}\nNothing is deleted. You can answer Fo naturally, ask a question, or decline.`;
+  return `${findSummary(ctx, plan)}\n\nProposed changes (version ${plan.version}):\n${proposalLines(ctx, plan)}\nNothing is deleted. You can answer Fo naturally, ask a question, ask for changes, or decline.`;
 }
 
 /** Standing permission, texts to the account holder only: one text per new proposal. */

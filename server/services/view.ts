@@ -392,7 +392,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
     planId: notifyPlanId(ctx, t.id),
     reply: (() => {
       const r = replyState(ctx, t.id);
-      return r ? { status: r.status, text: r.text, source: r.source } : null;
+      return r ? { status: r.status, text: r.text, source: r.source, ...(r.clarification ? { clarification: r.clarification } : {}), ...(r.revision ? { revision: r.revision } : {}) } : null;
     })(),
     mode: t.mode,
     state: t.state,

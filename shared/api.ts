@@ -273,10 +273,19 @@ export interface EventView {
 
 export interface NotificationView {
   taskId: string;
-  purpose: "find" | "done" | "summary";
+  /** "decide": Fo is bringing you a proposal to decide on, here in Kiki. */
+  purpose: "find" | "done" | "summary" | "decide";
   /** The plan the text was about. */
   planId: string | null;
-  reply: { status: "waiting" | "approved" | "declined" | "expired" | "stale" | "failed"; text: string | null; source: "text_reply" | "relayed_by_fo" | null } | null;
+  reply: {
+    status: "waiting" | "approved" | "declined" | "expired" | "stale" | "failed" | "adjusting" | "revised" | "not_changed";
+    text: string | null;
+    source: "text_reply" | "relayed_by_fo" | null;
+    /** Fo couldn't settle your answer and asked Kiki about it. */
+    clarification?: string;
+    /** After you asked for changes: the version Kiki made, or why she couldn't. */
+    revision?: { planId: string | null; version: number | null; note: string | null };
+  } | null;
   mode: Mode;
   state: FoTaskView["state"];
   outcome: "reported_sent" | "not_sent" | "unclear" | null;

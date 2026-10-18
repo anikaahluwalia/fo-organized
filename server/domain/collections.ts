@@ -56,8 +56,8 @@ export interface CollectionDoc {
 export interface Destination {
   /** "user": a folder the user keeps, filed into directly. "kiki": Projects/<name>/<type>. */
   kind: "user" | "kiki";
-  /** Why: the folder's name is in the document, its stated project, its title, or its supplier. */
-  how: "folder" | "project" | "title" | "supplier";
+  /** Why: the folder's name is in the document, its stated project, its title, its supplier, or the user chose it. */
+  how: "folder" | "project" | "title" | "supplier" | "choice";
   name: string;
   /** The user's folder path; for Kiki's collections the path follows from the name. */
   path: string | null;
@@ -103,6 +103,25 @@ export function userFolders(files: Folder[]): { path: string; name: string; word
 /** Collections Kiki already made: the folders directly inside Projects (or the earlier Renovations). */
 export function kikiCollections(files: Folder[]): string[] {
   return files.filter((f) => f.isFolder && !f.isShortcut && KIKI_ROOTS.includes(f.path)).map((f) => f.name);
+}
+
+/**
+ * Where the user said a file goes ("Kitchen", "Taxes", "School/CS 245"): a folder they keep, by its
+ * path or its name; a collection Kiki keeps, however it's spelled; or a new collection by that
+ * name. Null when it climbs out of a folder, or more than one of their folders could be meant.
+ */
+export function choosePlace(place: string, files: Folder[]): Destination | null {
+  const wanted = place.trim().replace(/^\/+|\/+$/g, "");
+  if (!wanted || wanted.split("/").some((s) => /^\s*\.+\s*$/.test(s))) return null;
+  const full = (f: Folder) => (f.path ? `${f.path}/${f.name}` : f.name);
+  const theirs = files.filter((f) => f.isFolder && !f.isShortcut && !KIKI_ROOTS.includes(full(f).split("/")[0]!) && !KIKI_INTERNAL.has(f.name));
+  const lower = wanted.toLowerCase();
+  const byPath = theirs.filter((f) => full(f).toLowerCase() === lower);
+  const named = byPath.length ? byPath : theirs.filter((f) => f.name.toLowerCase() === lower || isSameCollection(f.name, wanted));
+  if (named.length > 1) return null;
+  if (named.length === 1) return { kind: "user", how: "choice", name: named[0]!.name, path: full(named[0]!), because: place };
+  const kept = kikiCollections(files).filter((name) => isSameCollection(name, wanted));
+  return { kind: "kiki", how: "choice", name: kept.length === 1 ? kept[0]! : wanted, path: null, because: place };
 }
 
 const isPrefix = (a: string[], b: string[]) => a.length > 0 && a.length <= b.length && a.every((w, i) => b[i] === w);

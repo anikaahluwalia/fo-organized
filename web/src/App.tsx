@@ -580,12 +580,30 @@ function NotifyDecision({ view, act }: { view: AppView; act: ReturnType<typeof u
   );
 }
 
+/** What a proposal Fo is bringing you here in Kiki is waiting on, in plain words. */
+function decideLabel(n: NotificationView, fo: string): string {
+  const r = n.reply;
+  if (r?.status === "approved") return `You told ${fo} "${r.text}". Kiki is applying this version.`;
+  if (r?.status === "declined") return `You told ${fo} "${r.text}". Kiki isn't applying it.`;
+  if (r?.status === "adjusting") return `You asked for changes: "${r.text}". Kiki is preparing a new version…`;
+  if (r?.status === "revised") return `You asked for changes, and Kiki made version ${r.revision?.version ?? ""}. ${fo} is bringing it to you.`;
+  if (r?.status === "not_changed") return `Kiki didn't change the proposal. ${r.revision?.note ?? ""}`.trim();
+  if (r?.status === "stale") return "This was about an earlier version of the proposal.";
+  if (r?.status === "expired") return "This request expired. Ask again from the proposal.";
+  if (n.state === "failed") return `${fo} couldn't take the proposal.`;
+  if (n.state === "uncertain") return `Not sure ${fo} got the proposal.`;
+  if (n.state === "needs_user_input") return `${fo} is asking you about this proposal.`;
+  return `${fo} is reading the proposal…`;
+}
+
 function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; act: ReturnType<typeof useAction> }) {
   const fo = mock ? "Mock Fo" : "Fo";
   const [answer, setAnswer] = useState("");
   const r = n.reply;
-  const label =
-    r?.status === "approved"
+  const decide = n.purpose === "decide";
+  const label = decide
+    ? decideLabel(n, fo)
+    : r?.status === "approved"
       ? `You replied "${r.text}". Kiki is filing it.`
       : r?.status === "declined"
         ? `You replied "${r.text}". Not filing it.`
@@ -607,12 +625,13 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
               ? `${fo} says it didn't send the text.`
               : `${fo} is texting you…`;
   return (
-    <div className={`notice ${n.outcome === "reported_sent" ? "notice--ok" : n.state === "failed" || n.state === "uncertain" ? "notice--bad" : "notice--info"}`} style={{ marginBottom: 14 }}>
+    <div className={`notice ${n.outcome === "reported_sent" || r?.status === "approved" ? "notice--ok" : n.state === "failed" || n.state === "uncertain" ? "notice--bad" : "notice--info"}`} style={{ marginBottom: 14 }}>
       <strong>{label}</strong>
-      {n.text && <p className="hint">“{n.text}”</p>}
-      {(n.question || n.failureDetail) && <p>{n.question ?? n.failureDetail}</p>}
+      {n.text && !decide && <p className="hint">“{n.text}”</p>}
+      {(n.question || n.failureDetail) && <p className="message-preview">{n.question ?? n.failureDetail}</p>}
+      {r?.clarification && <p>{fo} needs clarification: “{r.clarification}”</p>}
       {n.state === "working" && n.progress && <p>{n.progress}</p>}
-      {(n.state === "needs_user_input" || (n.state === "complete" && r?.status === "waiting")) && (
+      {(n.state === "needs_user_input" || (n.state === "complete" && r?.status === "waiting")) && r?.status !== "adjusting" && (r === null || r.status === "waiting") && (
         <form
           className="stack"
           style={{ marginTop: 8 }}
@@ -625,6 +644,7 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
           }}
         >
           <label htmlFor={`ans-${n.taskId}`}>Answer {fo} about this proposal</label>
+          {decide && <span className="hint">Say yes or no, ask a question, or ask for changes, like "skip the Bright Floors quote".</span>}
           <textarea id={`ans-${n.taskId}`} style={{ minHeight: 70 }} value={answer} onChange={(e) => setAnswer(e.target.value)} />
           <button className="btn btn--primary" disabled={!answer.trim() || act.busy !== null}>
             Send answer to {fo}
@@ -635,7 +655,7 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
   );
 }
 
-function ApproveBlock({ plan, act }: { plan: PlanView; act: ReturnType<typeof useAction> }) {
+function ApproveBlock({ plan, act, fo }: { plan: PlanView; act: ReturnType<typeof useAction>; fo: AppView["integrations"]["fo"] }) {
   // One request id per plan version: a double click resolves to the same approval on the server.
   const requestId = useMemo(() => newId(), [plan.id, plan.contentHash]);
   return (
@@ -653,6 +673,11 @@ function ApproveBlock({ plan, act }: { plan: PlanView; act: ReturnType<typeof us
           {act.busy === `approve-${plan.id}` ? "Approving…" : "Approve"}
         </button>
         <div className="secondary-actions">
+          {fo.connection === "connected" && (
+            <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`ask-fo-${plan.id}`, () => post(`/api/plans/${plan.id}/ask-fo`))}>
+              {act.busy === `ask-fo-${plan.id}` ? "Asking…" : `Have ${fo.mode === "mock" ? "Mock Fo" : "Fo"} ask me`}
+            </button>
+          )}
           <button className="btn btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`discard-${plan.id}`, () => post(`/api/plans/${plan.id}/discard`))}>
             Not now
           </button>
@@ -716,7 +741,7 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
       {view.plans
         .filter((p) => p.status === "proposed")
         .map((p) => (
-          <ApproveBlock key={p.id} plan={p} act={act} />
+          <ApproveBlock key={p.id} plan={p} act={act} fo={view.integrations.fo} />
         ))}
       {running && (
         <div className="progress">

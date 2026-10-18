@@ -6,7 +6,9 @@ interface MockConversation {
   id: string;
   startedAt: string;
   turns: FoTurn[];
-  pending: { progress: string[]; final: string } | null;
+  pending: { progress: string[]; final: string; awaitingUser?: boolean } | null;
+  /** A proposal Fo brought you and is waiting on: your next message is the answer. */
+  decision: { requestId: string; planId: string; contentHash: string } | null;
   turnStartedAt: number;
   contractor: string | null;
   sentAt: number | null;
@@ -14,6 +16,16 @@ interface MockConversation {
 }
 
 export const MOCK_NOTE = "(Mock Fo: simulated. Nothing was sent and nobody was contacted.)";
+
+/** How the mock reads your answer to a proposal. Real Fo understands far more; this is only for rehearsals. */
+export function mockDecision(answer: string): "approved" | "declined" | "changes_requested" | "clarification" {
+  const a = answer.toLowerCase();
+  if (/\b(skip|rename|call (it|the|them)|keep (the |their |its )?names?|don'?t rename|instead|put|move|goes? (under|in)|is for|are for|folder|leave out|don'?t bother)\b/.test(a)) return "changes_requested";
+  if (/\?\s*$/.test(a.trim())) return "clarification";
+  if (/\b(no|nope|don'?t|not now|decline|leave it)\b/.test(a)) return "declined";
+  if (/\b(yes|yep|go ahead|do it|approve|sounds good|ok|okay|sure)\b/.test(a)) return "approved";
+  return "clarification";
+}
 
 /**
  * A clearly labelled stand-in for Fo, used only when FO_MODE=mock. It plays a short
@@ -61,18 +73,29 @@ export class MockFoClient implements FoClient {
     let convo = args.conversationId ? this.conversations.get(args.conversationId) : undefined;
     if (args.conversationId && !convo) throw new Error("Unknown conversation");
     if (!convo) {
-      convo = { id: `mock-${randomUUID()}`, startedAt: new Date().toISOString(), turns: [], pending: null, turnStartedAt: Date.now(), contractor: null, sentAt: null, replyPosted: false };
+      convo = { id: `mock-${randomUUID()}`, startedAt: new Date().toISOString(), turns: [], pending: null, turnStartedAt: Date.now(), contractor: null, sentAt: null, replyPosted: false, decision: null };
       this.conversations.set(convo.id, convo);
     }
     convo.turns.push({ role: "user", text: args.message, at: new Date().toISOString() });
     convo.turnStartedAt = Date.now();
     this.maybePostReply(convo);
 
-    if (/don't send the email/.test(args.message)) {
+    const handoff = /Kiki approval handoff[^\n]*\n(\{[^\n]*\})/.exec(args.message);
+    const answer = /^Answer from the account holder \(data\): ("(?:[^"\\]|\\.)*")/.exec(args.message);
+    if (answer && convo.decision) {
+      const said = JSON.parse(answer[1]!) as string;
+      const decision = { ...convo.decision, decision: mockDecision(said), userReply: said.trim().slice(0, 2000), actor: "account_holder", presentedExactProposal: true };
+      convo.decision = null;
+      convo.pending = { progress: [], final: `${MOCK_NOTE}\nThanks, I'll let Kiki know.\nKIKI-DECISION: ${JSON.stringify(decision)}` };
+    } else if (handoff && !/^Please text me/.test(args.message)) {
+      convo.decision = JSON.parse(handoff[1]!) as MockConversation["decision"];
+      const proposal = args.message.split("\n").filter((l) => /^(Kiki's proposal|\d+\. |Not moved)/.test(l)).join("\n");
+      convo.pending = { progress: ["Reading Kiki's proposal (mock)…"], final: `${MOCK_NOTE}\nHere's what Kiki proposes:\n${proposal}\nWould you like Kiki to go ahead, change something, or leave it?`, awaitingUser: true };
+    } else if (/don't send the email/.test(args.message)) {
       convo.pending = { progress: [], final: `${MOCK_NOTE}\nOkay, I won't send it.\nKIKI-STATUS: NOT-SENT` };
     } else if (/^Please text me/.test(args.message)) {
       const body = /-----BEGIN APPROVED BODY-----\n([\s\S]*?)\n-----END APPROVED BODY-----/.exec(args.message)?.[1] ?? "";
-      const sms: MockConversation = { id: `mock-sms-${randomUUID()}`, startedAt: new Date().toISOString(), turns: [{ role: "assistant", text: body, at: new Date().toISOString() }], pending: null, turnStartedAt: Date.now(), contractor: null, sentAt: null, replyPosted: true };
+      const sms: MockConversation = { id: `mock-sms-${randomUUID()}`, startedAt: new Date().toISOString(), turns: [{ role: "assistant", text: body, at: new Date().toISOString() }], pending: null, turnStartedAt: Date.now(), contractor: null, sentAt: null, replyPosted: true, decision: null };
       this.conversations.set(sms.id, sms);
       this.lastSms = sms;
       convo.pending = { progress: ["Texting you (mock)…"], final: `${MOCK_NOTE}\nI would have texted you Kiki's message.\nKIKI-STATUS: SENT` };
@@ -106,12 +129,12 @@ export class MockFoClient implements FoClient {
       return { status: "working", conversationId: convo.id, progress: convo.pending.progress.shift()!, elapsedSeconds, response: "Fo is still working (mock)." };
     }
     if (convo.pending) {
-      const final = convo.pending.final;
+      const { final, awaitingUser } = convo.pending;
       convo.pending = null;
       convo.turns.push({ role: "assistant", text: final, at: new Date().toISOString() });
       // Only an email to a contractor gets a (simulated) answer; a text to you doesn't answer itself.
       if (/KIKI-STATUS: SENT/.test(final) && convo.contractor !== null) convo.sentAt = Date.now();
-      return { status: "complete", conversationId: convo.id, response: final };
+      return { status: "complete", conversationId: convo.id, response: final, ...(awaitingUser ? { awaitingUser: true } : {}) };
     }
     const last = [...convo.turns].reverse().find((t) => t.role === "assistant");
     return { status: "complete", conversationId: convo.id, response: last?.text ?? "" };

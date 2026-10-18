@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { ADJUST_SYSTEM_PROMPT, adjustUserMessage, ChangeRequestSchema, mockAdjust, type ChangeRequest, type ProposalItem } from "./domain/adjust.ts";
 import { mockRead, READ_SYSTEM_PROMPT, ReadSchema, type ReadResult } from "./domain/documents.ts";
 import { mockInterpret, OUTCOME_SYSTEM_PROMPT, OutcomeSchema, outcomeUserMessage, verifyOutcome, type Outcome, type OutcomeContext } from "./domain/outcome.ts";
 import { pdfText } from "./domain/pdftext.ts";
@@ -10,6 +11,8 @@ export interface Reader {
   readonly mode: "live" | "mock";
   read(content: DriveContent, fileName: string): Promise<ReadResult>;
   interpret(ctx: OutcomeContext): Promise<Outcome>;
+  /** What the account holder's answer asks to change in a proposal (never whether to approve it). */
+  interpretChange(items: ProposalItem[], reply: string): Promise<ChangeRequest>;
 }
 
 export class ReadError extends Error {
@@ -41,6 +44,10 @@ export class MockReader implements Reader {
 
   async interpret(ctx: OutcomeContext): Promise<Outcome> {
     return verifyOutcome(ctx.message, mockInterpret(ctx));
+  }
+
+  async interpretChange(items: ProposalItem[], reply: string): Promise<ChangeRequest> {
+    return mockAdjust(items, reply);
   }
 }
 
@@ -115,5 +122,25 @@ export class ClaudeReader implements Reader {
     if (response.stop_reason === "refusal") throw new ReadError("Claude declined to interpret this message. Read it yourself.");
     if (!response.parsed_output) throw new ReadError("Claude's answer didn't match the expected format.");
     return verifyOutcome(ctx.message, response.parsed_output);
+  }
+
+  async interpretChange(items: ProposalItem[], reply: string): Promise<ChangeRequest> {
+    let response;
+    try {
+      response = await this.client.beta.messages.parse({
+        model: this.model,
+        max_tokens: 4000,
+        system: ADJUST_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: adjustUserMessage(items, reply) }],
+        output_config: { effort: "low", format: betaZodOutputFormat(ChangeRequestSchema) },
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+      });
+    } catch (err) {
+      throw claudeError(err, this.model);
+    }
+    if (response.stop_reason === "refusal") throw new ReadError("Claude declined to read this answer. Change the proposal in Kiki yourself.");
+    if (!response.parsed_output) throw new ReadError("Claude's answer didn't match the expected format.");
+    return response.parsed_output;
   }
 }
