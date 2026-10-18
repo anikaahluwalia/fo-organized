@@ -11,6 +11,7 @@ import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { approvePlan } from "./plans.ts";
 import { answerLink } from "./answerlink.ts";
+import { isPersonalId, withoutIdNumbers } from "../domain/naming.ts";
 import { chooseText, plainText, type ComposeFacts, type ComposeItem, type Situation } from "../domain/compose.ts";
 import { proposalItems, proposalLines } from "./proposal.ts";
 import { requireWorkspace } from "./workspace.ts";
@@ -506,15 +507,25 @@ export function displayFolder(path: string | null): string {
   return parts.join(" › ");
 }
 
-/** What Kiki read about a document: the words a short name for it may use. */
-function aboutDoc(ctx: Ctx, docId: string | null, fileId: string | null, workspaceId: string): string[] {
+/**
+ * A file as a text may speak of it: its name, what Kiki read about it (the words a short name may
+ * use) and, for a personal ID, its number, which the text must never carry (nor the name it's given).
+ */
+function describe(ctx: Ctx, name: string, docId: string | null, fileId: string | null, workspaceId: string): Pick<ComposeItem, "name" | "about" | "never"> {
   const doc = docId
     ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", docId)
     : fileId
       ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE workspace_id = ? AND file_id = ?", workspaceId, fileId)
       : undefined;
   const f = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
-  return [f?.title?.value, f?.issuer?.value, f?.reference?.value, f?.docType && f.docType !== "unknown" && f.docType !== "other" ? f.docType : null, f?.project?.value].filter((x): x is string => Boolean(x)).map((x) => inert(x, 120));
+  const personal = isPersonalId(f, name);
+  const about = [f?.title?.value, f?.issuer?.value, personal ? null : f?.reference?.value, f?.docType && f.docType !== "unknown" && f.docType !== "other" ? f.docType : null, f?.project?.value]
+    .filter((x): x is string => Boolean(x))
+    .map((x) => inert(personal ? withoutIdNumbers(x, f?.reference?.value) : x, 120))
+    .filter(Boolean);
+  if (!personal) return { name: inert(name), about };
+  const never = [...(f?.reference?.value ?? "").split(/[\s-]+/), ...(name.match(/\d{4,}/g) ?? [])].filter((p) => p.replace(/\D/g, "").length >= 3);
+  return { name: inert(withoutIdNumbers(name, f?.reference?.value)), about, never };
 }
 
 /** A new name, as a text shows it: without the extension or the leading date. */
@@ -539,15 +550,14 @@ export function proposalFacts(ctx: Ctx, plan: PlanRow, situation: Situation, lin
     items.push({
       n: numbered.get(op.file_id ?? "")?.n ?? op.seq,
       kind: "file",
-      name: inert(op.pre_name ?? op.new_name ?? ""),
-      about: aboutDoc(ctx, op.doc_id, op.file_id, plan.workspace_id),
+      ...describe(ctx, op.pre_name ?? op.new_name ?? "", op.doc_id, op.file_id, plan.workspace_id),
       folder: inert(displayFolder(op.new_path)),
       renamedTo: op.new_name && op.pre_name && op.new_name !== op.pre_name ? inert(shownName(op.new_name)) : undefined,
     });
   }
-  for (const op of freshCopies) items.push({ n: numbered.get(op.file_id ?? "")?.n ?? op.seq, kind: "copy", name: inert(op.pre_name ?? ""), about: aboutDoc(ctx, op.doc_id, op.file_id, plan.workspace_id) });
+  for (const op of freshCopies) items.push({ n: numbered.get(op.file_id ?? "")?.n ?? op.seq, kind: "copy", ...describe(ctx, op.pre_name ?? "", op.doc_id, op.file_id, plan.workspace_id) });
   for (const i of numbered.values()) {
-    if (i.kind === "unplaced") items.push({ n: i.n, kind: "unplaced", name: inert(i.name), about: aboutDoc(ctx, null, i.fileId, plan.workspace_id), options: (i.options ?? []).map((o) => inert(displayFolder(o))) });
+    if (i.kind === "unplaced") items.push({ n: i.n, kind: "unplaced", ...describe(ctx, i.name, null, i.fileId, plan.workspace_id), options: (i.options ?? []).map((o) => inert(displayFolder(o))) });
   }
   const alsoTidying = filing.length - fresh.length + (copies - freshCopies.length);
   return { situation, workspace: inert(ws.name), items, answer: howToAnswer(ctx, link), ...(note ? { note: inert(note, 300) } : {}), ...(alsoTidying ? { alsoTidying } : {}) };
@@ -562,8 +572,7 @@ function resultFacts(ctx: Ctx, plan: PlanRow): ComposeFacts {
     n: op.seq,
     kind: op.new_path && inDuplicatesFolder(op.new_path) ? "copy" : "file",
     // By the name you knew it by; where it went is the folder.
-    name: inert(op.pre_name ?? op.new_name ?? ""),
-    about: aboutDoc(ctx, op.doc_id, op.file_id, plan.workspace_id),
+    ...describe(ctx, op.pre_name ?? op.new_name ?? "", op.doc_id, op.file_id, plan.workspace_id),
     folder: inert(displayFolder(op.new_path)),
   }));
   return { situation: plan.status === "applied" ? "done" : "stopped", workspace: inert(ws.name), items, answer: null, verified: { done: live.filter((o) => o.state === "verified").length, total: live.length } };

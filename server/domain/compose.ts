@@ -25,6 +25,8 @@ export interface ComposeItem {
   renamedTo?: string;
   /** For a file Kiki can't place: folders that fit. */
   options?: string[];
+  /** A personal ID's number, in parts: never in a text. */
+  never?: string[];
 }
 
 export interface ComposeFacts {
@@ -123,6 +125,8 @@ export function checkComposed(facts: ComposeFacts, c: Composed): string[] {
     }
     if (item.renamedTo && spellRenames && PROPOSING.includes(facts.situation) && !t.includes(norm(item.renamedTo))) problems.push(`doesn't show the new name of ${item.n}`);
     if (item.kind === "copy" && !/\bcop(y|ies)\b/i.test(text)) problems.push("doesn't say it's a copy");
+    const digits = text.replace(/\D/g, "");
+    if (item.never?.some((x) => (/\d/.test(x) ? digits.includes(x.replace(/\D/g, "")) : t.includes(norm(x))))) problems.push(`has the ID number of ${item.n}`);
   }
   for (const folder of new Set(facts.items.flatMap((i) => (i.kind === "file" && i.folder ? [folderHead(i.folder)] : [])))) {
     if (!t.includes(norm(folder))) problems.push(`doesn't name the folder ${folder}`);

@@ -1,6 +1,7 @@
 import { all, type Db, type DocumentRow, type FileRow, type ProjectRow } from "../db.ts";
 import { DOC_TYPES, type DocFacts } from "../domain/documents.ts";
 import { join } from "../domain/plan.ts";
+import { isPersonalId } from "../domain/naming.ts";
 import { money } from "../domain/reconcile.ts";
 import { copyMap } from "../domain/duplicates.ts";
 
@@ -79,7 +80,8 @@ export function buildIndexCsv(db: Db, project: ProjectRow, verifiedAt: string): 
         f.docType,
         f.docType === "quote" ? (STATUS_LABEL[row.doc.version_status ?? "unresolved"] ?? row.doc.version_status) : "",
         f.issuer.value,
-        f.reference.value,
+        // A personal ID's number stays on the document, not in the index.
+        isPersonalId(f, row.file.name) ? "" : f.reference.value,
         f.date.value,
         f.total.value === null ? "" : money(f.total.value, f.total.currency),
         row.doc.accepted_at ? `Yes (${row.doc.accepted_at.slice(0, 10)})` : "",

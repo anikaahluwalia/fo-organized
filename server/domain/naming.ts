@@ -114,16 +114,41 @@ function shortTitle(title: string, max = 60): string {
   return `${(/\s/.test(title[max]!) ? head : head.replace(/\s+\S*$/, "")).trimEnd()}…`;
 }
 
+const PERSONAL_ID =
+  /\b(driver'?s'?\s*licen[cs]e|driving\s*licen[cs]e|passport|health\s*(insurance\s*)?card|social\s*insurance|social\s*security|\bSIN\b|\bSSN\b|identity\s*card|\bID\s*card|photo\s*card|birth\s*certificate|permanent\s*resident|citizenship\s*card|national\s*id)\b/i;
+
+/**
+ * A personal ID document (a driver's licence, passport, health card, SIN card…). Its number never
+ * goes into a file name, the index or a text: those travel further than the document does.
+ */
+export function isPersonalId(facts: DocFacts | null, name = ""): boolean {
+  return PERSONAL_ID.test([facts?.title?.value, facts?.issuer?.value, name].filter(Boolean).join(" "));
+}
+
+/** Without any number run of 4+ digits (or the document's reference): for a personal ID's title or name. */
+export function withoutIdNumbers(s: string, reference?: string | null): string {
+  let out = reference ? s.split(reference).join(" ") : s;
+  if (reference) for (const part of reference.split(/[\s-]+/).filter((p) => p.length >= 3)) out = out.split(part).join("");
+  return out
+    .replace(/[A-Z]?\d[\d\s-]{3,}\d/gi, "")
+    .replace(/(\s*-\s*){2,}/g, " - ")
+    .replace(/^[\s-]+|[\s-]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function proposedName(facts: DocFacts, originalName: string, mimeType: string): string | null {
   const date = facts.date.value;
   const issuer = facts.issuer.value;
-  const title = meaningfulTitle(facts.title?.value);
+  const personal = isPersonalId(facts, originalName);
+  const stated = meaningfulTitle(facts.title?.value);
+  const title = stated && personal ? withoutIdNumbers(stated, facts.reference.value) || null : stated;
   if (!date && !issuer && !title) return null;
   const label = facts.docType === "quote" && facts.revision.isRevision ? "Revised quote" : TYPE_LABELS[facts.docType];
   const short = title ? shortTitle(title) : null;
   const key = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
   // A reference already in the (shortened) title isn't repeated.
-  const reference = facts.reference.value && !(short && key(short).includes(key(facts.reference.value))) ? facts.reference.value : null;
+  const reference = !personal && facts.reference.value && !(short && key(short).includes(key(facts.reference.value))) ? facts.reference.value : null;
   const parts = [short || label, issuer, reference].filter((p): p is string => Boolean(p));
   const base = `${date ? `${date} ` : ""}${parts.join(" - ")}`;
   return sanitizeName(base) + extension(originalName, mimeType);
