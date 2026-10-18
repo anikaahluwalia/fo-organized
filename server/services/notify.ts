@@ -293,7 +293,9 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
 /** Standing permission, texts to the account holder only: one text per new proposal. */
 export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   if (!autoTextEnabled(ctx)) return;
-  if (kvGet(ctx.db, `notify.plan.${plan.id}`)) return;
+  // One text per distinct proposal, even if it gets re-saved as a new version.
+  if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
+  kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);
   const text = newFindText(ctx, plan);
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);

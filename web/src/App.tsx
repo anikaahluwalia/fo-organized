@@ -422,7 +422,9 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
   const proposed = view.plans.find((p) => p.status === "proposed");
   const requestId = useMemo(() => newId(), [proposed?.id]);
   const applied = view.plans.find((p) => p.status === "applied" || p.status === "partial");
-  const readingDone = view.workspace && view.inventory.status === "done" && view.inventory.reading === 0 && !view.busy.reading && !view.busy.inventory;
+  const readingDone = view.workspace && view.inventory.files.length > 0 && view.inventory.reading === 0 && !view.busy.reading;
+  const broken = view.plans.find((p) => p.status === "failed" || p.status === "partial" || p.status === "stale");
+  const brokenError = broken?.ops.find((o) => o.error)?.error ?? null;
   const running = view.plans.find((p) => p.status === "approved" || p.status === "executing");
 
   return (
@@ -446,6 +448,20 @@ function Decisions({ view, act }: { view: AppView; act: ReturnType<typeof useAct
         <FoTextStatus n={view.notifications[0]} mock={view.integrations.fo.mode === "mock"} act={act} />
       )}
       {!view.workspace && <p className="lede">Choose a workspace folder to begin.</p>}
+      {broken && !proposed && !running && (
+        <div className="notice notice--bad" style={{ marginBottom: 14 }}>
+          <strong>{broken.status === "stale" ? "Something changed since the plan was made." : "Some changes didn't go through."}</strong>
+          {brokenError && <p>{brokenError}</p>}
+          <button
+            className="btn btn--small"
+            style={{ marginTop: 8 }}
+            disabled={act.busy !== null}
+            onClick={() => act.run("retry", () => post(broken.status === "stale" ? "/api/plans/organize" : `/api/plans/${broken.id}/resume`))}
+          >
+            {broken.status === "stale" ? "Refresh the plan" : "Try again"}
+          </button>
+        </div>
+      )}
       {view.workspace && !proposed && !running && (
         <div className="stack">
           {!readingDone && <p className="lede">Reading files…</p>}

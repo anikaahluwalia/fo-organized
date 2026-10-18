@@ -227,7 +227,8 @@ export function autoPropose(ctx: Ctx): { plan: PlanRow; created: boolean } | nul
   const draft = organizeDraft(ctx.db, ws);
   if (!draft.ops.some((o) => o.kind === "move_rename")) return null;
   const hash = hashWithExclusions(draft.ops, new Set());
-  if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status = 'discarded' AND content_hash = ?", seriesId, hash)) return null;
+  // Don't re-propose something the user set aside, or that already failed: they choose to retry.
+  if (one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status IN ('discarded', 'failed', 'partial', 'stale') AND content_hash = ?", seriesId, hash)) return null;
   return saveOrganize(ctx.db, ws, draft);
 }
 

@@ -22,7 +22,7 @@ Run everything offline and clearly labelled as mock: `npm run start:mock`.
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Claude reads the documents (live). |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client, type "Web application", redirect URI `http://localhost:8787/api/google/oauth/callback`. Enable the Drive API; consent screen in Testing with your account as a test user. |
-| `GOOGLE_DRIVE_SCOPES` | Optional. Default asks for `drive.readonly` + `drive.metadata` + `drive.file` (read content, rename/move, create folders and the index; no rewriting existing files). `full` requests the single `drive` scope. Restricting Kiki to one folder is enforced by the app, not by the OAuth scope. |
+| `GOOGLE_DRIVE_SCOPES` | Optional. Default is the full `drive` scope: moving or renaming files you added to Drive yourself needs it (tested live: with `drive.readonly` + `drive.metadata` + `drive.file`, Google refuses with "The user has not granted the app write access to the file"). `narrow` keeps that narrower set, which only works for files Kiki uploaded. Restricting Kiki to one folder is enforced by the app, not by the OAuth scope. |
 | `KIKI_MODE`, `DRIVE_MODE`, `CLAUDE_MODE`, `FO_MODE` | `live` (default) or `mock`. Mock is always labelled and never replaces a failing live integration. |
 
 Fo signs in with your Wajo account from the app (**Connect Fo**); tokens stay in `.data/` on this machine.

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { all, logEvent, now, one, run, tx, type Db, type DocumentRow, type FileOrigin, type FileRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
+import { all, kvGet, kvSet, logEvent, now, one, run, tx, type Db, type DocumentRow, type FileOrigin, type FileRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
 import { DEMO_WORKSPACE_NAME, demoFileContent, MESSY_FOLDER, NEW_SUPPLIER_INVOICE, REVISED_QUOTE, SECOND_REVISION, type DemoDoc } from "../demo/renovation.ts";
 import { toFacts, type DocFacts } from "../domain/documents.ts";
 import { CATEGORY } from "../domain/naming.ts";
@@ -114,11 +114,16 @@ async function uploadDemoDocs(ctx: Ctx, ws: WorkspaceRow, docs: DemoDoc[]): Prom
   const present = new Set(all<{ name: string }>(ctx.db, "SELECT name FROM files WHERE workspace_id = ? AND present = 1", ws.id).map((r) => r.name));
   const live = await ctx.drive.listChildren(ws.root_file_id, ws.drive_id);
   for (const f of live) present.add(f.name);
+  // Files Kiki already renamed and filed don't match by name any more, so remember what was uploaded.
+  const uploadedKey = `demo.uploaded.${ws.id}`;
+  const uploaded = new Set<string>(JSON.parse(kvGet(ctx.db, uploadedKey) ?? "[]") as string[]);
   const added: string[] = [];
   for (const doc of docs) {
-    if (present.has(doc.fileName)) continue;
+    if (present.has(doc.fileName) || (doc.key !== "northside-invoice-2" && uploaded.has(doc.key))) continue;
     const f = await ctx.drive.createFile({ name: doc.fileName, parentId: ws.root_file_id, mimeType: doc.mimeType, content: demoFileContent(doc) });
     tx(ctx.db, () => recordFile(ctx.db, ws.id, f, "", "staged_demo"));
+    uploaded.add(doc.key);
+    kvSet(ctx.db, uploadedKey, JSON.stringify([...uploaded]));
     added.push(doc.fileName);
   }
   return added;

@@ -3,12 +3,12 @@ import path from "node:path";
 export type IntegrationMode = "live" | "mock";
 
 /**
- * Default Drive scopes, chosen to be as narrow as the workflow allows (see README):
- * - drive.readonly: read the content of existing documents to extract facts (restricted scope).
- * - drive.metadata: rename and move existing files; files.update accepts it (restricted scope).
- * - drive.file: create folders and the index file Kiki maintains (non-sensitive scope).
- * Kiki cannot rewrite the content of files it didn't create with these. GOOGLE_DRIVE_SCOPES=full
- * switches to the single broad "drive" scope if Google rejects the combination for an account.
+ * Drive scopes. Organizing files you put in Drive yourself needs the broad "drive" scope: tested
+ * live, drive.readonly + drive.metadata + drive.file can read such a file but Google refuses to
+ * move or rename it (403 "The user has not granted the app write access to the file"), because
+ * drive.file only covers files the app created or the user opened with it. Restricting Kiki to one
+ * folder is enforced by the app, not by the scope. GOOGLE_DRIVE_SCOPES=narrow keeps the narrower
+ * set, which only works for files Kiki uploaded herself.
  */
 export const NARROW_DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
@@ -47,7 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // KIKI_MODE sets every integration; CLAUDE_MODE / FO_MODE / DRIVE_MODE override one at a time.
   // There is no silent fallback: live stays live even when it isn't configured or fails.
   const base = mode(env.KIKI_MODE, "live");
-  const full = env.GOOGLE_DRIVE_SCOPES === "full";
+  const full = env.GOOGLE_DRIVE_SCOPES !== "narrow";
   const driveMode = mode(env.DRIVE_MODE, base);
   return {
     port,
