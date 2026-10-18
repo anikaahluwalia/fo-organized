@@ -101,7 +101,7 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   <p>${esc(status.text)}</p>
   ${status.next ? `<p class="next">${esc(status.next)}</p>` : ""}
 </section>
-<details><summary>The proposal</summary>${plan ? cards(ctx, plan) : `<pre>${esc(proposal)}</pre>`}</details>`
+${status.done ? `<details><summary>The proposal</summary>${plan ? cards(ctx, plan) : `<pre>${esc(proposal)}</pre>`}</details>` : ""}`
     : `<h1>Kiki</h1><p class="muted">Your answer goes to Fo, and Fo texts you what happens.</p>
 ${note ? `<p class="note">${esc(note)}</p>` : ""}
 ${question ? `<div class="ask"><strong>Fo asks:</strong><br>${esc(question)}</div>` : ""}

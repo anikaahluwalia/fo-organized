@@ -61,6 +61,7 @@ const MIN_PASSWORD = 12;
 export function configProblems(c: Config): string[] {
   const problems: string[] = [];
   if (c.hosted && !c.password) problems.push(`Kiki is online (APP_ORIGIN is ${c.appOrigin}), so set KIKI_PASSWORD (${MIN_PASSWORD} characters or more) first.`);
+  if (!c.hosted && !c.password && !["127.0.0.1", "::1", "localhost"].includes(c.listenHost)) problems.push(`Kiki would listen on ${c.listenHost} (beyond this machine), so set KIKI_PASSWORD (${MIN_PASSWORD} characters or more) first.`);
   if (c.password !== null && c.password.length < MIN_PASSWORD) problems.push(`KIKI_PASSWORD needs ${MIN_PASSWORD} characters or more.`);
   return problems;
 }

@@ -934,7 +934,9 @@ export function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const msg = params.get("connected") ? `Connected ${params.get("connected")}.` : params.get("connectError");
+    // Only Kiki's own words: the link's text names which connection, and nothing else is shown.
+    const known = (s: string | null) => (s === "Google Drive" || s === "Fo" ? s : null);
+    const msg = known(params.get("connected")) ? `Connected ${params.get("connected")}.` : known(params.get("connectError")) ? `Couldn't connect ${params.get("connectError")}. Try again.` : null;
     if (msg) {
       setFlash(msg);
       window.history.replaceState(null, "", "/");
@@ -960,9 +962,9 @@ export function App() {
         </div>
         <Integrations view={view} act={act} />
         {view.signedIn && (
-          <a className="btn btn--small btn--quiet" href="/logout">
+          <button className="btn btn--small btn--quiet" onClick={() => void post("/api/logout").finally(() => window.location.assign("/login"))}>
             Sign out
-          </a>
+          </button>
         )}
       </header>
       {view.integrations.drive.missingScopes.length > 0 && (

@@ -242,3 +242,12 @@ test("a change you ask for at the link comes back to you as a text, with its own
   assert.match(next.message, /Kiki: updated as you asked\./);
   assert.match(next.message, /\nhttps:\/\/kiki-test\.example\/a\/\S+\n-----END APPROVED BODY-----/, "with its own link");
 });
+
+test("once a link has expired, its page no longer shows the proposal", async (t) => {
+  const s = await setup(t);
+  const state = replyState(s.rig.app.ctx, s.note.taskId)!;
+  run(s.rig.db, "UPDATE kv SET value = ? WHERE key = ?", JSON.stringify({ ...state, requestedAt: new Date(Date.now() - 30 * 24 * 3600_000).toISOString() }), `notify.reply.${s.note.taskId}`);
+  const page = await request(s.port, { path: new URL(s.link!).pathname, host: new URL(PUBLIC).host });
+  assert.match(page.text, /This link expired/);
+  assert.doesNotMatch(page.text, /Every step|N-5602/);
+});

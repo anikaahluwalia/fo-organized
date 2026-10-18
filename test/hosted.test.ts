@@ -5,16 +5,17 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { configProblems, loadConfig } from "../server/config.ts";
 import { createHttpServer } from "../server/http.ts";
-import { LoginLimiter, safeNext } from "../server/auth.ts";
+import { LoginLimiter, safeNext, sessionValid, startSession } from "../server/auth.ts";
 import { makeRig } from "./helpers.ts";
 
 const ORIGIN = "https://kiki.example";
 const HOST = "kiki.example";
 const PASSWORD = "correct horse battery";
 
-function request(port: number, opts: { method?: string; path: string; body?: string; cookie?: string; origin?: string; type?: string; forwardedFor?: string }): Promise<{ status: number; text: string; headers: http.IncomingHttpHeaders }> {
+function request(port: number, opts: { method?: string; path: string; body?: string; cookie?: string; origin?: string; type?: string; forwardedFor?: string; host?: string; fetchSite?: string }): Promise<{ status: number; text: string; headers: http.IncomingHttpHeaders }> {
   return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = { host: HOST };
+    const headers: Record<string, string> = { host: opts.host ?? HOST };
+    if (opts.fetchSite) headers["sec-fetch-site"] = opts.fetchSite;
     if (opts.body !== undefined) headers["content-type"] = opts.type ?? "application/x-www-form-urlencoded";
     if (opts.cookie) headers.cookie = opts.cookie;
     if (opts.origin) headers.origin = opts.origin;
@@ -94,7 +95,7 @@ test("signing out ends the session, and Kiki keeps only a hash of it", async (t)
   const stored = s.rig.db.prepare("SELECT key FROM kv WHERE key LIKE 'session.%'").all() as { key: string }[];
   assert.equal(stored.length, 1);
   assert.ok(!stored[0]!.key.includes(token), "the token itself isn't stored");
-  await request(s.port, { path: "/logout", cookie });
+  await request(s.port, { method: "POST", path: "/api/logout", cookie, body: "{}", type: "application/json", origin: ORIGIN });
   assert.equal((await request(s.port, { path: "/api/state", cookie })).status, 401);
 });
 
@@ -129,4 +130,66 @@ test("on this machine (no password set), the app works as before", async (t) => 
   t.after(() => new Promise<void>((r) => (server.closeAllConnections(), server.close(() => r()))));
   const res = await new Promise<number>((resolve) => http.get({ host: "127.0.0.1", port, path: "/api/state", headers: { host: `localhost:${port}` }, agent: false }, (r) => (r.resume(), resolve(r.statusCode ?? 0))));
   assert.equal(res, 200);
+});
+
+test("Railway's health check, sent under its own hostname, gets an answer (and nothing else does)", async (t) => {
+  const s = await online(t);
+  assert.equal((await request(s.port, { path: "/healthz", host: "healthcheck.railway.app" })).status, 200);
+  assert.equal((await request(s.port, { path: "/api/state", host: "healthcheck.railway.app" })).status, 421);
+  assert.equal((await request(s.port, { path: "/healthz?x=1", host: "healthcheck.railway.app" })).status, 421, "only the health check itself");
+});
+
+test("an Origin header claiming to be the side panel proves nothing: the app, its files and OAuth callbacks still need a session", async (t) => {
+  const s = await online(t);
+  const fake = "chrome-extension://" + "a".repeat(32);
+  assert.equal((await request(s.port, { path: "/", origin: fake })).status, 302);
+  assert.equal((await request(s.port, { path: "/api/google/oauth/callback?code=a&state=b", origin: fake })).status, 401);
+  assert.equal((await request(s.port, { path: "/api/fo/oauth/callback?code=a&state=b", origin: fake })).status, 401);
+  assert.equal((await request(s.port, { path: "/api/state", origin: fake })).status, 401, "its API calls need its token");
+});
+
+test("a new password signs every session out", () => {
+  const rig = makeRig();
+  try {
+    const { token } = startSession(rig.db, PASSWORD);
+    assert.equal(sessionValid(rig.db, token, PASSWORD), true);
+    assert.equal(sessionValid(rig.db, token, "a different password"), false);
+  } finally {
+    rig.app.close();
+  }
+});
+
+test("another site can't post the sign-in form, even as a sandboxed page (\"Origin: null\") or by Sec-Fetch-Site", async (t) => {
+  const s = await online(t);
+  const body = `password=${encodeURIComponent(PASSWORD)}`;
+  assert.equal((await request(s.port, { method: "POST", path: "/login", body, origin: "null" })).status, 403);
+  assert.equal((await request(s.port, { method: "POST", path: "/login", body, fetchSite: "cross-site" })).status, 403);
+  assert.equal((await request(s.port, { method: "POST", path: "/login", body, origin: ORIGIN, fetchSite: "same-origin" })).status, 303);
+  assert.equal((await request(s.port, { path: "/login" })).headers["referrer-policy"], "same-origin", "so the real form carries this site's origin");
+});
+
+test("signing out is the app's own request; a link or another site can't sign you out", async (t) => {
+  const s = await online(t);
+  const { cookie } = await s.signIn();
+  const link = await request(s.port, { path: "/logout", cookie });
+  assert.notEqual(link.headers["set-cookie"], "kiki_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure", "a plain link signs nothing out");
+  assert.equal((await request(s.port, { method: "POST", path: "/api/logout", cookie, body: "{}", type: "application/json", origin: "https://evil.example" })).status, 403);
+  assert.equal((await request(s.port, { path: "/api/state", cookie })).status, 200, "still signed in");
+  const out = await request(s.port, { method: "POST", path: "/api/logout", cookie, body: "{}", type: "application/json", origin: ORIGIN });
+  assert.equal(out.status, 200);
+  assert.match(String(out.headers["set-cookie"]), /kiki_session=; .*Max-Age=0/);
+  assert.equal((await request(s.port, { path: "/api/state", cookie })).status, 401);
+});
+
+test("listening beyond this machine needs a password, online or not", () => {
+  assert.match(configProblems(loadConfig({ HOST: "0.0.0.0" })).join(" "), /beyond this machine/);
+  assert.deepEqual(configProblems(loadConfig({ HOST: "0.0.0.0", KIKI_PASSWORD: PASSWORD })), []);
+  assert.deepEqual(configProblems(loadConfig({ HOST: "127.0.0.1" })), []);
+});
+
+test("a lockout still running isn't dropped when the table gets big", () => {
+  const l = new LoginLimiter();
+  for (let i = 0; i < 10; i++) l.failed("locked", 1000);
+  for (let i = 0; i < 10_001; i++) l.failed(`other-${i}`, 1000);
+  assert.ok(l.waitMs("locked", 1001) > 0);
 });

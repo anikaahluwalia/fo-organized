@@ -192,7 +192,9 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
       app.forgetConnectionCache();
       back.searchParams.set("connected", label);
     } catch (err) {
-      back.searchParams.set("connectError", `${label}: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
+      // The app says only that it didn't connect (a link's text is never shown as if it were Kiki's); the reason is here.
+      console.error(`Connecting ${label} failed: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
+      back.searchParams.set("connectError", label);
     }
     res.writeHead(302, { ...SECURITY_HEADERS, Location: back.toString(), "Cache-Control": "no-store" });
     res.end();
@@ -236,6 +238,8 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
       res.end(JSON.stringify(payload ?? { ok: true }));
     };
     try {
+      // For the host's health check (Railway sends it under its own hostname): says only that Kiki is up.
+      if (req.method === "GET" && req.url === "/healthz") return send(200, { ok: true });
       // DNS-rebinding guard: only answer to the hosts this app is served on.
       const isPublic = publicHost !== null && req.headers.host === publicHost;
       if (!allowedHosts.has(req.headers.host ?? "") && !isPublic) return send(421, { error: "Unexpected host." });
@@ -291,8 +295,6 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
         res.writeHead(404, { ...SECURITY_HEADERS, "Content-Type": "text/plain; charset=utf-8" });
         return res.end("Not found.");
       }
-      // For the host's health check: says only that Kiki is up.
-      if (url.pathname === "/healthz" && method === "GET") return send(200, { ok: true });
 
       if (config.password) {
         const page = (status: number, body: string, headers: Record<string, string> = {}) => {
@@ -300,11 +302,14 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
           res.end(body);
         };
         const session = cookieValue(req.headers.cookie, SESSION_COOKIE);
+        // Only this site's own pages post here (a browser always says where a form came from).
+        const crossSite = (origin !== undefined && !allowedOrigins.has(origin)) || !["same-origin", "none", undefined].includes(req.headers["sec-fetch-site"] as string | undefined);
         if (url.pathname === "/login") {
-          if (method === "GET") return page(200, loginPage(safeNext(url.searchParams.get("next"))));
+          // same-origin, so the form's post carries this site's origin (not "null", which any sandboxed page can send).
+          if (method === "GET") return page(200, loginPage(safeNext(url.searchParams.get("next"))), { "Referrer-Policy": "same-origin" });
           if (method !== "POST") return send(405, { error: "Method not allowed." });
-          // The sign-in form posts to itself; another site can't sign you in (or out of your account).
-          if (origin && origin !== "null" && !allowedOrigins.has(origin)) return send(403, { error: "Cross-site requests aren't allowed." });
+          // Another site can't sign you in, or make you wait by trying wrong passwords from your browser.
+          if (crossSite) return send(403, { error: "Cross-site requests aren't allowed." });
           const from = clientOf(req);
           const form = await readForm(req);
           const next = safeNext(form.next);
@@ -316,15 +321,20 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
           }
           limiter.succeeded(from);
           endSession(app.db, session);
-          const started = startSession(app.db);
+          const started = startSession(app.db, config.password);
           return page(303, "", { Location: next, "Set-Cookie": sessionCookie(started.token, started.maxAgeSeconds, secure) });
         }
-        if (url.pathname === "/logout") {
+        // Signing out: the app's own request (JSON, from this site), like any other action.
+        if (url.pathname === "/api/logout" && method === "POST") {
+          if (crossSite || !String(req.headers["content-type"] ?? "").startsWith("application/json")) return send(403, { error: "Cross-site requests aren't allowed." });
           endSession(app.db, session);
-          return page(303, "", { Location: "/login", "Set-Cookie": sessionCookie("", 0, secure) });
+          res.writeHead(200, { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Set-Cookie": sessionCookie("", 0, secure) });
+          return res.end(JSON.stringify({ ok: true }));
         }
-        // Everything else needs you signed in (the side panel has its own token, checked below).
-        if (!fromExtension && !sessionValid(app.db, session)) {
+        // Everything else needs you signed in. Only the side panel's own API calls don't: they carry
+        // its token, checked below (an Origin header alone proves nothing).
+        const sidePanelApi = fromExtension && url.pathname.startsWith("/api/") && !url.pathname.endsWith("/oauth/callback");
+        if (!sidePanelApi && !sessionValid(app.db, session, config.password)) {
           if (url.pathname.startsWith("/api/")) return send(401, { error: "Sign in to Kiki first.", code: "login" });
           return page(302, "", { Location: `/login?next=${encodeURIComponent(safeNext(url.pathname + url.search))}` });
         }

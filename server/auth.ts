@@ -16,22 +16,24 @@ const LOCK_MS = 15 * 60_000;
 
 const digest = (s: string) => createHash("sha256").update(s, "utf8").digest();
 const key = (token: string) => `session.${digest(token).toString("hex")}`;
+/** Which password a session was signed in with: a new password signs everyone out. */
+const fingerprint = (password: string) => digest(`kiki-session:${password}`).toString("hex").slice(0, 16);
 
 /** The same time whatever's typed, so timing doesn't tell how close a guess was. */
 export function passwordMatches(expected: string, given: string): boolean {
   return timingSafeEqual(digest(expected), digest(given));
 }
 
-export function startSession(db: Db): { token: string; maxAgeSeconds: number } {
+export function startSession(db: Db, password: string): { token: string; maxAgeSeconds: number } {
   const token = randomBytes(32).toString("base64url");
-  kvSet(db, key(token), new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString());
+  kvSet(db, key(token), `${new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString()}|${fingerprint(password)}`);
   return { token, maxAgeSeconds: SESSION_DAYS * 86_400 };
 }
 
-export function sessionValid(db: Db, token: string | null): boolean {
+export function sessionValid(db: Db, token: string | null, password: string): boolean {
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return false;
-  const until = kvGet(db, key(token));
-  return Boolean(until && Date.parse(until) > Date.now());
+  const [until, made] = (kvGet(db, key(token)) ?? "").split("|");
+  return Boolean(until && Date.parse(until) > Date.now() && made === fingerprint(password));
 }
 
 export function endSession(db: Db, token: string | null): void {
@@ -67,7 +69,8 @@ export class LoginLimiter {
       f.n = 0;
     }
     this.failures.set(from, f);
-    if (this.failures.size > 10_000) this.failures.clear();
+    // Bounded memory, but a lockout that's still running is never dropped to make room.
+    if (this.failures.size > 10_000) for (const [k, v] of this.failures) if (v.until <= now) this.failures.delete(k);
   }
 
   succeeded(from: string): void {
