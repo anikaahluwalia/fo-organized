@@ -8,11 +8,13 @@
  * opens this one request until it's settled or expires. Nothing else in Kiki is served to it.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { kvGet, kvSet, one, type PlanRow } from "../db.ts";
+import { all, kvGet, kvSet, one, type PlanOpRow, type PlanRow } from "../db.ts";
+import { inDuplicatesFolder } from "../domain/duplicates.ts";
+import { proposalLines } from "./proposal.ts";
 import { notFound } from "../errors.ts";
 import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
-import { isQuestion, LINK_ONLY, LINK_ONLY_WHERE, LINK_OR_TEXT, LINK_OR_TEXT_WHERE, notifyText, unplacedNotes, replyState, replyWindowMs } from "./notify.ts";
+import { alreadyFiled, displayFolder, isQuestion, LINK_LINE, LINK_ONLY, LINK_ONLY_WHERE, LINK_OR_TEXT, LINK_OR_TEXT_WHERE, notifyText, unplacedNotes, replyState, replyWindowMs } from "./notify.ts";
 import { replyToTask } from "./outreach.ts";
 
 const key = (token: string) => `answer.link.${createHash("sha256").update(token).digest("hex")}`;
@@ -72,9 +74,11 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   const taskId = requestFor(ctx, token);
   const task = getTask(ctx.db, taskId);
   // The text as Fo sent it, without its own link (you're on that page).
-  let proposal = (notifyText(ctx, taskId) ?? "").replace(/\s*Answer here: \S+\s*$/, "");
+  let proposal = (notifyText(ctx, taskId) ?? "").replace(LINK_LINE, "").replace(/\s*Answer here: \S+\s*$/, "");
   for (const line of [LINK_ONLY, LINK_OR_TEXT, LINK_ONLY_WHERE, LINK_OR_TEXT_WHERE]) proposal = proposal.replace(line, "");
   proposal = proposal.trim();
+  // On the page itself: no "Kiki:" (it's her page) and no "tap to answer" (the answers are right here).
+  const lead = proposal.replace(/^Kiki:\s*/, "").replace(/\s*(?:Reply|Tap)\b[^?!]*$/, "").trim();
   const status = settled(ctx, taskId);
   const state = replyState(ctx, taskId);
   const plan = state ? one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", state.planId) : null;
@@ -88,11 +92,12 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   <p>${esc(status.text)}</p>
   ${status.next ? `<p class="next">${esc(status.next)}</p>` : ""}
 </section>
-<details><summary>The proposal</summary><pre>${esc(proposal)}</pre></details>`
+<details><summary>The proposal</summary>${plan ? cards(ctx, plan) : `<pre>${esc(proposal)}</pre>`}</details>`
     : `<h1>Kiki</h1><p class="muted">Your answer goes to Fo, and Fo texts you what happens.</p>
 ${note ? `<p class="note">${esc(note)}</p>` : ""}
 ${question ? `<div class="ask"><strong>Fo asks:</strong><br>${esc(question)}</div>` : ""}
-<pre>${esc(proposal)}</pre>
+<p class="lead">${esc(lead ? lead[0]!.toUpperCase() + lead.slice(1) : proposal)}</p>
+${plan ? cards(ctx, plan) : ""}
 ${plan && isQuestion(ctx, plan) ? whereForm(unplacedNotes(plan)) : decideForm}`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kiki</title>
 <style>
@@ -109,11 +114,38 @@ label{display:block;font-size:14px;color:var(--muted);margin:0 0 6px}textarea{wi
 .note{border:1px solid var(--line);border-radius:12px;padding:12px}
 .status{text-align:center;padding:48px 8px 32px}.status h1{font-size:24px;margin:0 0 8px}.status p{margin:0 auto;max-width:34ch;color:var(--muted)}.status .next{margin-top:16px;color:var(--ink);font-weight:600}
 .check{width:56px;height:56px;margin:0 auto 16px;border-radius:50%;background:var(--ok);color:var(--bg);font-size:30px;line-height:56px}
+.lead{font-size:17px;margin:0 0 14px}.cards{list-style:none;padding:0;margin:0 0 12px}.card{border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 8px}
+.card .name{font-size:14px;color:var(--muted);word-break:break-word}.card .to{margin:2px 0}.small{font-size:14px;word-break:break-word}.why{font-size:13px;color:var(--muted);margin-top:4px}
+.steps{border-top:0;padding-top:0;margin:0 0 16px}.steps pre{font-size:13px}
 .label{font-weight:600;margin:0 0 10px}.place{display:block;width:100%;text-align:left;margin:0 0 8px;border-radius:12px;border-color:var(--line)}
 details{border-top:1px solid var(--line);padding-top:12px}summary{color:var(--muted);font-size:14px;cursor:pointer;margin:0 0 12px}
 </style></head><body><main>
 ${body}
 </main></body></html>`;
+}
+
+/**
+ * The proposal as you'd check it on a phone: each file you just added, where it goes and any new
+ * name, with Kiki's reason; then what else it tidies; then every step, exactly, under a fold.
+ */
+function cards(ctx: Ctx, plan: PlanRow): string {
+  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state <> 'excluded' ORDER BY seq", plan.id);
+  const fresh = moves.filter((o) => !alreadyFiled(o.pre_path));
+  const card = (o: PlanOpRow) => {
+    const copy = Boolean(o.new_path && inDuplicatesFolder(o.new_path));
+    const renamed = o.new_name && o.pre_name && o.new_name !== o.pre_name && !copy;
+    return `<li class="card"><div class="name">${esc(o.pre_name ?? o.new_name ?? "")}</div>
+  <div class="to">${copy ? "Set aside as a copy" : `&rarr; <strong>${esc(displayFolder(o.new_path) || "the main folder")}</strong>`}</div>
+  ${renamed ? `<div class="small">New name: ${esc(o.new_name!)}</div>` : ""}
+  ${o.reason ? `<div class="why">${esc(o.reason)}</div>` : ""}</li>`;
+  };
+  const tidy = moves.length - fresh.length;
+  // Files Kiki asks about: which one, and why she can't tell.
+  const asked = unplacedNotes(plan).map((n) => `<li class="card"><div class="name">${esc(n.name)}</div><div class="why">Kiki couldn't tell which project or folder it belongs to.</div></li>`);
+  if (!moves.length) return asked.length ? `<ul class="cards">${asked.join("")}</ul>` : "";
+  return `${fresh.length || asked.length ? `<ul class="cards">${fresh.map(card).join("")}${asked.join("")}</ul>` : ""}
+${tidy ? `<p class="muted">Also tidies ${tidy} file${tidy === 1 ? "" : "s"} already filed.</p>` : ""}
+<details class="steps"><summary>Every step</summary><pre>${esc(proposalLines(ctx, plan))}\nNothing is deleted.</pre></details>`;
 }
 
 const decideForm = `<form method="post">
@@ -131,8 +163,7 @@ function whereForm(files: { name: string; options: string[] }[]): string {
   const one = files.length === 1;
   const places = one ? files[0]!.options.slice(0, 3) : [];
   return `<form method="post">
-  <p class="label">${one ? "Where should it go?" : "Where should they go?"}</p>
-  ${places.map((p) => `<button name="answer" value="${esc(`Put it in ${p}`)}" class="place">${esc(p)}</button>`).join("\n  ")}
+  ${places.map((p) => `<button name="answer" value="${esc(`Put it in ${p}`)}" class="place">${esc(displayFolder(p))}</button>`).join("\n  ")}
   <label for="other">${places.length ? "Or type a project or folder" : "Type a project or folder"}</label>
   <textarea id="other" name="other" rows="2" placeholder="${one ? "Work, or Projects/Kitchen…" : "Put the timesheet in Work, the receipt in Kitchen…"}"></textarea>
   <div class="row">

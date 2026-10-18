@@ -845,8 +845,8 @@ describe("texts to the account holder through Fo", () => {
     await rig.app.settle();
 
     assert.match(texts(rig.fo)[0]!, /Northside Building Supply/);
-    assert.match(texts(rig.fo)[0]!, /Proposed changes/);
-    assert.match(texts(rig.fo)[0]!, /N-5602.pdf/);
+    assert.match(texts(rig.fo)[0]!, /N-5602/, "the new name is in the text");
+    assert.match(rig.fo.asks[0]!.message, /The exact proposal this text is about/, "and every step is with Fo");
     const ask = rig.fo.asks[0]!;
     assert.equal(ask.newConversation, true);
     assert.match(ask.message, /^Please text me \(an SMS to my phone, nobody else\) this exact message:/);
@@ -930,7 +930,7 @@ describe("texts to the account holder through Fo", () => {
   test("a plan you approved by answering Fo's text gets one 'done' text once it's verified in Drive", async (t) => {
     const rig = await textedAboutInvoice(t);
     await youAnswerInKiki(rig, "go ahead");
-    assert.deepEqual(texts(rig.fo).slice(1), [`Kiki: done. It's filed in Projects/Flooring/Invoices as "${INVOICE_FILED}".`]);
+    assert.deepEqual(texts(rig.fo).slice(1), [`Kiki: done ✓ "Northside invoice Oct 17" is in Flooring › Invoices.`]);
 
     sendDoneText(rig.app.ctx, rig.plan.id); // e.g. the execute job running again
     await checkTextReply(rig.app.ctx, rig.note.taskId);

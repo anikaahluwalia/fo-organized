@@ -96,7 +96,7 @@ test("signatures: Standard Webhooks, within five minutes, nothing else", () => {
 
 test("a yes you text Fo, even in an old iMessage thread, approves the proposal Fo texted you", async (t) => {
   const s = await setup(t);
-  assert.match(s.note.text ?? "", /or just reply to this text/, "with the webhook, the text invites a reply");
+  assert.match(s.note.text ?? "", /Reply yes, or tap to change it:/, "with the webhook, the text invites a reply");
   foReads(s, "yes go ahead");
   assert.equal(await deliver(s, textEvent()), 204);
   assert.equal(asked(s), 1, "Kiki asked Fo, in her conversation, to read your text");
@@ -149,6 +149,7 @@ test("a text from before Kiki's question isn't taken as an answer", async (t) =>
 
 test("without a webhook secret, the address isn't there and the text says to use the link", async (t) => {
   const s = await setup(t, null);
-  assert.match(s.note.text ?? "", /text replies can't be processed/);
+  assert.match(s.note.text ?? "", /Tap to answer:/);
+  assert.doesNotMatch(s.note.text ?? "", /\breply\b/i);
   assert.equal(await post(s.port, textEvent(), {}), 404);
 });

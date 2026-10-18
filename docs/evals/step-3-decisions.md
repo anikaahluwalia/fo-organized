@@ -40,3 +40,9 @@ Every finding filed under Step 3, and about 30 more that automated reviews found
 - quote updates never brought to Fo.
 
 Where a reproduction test pinned an earlier design (approval by text reply, an old line format, a separate placement protocol), its mechanism was updated and what it protects was kept. The test files say so.
+
+## Texts written for the moment (`scripts/eval-compose.ts`)
+
+Fo's texts are written by Claude from Kiki's facts and checked by Kiki before they go out: every file named (by a short name made only of words from its name or what Kiki read), every folder, each new name (or how many, past two), nothing said done before you've answered, no links, paths, versions or protocol lines, and an answer that fits (a place for a question, never a yes; no text reply invited when only the link works). A text that fails a check goes out in Kiki's own words. Fo still gets the exact proposal alongside, not to be texted.
+
+Live (claude-opus-5-5), 12 situations (one file, a rename, link only, no link, three renames, seven files, a question, a copy, a revised and an unchanged version, done, stopped): 12/12 passed Kiki's checks, longest 150 characters. Before the rename and question rules: 11/12 (three full new names ran past the length limit; a question ended "Reply yes").

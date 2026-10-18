@@ -23,7 +23,7 @@ test("after Try again finishes a plan you approved by text, Fo tells you it's do
   rig.app.approvePlan(plan.id, { contentHash: plan.contentHash, clientRequestId: `fo-reply-${plan.id}` });
   await rig.app.settle();
   const texts = async () => (await rig.app.view()).notifications.filter((n) => n.purpose === "done").map((n) => n.text ?? "");
-  assert.match((await texts()).join(" | "), /approved plan stopped \(partial\)/, "Fo told you it stopped");
+  assert.match((await texts()).join(" | "), /^Kiki: I couldn.t finish\. \d+ of \d+ steps are done/, "Fo told you it stopped");
 
   rig.app.resumePlan(plan.id);
   await rig.app.settle();

@@ -12,12 +12,12 @@ import { kvGet, kvSet, logEvent, now, one, tx, type PlanRow, type WorkspaceRow }
 import { conflict } from "../errors.ts";
 import { getTask, insertTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
-import { notifyPurpose, replyState, saveReply, textedProposal } from "./notify.ts";
+import { notifyPurpose, replyState, saveReply, textProposal } from "./notify.ts";
 import { adjustOrganize, getPlan } from "./plans.ts";
 import { proposalItems, proposalLines } from "./proposal.ts";
 
 function decideMessage(ctx: Ctx, ws: WorkspaceRow, plan: PlanRow, binding: ApprovalBinding, lead: string): string {
-  return `${lead} Please explain it to me here in plain words and ask me what I'd like to do. Don't message anyone else, and don't change any files yourself: Kiki does that after I decide.
+  return `${lead} Please explain it to me here in plain words, in two or three short sentences (name the files and where they'd go; skip folder paths, the index and version numbers unless I ask), and ask me what I'd like to do. Don't message anyone else, and don't change any files yourself: Kiki does that after I decide.
 
 Kiki's proposal for my Drive folder "${inert(ws.name)}" (version ${plan.version}): ${inert(plan.summary)}
 ${proposalLines(ctx, plan)}
@@ -29,17 +29,24 @@ ${approvalInstructions(binding)}`;
 }
 
 /** A request to Fo about one proposal version: its task, binding and what Kiki asked. */
-function newRequest(ctx: Ctx, plan: PlanRow, message: (binding: ApprovalBinding) => string, texted?: (binding: ApprovalBinding, taskId: string) => { body: string; request: string }): { taskId: string; message: string; byText: boolean } {
+/**
+ * A new request for your decision on `plan`. In Kiki, Fo brings it to you with `message`; by text
+ * (`texted`), the text is queued and goes out on its own, so there's no message to send here.
+ */
+function newRequest(ctx: Ctx, plan: PlanRow, message: (binding: ApprovalBinding) => string, texted?: (taskId: string) => void): { taskId: string; message: string; byText: boolean } {
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   const binding: ApprovalBinding = { requestId: randomUUID(), planId: plan.id, contentHash: plan.content_hash };
-  const t = texted?.(binding, taskId);
-  const text = t ? t.request : message(binding);
-  kvSet(ctx.db, `notify.purpose.${taskId}`, t ? "find" : "decide");
-  kvSet(ctx.db, `notify.text.${taskId}`, t ? t.body : text);
-  if (t) kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
+  kvSet(ctx.db, `notify.purpose.${taskId}`, texted ? "find" : "decide");
+  if (texted) kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
   kvSet(ctx.db, `decide.plan.${plan.id}`, taskId);
   saveReply(ctx, taskId, { status: "waiting", text: null, source: null, ...binding, requestedAt: now() });
-  return { taskId, message: text, byText: Boolean(t) };
+  if (texted) {
+    texted(taskId);
+    return { taskId, message: "", byText: true };
+  }
+  const text = message(binding);
+  kvSet(ctx.db, `notify.text.${taskId}`, text);
+  return { taskId, message: text, byText: false };
 }
 
 /**
@@ -123,11 +130,11 @@ export async function handleChangeRequest(ctx: Ctx, taskId: string, opts: { quie
     // The proposal reached you as a text (you answered by text, or at its link): the next version
     // comes back to you as a text too, with its own link.
     const byText = Boolean(state.answers?.at(-1)?.via) || notifyPurpose(ctx, taskId) === "find";
-    const sent = newRequest(ctx, target, (binding) => decideMessage(ctx, ws, target, binding, lead), byText ? (binding, id) => textedProposal(ctx, target, binding, next ? `Kiki: you asked for changes, so here's version ${next.version}.` : `Kiki: she didn't change the proposal. ${note ?? ""}`.trim(), id) : undefined);
+    const sent = newRequest(ctx, target, (binding) => decideMessage(ctx, ws, target, binding, lead), byText ? (id) => void textProposal(ctx, target, id, next ? "revised" : "unchanged", note ?? undefined) : undefined);
     saveReply(ctx, taskId, { ...state, status: next ? "revised" : "not_changed", revision: { planId: next?.id ?? null, version: next?.version ?? null, note } });
     logEvent(ctx.db, ws.id, "plan", next ? `You asked for changes through Fo, so Kiki made version ${next.version} of "${next.title}". It needs your decision.` : `You answered through Fo, but Kiki didn't change the proposal. ${note ?? ""}`.trim());
     return sent;
   });
-  if (followUp?.byText) await ctx.engine.start(followUp.taskId, followUp.message).catch(() => undefined);
-  else if (followUp) await ctx.engine.startInConversation(followUp.taskId, conversationId, followUp.message).catch(() => undefined);
+  // A texted version is on its way (queued with its text); one in Kiki goes to the same conversation.
+  if (followUp && !followUp.byText) await ctx.engine.startInConversation(followUp.taskId, conversationId, followUp.message).catch(() => undefined);
 }

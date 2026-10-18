@@ -39,7 +39,7 @@ async function setup(t: TestContext) {
   await rig.app.stageRevision("invoice");
   await rig.app.settle();
   const note = (await rig.app.view()).notifications.find((n) => n.purpose === "find")!;
-  const link = /Answer here: (\S+)/.exec(note.text ?? "")?.[1];
+  const link = /(https:\/\/\S+\/a\/\S+)$/.exec(note.text ?? "")?.[1];
   const port = 30_000 + Math.floor(Math.random() * 20_000);
   const server = createHttpServer(rig.app, { ...loadConfig({ PORT: String(port), KIKI_MODE: "mock" }), publicUrl: PUBLIC }, { google: null, fo: null }, "/nonexistent");
   await new Promise<void>((r) => server.listen(port, "127.0.0.1", () => r()));
@@ -115,12 +115,20 @@ test("another site can't post an answer through your link", async (t) => {
 
 test("a text with a link says to answer there, and asks Fo not to invite a text reply", async (t) => {
   const s = await setup(t);
-  assert.match(s.note.text ?? "", /Please tap the link to approve or ask for changes: text replies can't be processed\./);
-  assert.doesNotMatch(s.note.text ?? "", /Reply to this text|answer Fo naturally/);
+  assert.match(s.note.text ?? "", /Tap to answer:\nhttps:/);
+  assert.doesNotMatch(s.note.text ?? "", /\breply\b/i, "without the webhook, a text reply isn't invited");
   const sent = s.fo.asks.find((a) => a.message.startsWith("Please text me"))!.message;
   assert.match(sent, /Don't invite me to reply by text/);
-  const page = await request(s.port, { path: new URL(s.link!).pathname, host: new URL(PUBLIC).host });
-  assert.doesNotMatch(page.text, /text replies can't be processed/, "the page itself doesn't repeat it");
+});
+
+test("the text is short; Fo gets the exact proposal besides, and isn't to text it", async (t) => {
+  const s = await setup(t);
+  const body = (s.note.text ?? "").replace(/\nhttps:\S+$/, "");
+  assert.ok(body.length <= 260, `short: ${body}`);
+  assert.doesNotMatch(body, /Projects\/|version \d|index|Nothing is deleted/);
+  const sent = s.fo.asks.find((a) => a.message.startsWith("Please text me"))!.message;
+  assert.match(sent, /The exact proposal this text is about \(version \d+\), for you to answer my questions about it; don't text it to me:/);
+  assert.match(sent, /Move "Northside invoice/, "every step is there for Fo");
 });
 
 test("a text reply to a linked proposal isn't taken as an answer", async (t) => {
@@ -179,7 +187,7 @@ async function askedWhere(t: TestContext) {
   rig.app.refreshInventory();
   await rig.app.settle();
   const note = (await rig.app.view()).notifications.find((n) => n.purpose === "find")!;
-  const link = /Answer here: (\S+)/.exec(note.text ?? "")![1]!;
+  const link = /(https:\/\/\S+\/a\/\S+)$/.exec(note.text ?? "")![1]!;
   const port = 30_000 + Math.floor(Math.random() * 20_000);
   const server = createHttpServer(rig.app, { ...loadConfig({ PORT: String(port), KIKI_MODE: "mock" }), publicUrl: PUBLIC }, { google: null, fo: null }, "/nonexistent");
   await new Promise<void>((r) => server.listen(port, "127.0.0.1", () => r()));
@@ -189,9 +197,9 @@ async function askedWhere(t: TestContext) {
 
 test("\"where does it go?\" asks for a place on the page, not a yes", async (t) => {
   const s = await askedWhere(t);
-  assert.match(s.note.text ?? "", /Please tap the link to tell her/);
+  assert.match(s.note.text ?? "", /where should "thoughts" go\? Tap to pick a folder:/);
   const page = await request(s.port, { path: s.path, host: s.host });
-  assert.match(page.text, /Where should it go\?/);
+  assert.match(page.text, /Where should &quot;thoughts&quot; go\?[\s\S]*Leave it where it is/);
   assert.match(page.text, /Leave it where it is/);
   assert.doesNotMatch(page.text, /Yes, go ahead/);
 });
@@ -205,7 +213,7 @@ test("a yes to \"where does it go?\" keeps the question open, and the page says 
   assert.equal(replyState(s.rig.app.ctx, s.note.taskId)?.status, "waiting");
   const page = await request(s.port, { path: s.path, host: s.host });
   assert.match(page.text, /Kiki needs to know where it goes/);
-  assert.match(page.text, /Where should it go\?/, "and you can still answer");
+  assert.match(page.text, /Where should &quot;thoughts&quot; go\?[\s\S]*Leave it where it is/, "and you can still answer");
 });
 
 test("a question a plain yes left stuck before this fix is reopened when Kiki starts", async (t) => {
@@ -214,7 +222,7 @@ test("a question a plain yes left stuck before this fix is reopened when Kiki st
   assert.match((await request(s.port, { path: s.path, host: s.host })).text, /settled/);
   s.rig.app.recover();
   const page = await request(s.port, { path: s.path, host: s.host });
-  assert.match(page.text, /Where should it go\?/);
+  assert.match(page.text, /Where should &quot;thoughts&quot; go\?[\s\S]*Leave it where it is/);
   assert.match(page.text, /Kiki needs to know where it goes/);
 });
 
@@ -231,6 +239,6 @@ test("a change you ask for at the link comes back to you as a text, with its own
   await s.rig.app.settle();
   const next = s.fo.asks.at(-1)!;
   assert.match(next.message, /^Please text me/, "Fo is asked to text it, not just tell you in Kiki");
-  assert.match(next.message, /here's version \d+/);
-  assert.match(next.message, /Answer here: https:\/\/kiki-test\.example\/a\//);
+  assert.match(next.message, /Kiki: updated as you asked\./);
+  assert.match(next.message, /\nhttps:\/\/kiki-test\.example\/a\/\S+\n-----END APPROVED BODY-----/, "with its own link");
 });

@@ -27,7 +27,7 @@ import { approvePlan, autoPropose, discardPlan, placeFile, proposeOrganize, prop
 import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
 import { refreshPlan } from "./services/refresh.ts";
 import { textFromWebhook, watchTextReplies } from "./services/textreply.ts";
-import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText, reopenQuestions } from "./services/notify.ts";
+import { autoNotifyProposal, autoTextEnabled, checkTextReply, composeAndSend, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText, reopenQuestions } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
 import { dismissAttention } from "./services/attention.ts";
@@ -83,6 +83,8 @@ export function createApp(deps: AppDeps) {
   });
   // Watches for your reply to Fo's text ("go ahead"), read-only, until it arrives or expires.
   jobs.register("text_reply", async (p) => checkTextReply(ctx, String(p.taskId)));
+  // A text for Fo to send you: written for the moment and checked, then sent.
+  jobs.register("compose_text", async (p) => composeAndSend(ctx, String(p.taskId)));
   // You asked Fo for changes to a proposal: Kiki makes the new version and sends it back to Fo.
   // A text you send Fo while a proposal waits: Kiki has Fo read it and report your decision.
   jobs.register("text_watch", async (p) => watchTextReplies(ctx, String(p.taskId)));

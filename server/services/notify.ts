@@ -10,8 +10,9 @@ import { AppError, badRequest, conflict } from "../errors.ts";
 import { getTask, insertTask, type TaskHandler } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { approvePlan } from "./plans.ts";
-import { proposalLines } from "./proposal.ts";
 import { answerLink } from "./answerlink.ts";
+import { chooseText, plainText, type ComposeFacts, type ComposeItem, type Situation } from "../domain/compose.ts";
+import { proposalItems, proposalLines } from "./proposal.ts";
 import { requireWorkspace } from "./workspace.ts";
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -75,7 +76,7 @@ I may text back "go ahead". If I do, please don't move or change any files yours
 ${text}
 -----END APPROVED BODY-----
 
-This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${/\nAnswer here: \S+$/.test(text) ? ` Keep the link exactly as written.${text.includes(LINK_ONLY) ? " Don't invite me to reply by text: the link is how I answer." : ""}` : ""}${context ? ` ${context}` : ""}${reply}
+This comes from Kiki, the file-organizing app I connected to you (ref ${reference}). Don't contact anyone else or do anything besides sending this to me.${LINK_LINE.test(text) ? ` Keep the link exactly as written, on its own line.${text.includes(LINK_ONLY) ? " Don't invite me to reply by text: the link is how I answer." : ""}` : ""}${context ? ` ${context}` : ""}${reply}
 
 End your reply with exactly one of these lines:
 ${STATUS_LINES.sent}
@@ -301,23 +302,15 @@ export function sendDoneText(ctx: Ctx, planId: string): void {
   // One text per outcome: a "done" can still follow a "stopped" once Try again finishes it.
   const outcome = plan.status === "applied" ? "done" : "stopped";
   if (kvGet(ctx.db, `notify.done.${planId}.${outcome}`) || (outcome === "stopped" && kvGet(ctx.db, `notify.done.${planId}.done`))) return;
-  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state = 'verified' ORDER BY seq", planId);
-  const text = plan.status !== "applied"
-    ? `Kiki: the approved plan stopped (${plan.status}). ${all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state = 'verified'", planId).length} steps were verified in Drive. The remaining changes need review; I have not marked the plan done.`
-    : moves.length === 1
-      ? `Kiki: done. It's filed in ${inert(moves[0]!.new_path)} as "${inert(moves[0]!.new_name)}".`
-      : `Kiki: done. I filed ${moves.length} documents and updated the index.`;
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   kvSet(ctx.db, `notify.done.${planId}.${outcome}`, taskId);
-  kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "done");
   logEvent(ctx.db, plan.workspace_id, "fo_text", `Kiki asked ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to text you that it's done.`);
-  const conversationId = getTask(ctx.db, requestTask)?.conversation_id;
-  const context = `It's the outcome of "${inert(plan.title)}" (version ${plan.version}), the proposal you brought me in this conversation and whose answer you reported to Kiki: Kiki ${plan.status === "applied" ? "applied it and read every change back from Google Drive" : "started applying it and read back from Google Drive what got done"}, and the text above is that verified result.`;
-  const send = conversationId
-    ? ctx.engine.startInConversation(taskId, conversationId, message(text, newReference(), "text", false, context))
-    : ctx.engine.start(taskId, message(text, newReference(), "text"));
-  void send.catch(() => undefined);
+  const conversationId = getTask(ctx.db, requestTask)?.conversation_id ?? undefined;
+  const context = conversationId
+    ? `It's the outcome of "${inert(plan.title)}" (version ${plan.version}), the proposal you brought me in this conversation and whose answer you reported to Kiki: Kiki ${plan.status === "applied" ? "applied it and read every change back from Google Drive" : "started applying it and read back from Google Drive what got done"}, and the text above is that verified result.`
+    : undefined;
+  queueText(ctx, taskId, { planId, situation: outcome, link: null, conversationId, context, bind: false }, plainText(resultFacts(ctx, plan)));
 }
 
 /** Fo's reply as you should read it: its own words, without Kiki's status and decision lines. */
@@ -393,7 +386,7 @@ function describeDoc(f: DocFacts | null): string {
 /** What Fo texts: what Kiki found, where she'd put it, and how to say yes. */
 /** Moves that file a document, as opposed to setting an exact copy aside. */
 /** Already inside the folders Kiki files into (Projects, or the earlier Renovations). */
-const alreadyFiled = (path: string | null) => /^(Projects|Renovations)(\/|$)/.test(path ?? "");
+export const alreadyFiled = (path: string | null) => /^(Projects|Renovations)(\/|$)/.test(path ?? "");
 
 /** New documents to file, documents already filed that would be renamed or moved, and exact copies set aside. */
 function filingMoves(ctx: Ctx, planId: string): { filing: PlanOpRow[]; fresh: PlanOpRow[]; refiled: number; copies: number; freshCopies: PlanOpRow[] } {
@@ -473,8 +466,9 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
 }
 
 /**
- * Said in a text with a link. Without Fo's webhook a text reply lands in a separate Fo conversation
- * Kiki can't tie to the request, so the link is the one way to answer; with it, a reply works too.
+ * Said in a text with a link (Kiki's older texts, and quote updates). Without Fo's webhook a text
+ * reply lands in a separate Fo conversation Kiki can't tie to the request, so the link is the one
+ * way to answer; with it, a reply works too.
  */
 export const LINK_ONLY = "Please tap the link to approve or ask for changes: text replies can't be processed.";
 export const LINK_OR_TEXT = "Tap the link to approve or ask for changes, or just reply to this text.";
@@ -482,12 +476,15 @@ export const LINK_OR_TEXT = "Tap the link to approve or ask for changes, or just
 export const LINK_ONLY_WHERE = "Please tap the link to tell her: text replies can't be processed.";
 export const LINK_OR_TEXT_WHERE = "Tap the link to tell her, or just reply to this text.";
 
+/** The answer link on the last line of a text. */
+export const LINK_LINE = /\n(https:\/\/\S+\/a\/[A-Za-z0-9_-]+)$/;
+
 /** A proposal that only asks where files go: nothing to approve, so you answer with a place. */
 export function isQuestion(ctx: Ctx, plan: PlanRow): boolean {
   return !one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id);
 }
 
-/** A text with its answer link, saying how to answer. */
+/** Kiki's long text with its answer link (quote updates, which aren't written for the moment yet). */
 function withLink(ctx: Ctx, plan: PlanRow, text: string, link: string | null): string {
   if (!link) return text;
   const how = isQuestion(ctx, plan) ? (ctx.foWebhook ? LINK_OR_TEXT_WHERE : LINK_ONLY_WHERE) : ctx.foWebhook ? LINK_OR_TEXT : LINK_ONLY;
@@ -495,14 +492,147 @@ function withLink(ctx: Ctx, plan: PlanRow, text: string, link: string | null): s
     .replace(/ ?Reply to this text, or answer in Kiki: yes, a change, or no\./g, "")
     .replace(/Reply to this text, or answer in Kiki:/g, "At the link,")
     .replace(/You can answer Fo naturally, ask a question, ask for changes, or decline\./, how);
-  return `${body}${body.includes(how) ? "" : `\n\n${how}`}\n\nAnswer here: ${link}`;
+  return `${body}${body.includes(how) ? "" : `\n\n${how}`}\n${link}`;
 }
 
-/** The request that has Fo text you a proposal (and only you), with the binding for your answer. */
-export function textedProposal(ctx: Ctx, plan: PlanRow, binding: ApprovalBinding, lead?: string, taskId?: string): { body: string; request: string } {
-  const link = taskId ? answerLink(ctx, taskId) : null;
-  const body = withLink(ctx, plan, `${lead ? `${lead}\n\n` : ""}${newFindText(ctx, plan)}`, link);
-  return { body, request: message(body, newReference(), "text") + "\n\n" + approvalInstructions(binding) };
+/** A folder as you'd say it: "Projects/Work/Other documents" is "Work › Other documents". */
+export function displayFolder(path: string | null): string {
+  const parts = (path ?? "").split("/").filter(Boolean);
+  if (parts[0] === "Projects" || parts[0] === "Renovations") parts.shift();
+  return parts.join(" › ");
+}
+
+/** What Kiki read about a document: the words a short name for it may use. */
+function aboutDoc(ctx: Ctx, docId: string | null, fileId: string | null, workspaceId: string): string[] {
+  const doc = docId
+    ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE id = ?", docId)
+    : fileId
+      ? one<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE workspace_id = ? AND file_id = ?", workspaceId, fileId)
+      : undefined;
+  const f = doc?.facts_json ? (JSON.parse(doc.facts_json) as DocFacts) : null;
+  return [f?.title?.value, f?.issuer?.value, f?.reference?.value, f?.docType && f.docType !== "unknown" && f.docType !== "other" ? f.docType : null, f?.project?.value].filter((x): x is string => Boolean(x)).map((x) => inert(x, 120));
+}
+
+/** A new name, as a text shows it: without the extension or the leading date. */
+const shownName = (name: string) => name.replace(/(\.[a-z0-9]{2,5})+$/i, "").replace(/^\d{4}-\d{2}-\d{2}\s+/, "");
+
+function howToAnswer(ctx: Ctx, link: string | null): ComposeFacts["answer"] {
+  return link ? (ctx.foWebhook ? "reply_or_link" : "link") : "reply_or_app";
+}
+
+/**
+ * A proposal as facts for its text: the new files and where they go, copies to set aside, files
+ * Kiki asks about, and how many already filed it also tidies. Null when it isn't a filing (a quote
+ * update): that keeps Kiki's own text.
+ */
+export function proposalFacts(ctx: Ctx, plan: PlanRow, situation: Situation, link: string | null, note?: string): ComposeFacts | null {
+  if (plan.kind !== "organize") return null;
+  const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
+  const { fresh, freshCopies, filing, copies } = filingMoves(ctx, plan.id);
+  const numbered = new Map(proposalItems(ctx, plan).map((i) => [i.fileId, i]));
+  const items: ComposeItem[] = [];
+  for (const op of fresh) {
+    items.push({
+      n: numbered.get(op.file_id ?? "")?.n ?? op.seq,
+      kind: "file",
+      name: inert(op.pre_name ?? op.new_name ?? ""),
+      about: aboutDoc(ctx, op.doc_id, op.file_id, plan.workspace_id),
+      folder: inert(displayFolder(op.new_path)),
+      renamedTo: op.new_name && op.pre_name && op.new_name !== op.pre_name ? inert(shownName(op.new_name)) : undefined,
+    });
+  }
+  for (const op of freshCopies) items.push({ n: numbered.get(op.file_id ?? "")?.n ?? op.seq, kind: "copy", name: inert(op.pre_name ?? ""), about: aboutDoc(ctx, op.doc_id, op.file_id, plan.workspace_id) });
+  for (const i of numbered.values()) {
+    if (i.kind === "unplaced") items.push({ n: i.n, kind: "unplaced", name: inert(i.name), about: aboutDoc(ctx, null, i.fileId, plan.workspace_id), options: (i.options ?? []).map((o) => inert(displayFolder(o))) });
+  }
+  const alsoTidying = filing.length - fresh.length + (copies - freshCopies.length);
+  return { situation, workspace: inert(ws.name), items, answer: howToAnswer(ctx, link), ...(note ? { note: inert(note, 300) } : {}), ...(alsoTidying ? { alsoTidying } : {}) };
+}
+
+/** A plan you approved by text, as facts for the text that says how it went. */
+function resultFacts(ctx: Ctx, plan: PlanRow): ComposeFacts {
+  const ws = one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", plan.workspace_id)!;
+  const moves = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND kind = 'move_rename' AND state = 'verified' ORDER BY seq", plan.id);
+  const live = all<PlanOpRow>(ctx.db, "SELECT * FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id);
+  const items: ComposeItem[] = moves.map((op) => ({
+    n: op.seq,
+    kind: op.new_path && inDuplicatesFolder(op.new_path) ? "copy" : "file",
+    // By the name you knew it by; where it went is the folder.
+    name: inert(op.pre_name ?? op.new_name ?? ""),
+    about: aboutDoc(ctx, op.doc_id, op.file_id, plan.workspace_id),
+    folder: inert(displayFolder(op.new_path)),
+  }));
+  return { situation: plan.status === "applied" ? "done" : "stopped", workspace: inert(ws.name), items, answer: null, verified: { done: live.filter((o) => o.state === "verified").length, total: live.length } };
+}
+
+/** How a text is to be written and sent, kept until the job sends it. */
+interface TextSpec {
+  planId: string;
+  situation: Situation;
+  note?: string;
+  link: string | null;
+  /** Sent into this Fo conversation (where Fo brought you the proposal); else a new one. */
+  conversationId?: string;
+  /** What Fo should know about it, said after the text. */
+  context?: string;
+  /** Carries the binding for your answer (a proposal); a result doesn't. */
+  bind: boolean;
+}
+
+/**
+ * Queues a text for Fo to send you. Kiki's own version is saved at once (so the app shows it); the
+ * job then has Claude write it for the moment, checks it, and sends whichever passes.
+ */
+function queueText(ctx: Ctx, taskId: string, spec: TextSpec, fallback: string): void {
+  kvSet(ctx.db, `notify.compose.${taskId}`, JSON.stringify(spec));
+  kvSet(ctx.db, `notify.text.${taskId}`, fallback);
+  ctx.jobs.enqueue("compose_text", `compose_text:${taskId}`, { taskId });
+}
+
+function factsFor(ctx: Ctx, plan: PlanRow, spec: TextSpec): ComposeFacts | null {
+  return spec.situation === "done" || spec.situation === "stopped" ? resultFacts(ctx, plan) : proposalFacts(ctx, plan, spec.situation, spec.link, spec.note);
+}
+
+/** The job: writes the queued text (Claude, checked; Kiki's own if not), then has Fo send it. */
+export async function composeAndSend(ctx: Ctx, taskId: string): Promise<void> {
+  const raw = kvGet(ctx.db, `notify.compose.${taskId}`);
+  const task = getTask(ctx.db, taskId);
+  if (!raw || task?.state !== "pending") return;
+  const spec = JSON.parse(raw) as TextSpec;
+  const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", spec.planId);
+  const facts = plan ? factsFor(ctx, plan, spec) : null;
+  let text = kvGet(ctx.db, `notify.text.${taskId}`) ?? "";
+  if (facts) {
+    // A text that can't be written for the moment still goes out, in Kiki's words.
+    const composed = await ctx.reader.composeText(facts).catch(() => null);
+    const choice = chooseText(facts, composed);
+    kvSet(ctx.db, `notify.composed.${taskId}`, JSON.stringify({ by: choice.by, problems: choice.problems }));
+    text = `${choice.text}${spec.link ? `\n${spec.link}` : ""}`;
+    kvSet(ctx.db, `notify.text.${taskId}`, text);
+  }
+  if (getTask(ctx.db, taskId)?.state !== "pending") return;
+  const state = replyState(ctx, taskId);
+  const linkOnly = spec.link && !ctx.foWebhook ? " Don't invite me to reply by text: the link is how I answer." : "";
+  // The text is short; Fo gets the exact proposal too, to answer questions and know what I decide on.
+  const scope = spec.bind && plan ? `\n\nThe exact proposal this text is about (version ${plan.version}), for you to answer my questions about it; don't text it to me:\n${proposalLines(ctx, plan)}\nNothing is deleted.` : "";
+  const request =
+    message(text, newReference(), "text", false, `${spec.context ?? ""}${linkOnly}`.trim()) +
+    scope +
+    (spec.bind && state?.requestId ? `\n\n${approvalInstructions({ requestId: state.requestId, planId: state.planId, contentHash: state.contentHash })}` : "");
+  const send = spec.conversationId ? ctx.engine.startInConversation(taskId, spec.conversationId, request) : ctx.engine.start(taskId, request);
+  await send.catch(() => undefined);
+}
+
+/**
+ * A texted proposal with its answer link: Kiki's own text now, and the text for the moment queued.
+ * Returns that first text (what the app shows until the written one replaces it).
+ */
+export function textProposal(ctx: Ctx, plan: PlanRow, taskId: string, situation: Situation, note?: string): string {
+  const link = answerLink(ctx, taskId);
+  const facts = proposalFacts(ctx, plan, situation, link, note);
+  const fallback = facts ? `${plainText(facts)}${link ? `\n${link}` : ""}` : withLink(ctx, plan, newFindText(ctx, plan), link);
+  queueText(ctx, taskId, { planId: plan.id, situation, note, link, bind: true }, fallback);
+  return fallback;
 }
 
 /** Standing permission, texts to the account holder only: one text per new proposal. */
@@ -517,14 +647,11 @@ export function autoNotifyProposal(ctx: Ctx, plan: PlanRow): void {
   if (kvGet(ctx.db, `notify.plan.${plan.id}`) || kvGet(ctx.db, `notify.hash.${plan.content_hash}`)) return;
   kvSet(ctx.db, `notify.hash.${plan.content_hash}`, plan.id);
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
-  // The link to answer it: your answer there stays tied to this exact proposal.
-  const link = answerLink(ctx, taskId);
-  const text = withLink(ctx, plan, newFindText(ctx, plan), link);
   kvSet(ctx.db, `notify.plan.${plan.id}`, taskId);
-  kvSet(ctx.db, `notify.text.${taskId}`, text);
   kvSet(ctx.db, `notify.purpose.${taskId}`, "find");
   const binding: ApprovalBinding = { requestId: randomUUID(), planId: plan.id, contentHash: plan.content_hash };
   saveReply(ctx, taskId, { status: "waiting", text: null, source: null, ...binding, requestedAt: new Date().toISOString() });
+  // The link to answer it: your answer there stays tied to this exact proposal.
+  textProposal(ctx, plan, taskId, isQuestion(ctx, plan) ? "question" : "new");
   logEvent(ctx.db, plan.workspace_id, "fo_text", `Kiki asked ${ctx.engine.mode === "mock" ? "Mock Fo" : "Fo"} to text you about it.`);
-  void ctx.engine.start(taskId, message(text, newReference(), "text") + "\n\n" + approvalInstructions(binding)).catch(() => undefined);
 }

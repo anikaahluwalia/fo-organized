@@ -145,7 +145,7 @@ describe("Fo explains the exact proposal", () => {
     const s = await broughtToYou(t);
     assert.deepEqual({ planId: s.binding.planId, contentHash: s.binding.contentHash }, { planId: s.plan.id, contentHash: s.plan.contentHash });
     assert.match(s.binding.requestId, /^[0-9a-f-]{36}$/);
-    assert.ok(s.request.includes(`Proposed changes (version ${s.plan.version}):`));
+    assert.ok(s.request.includes(`The exact proposal this text is about (version ${s.plan.version})`));
     const steps = s.plan.ops.filter((o) => o.state !== "excluded");
     assert.deepEqual(
       steps.map((o) => o.kind),

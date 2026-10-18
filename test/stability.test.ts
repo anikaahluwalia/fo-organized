@@ -63,7 +63,7 @@ test("a filed document isn't renamed when it reads differently later, and Fo tex
   await rig.app.settle();
   view = await rig.app.view();
   const text = view.notifications[0]?.text ?? "";
-  assert.match(text, /^Kiki: a new invoice from Northside Building Supply/);
+  assert.match(text, /^Kiki: new file\. File "Northside invoice Oct 17" in Flooring/);
   assert.doesNotMatch(text, /already filed/);
   rig.app.close();
 });

@@ -25,7 +25,7 @@ If their answer is unclear or conditional and you can't resolve it with them, th
 When the account holder has actually answered, report their decision to Kiki in this conversation using ONE standalone line starting KIKI-DECISION: followed by a JSON object with exactly these fields:
 requestId, planId, contentHash (copy the binding above), decision (approved, declined, changes_requested, or clarification), userReply (their exact words), actor (account_holder), presentedExactProposal (true).
 Do not produce a decision report before receiving an answer. This format is for you, never something the user must type.
-Report decisions only here, in this conversation. If they answer by text, Kiki will ask you here to read it.
+Keep what you say to me short and plain: a sentence or two. Report decisions only here, in this conversation. If they answer by text, Kiki will ask you here to read it.
 If you cannot access the reply or relay it here, say so honestly. Kiki cannot assume cross-channel delivery works.
 Please don't move or change any files yourself. Kiki executes approved changes and reports the verified result.`;
 }

@@ -61,7 +61,8 @@ test("a change you text Fo makes a new version, which needs its own decision", a
   const next = (await s.rig.app.view()).plans.find((p) => p.status === "proposed");
   assert.ok(next?.ops.some((o) => o.after?.path.startsWith("Projects/Kitchen/")), "the new version files it under Kitchen");
   const texts = s.fo.asks.filter((a) => a.message.startsWith("Please text me"));
-  assert.match(texts.at(-1)!.message, new RegExp(`here's version ${next!.version}`), "and it comes back to you as a text");
+  assert.match(texts.at(-1)!.message, /Kiki: updated as you asked\./, "and it comes back to you as a text");
+  assert.ok(texts.at(-1)!.message.includes(`(version ${next!.version})`), "bound to that version");
 });
 
 test("a text from before Kiki's question isn't taken as an answer", async (t) => {
@@ -87,8 +88,8 @@ test("dropping a copy and a file Kiki can't place gets you one text about both",
   await rig.app.settle();
   const texts = (await rig.app.view()).notifications.filter((n) => n.purpose === "find");
   assert.equal(texts.length, 1, "one text");
-  assert.match(texts[0]!.text ?? "", /"quote again\.pdf" is an exact copy/);
-  assert.match(texts[0]!.text ?? "", /can't tell where "thoughts\.txt" goes/);
+  assert.match(texts[0]!.text ?? "", /"quote again\.pdf" is a copy of a file already filed/);
+  assert.match(texts[0]!.text ?? "", /where should "thoughts" go\?/);
 });
 
 test("a proposal that never reached Fo is texted when Kiki starts, once", async (t) => {
