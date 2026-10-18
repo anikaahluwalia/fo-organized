@@ -11,6 +11,7 @@ import { DbOAuthProvider } from "./fo/oauth.ts";
 import type { FoClient } from "./fo/types.ts";
 import { FakeDrive } from "./google/fake.ts";
 import { LiveDrive } from "./google/live.ts";
+import { FakeGmail, GMAIL_READONLY, LiveGmail, type GmailAdapter } from "./google/gmail.ts";
 import { GoogleAuth } from "./google/oauth.ts";
 import type { DriveAdapter } from "./google/types.ts";
 
@@ -21,6 +22,7 @@ const db = openDb(path.join(config.dataDir, "fo-rganized.db"));
 // Each integration is live or mock by configuration only. A live integration that fails stays a
 // visible failure; it is never swapped for a mock behind the user's back.
 let drive: DriveAdapter;
+let gmail: GmailAdapter;
 let googleFlow: OAuthFlow | null = null;
 let googleAuth: GoogleAuth | null = null;
 if (config.driveMode === "live") {
@@ -32,9 +34,15 @@ if (config.driveMode === "live") {
   });
   const auth = googleAuth;
   drive = new LiveDrive(auth);
-  googleFlow = { begin: async () => auth.beginAuth(), finish: (code, state) => auth.finishAuth(code, state), disconnect: () => auth.disconnect() };
+  gmail = new LiveGmail(auth);
+  googleFlow = {
+    begin: async (opts) => auth.beginAuth(opts?.gmail ? [GMAIL_READONLY] : []),
+    finish: (code, state) => auth.finishAuth(code, state),
+    disconnect: () => auth.disconnect(),
+  };
 } else {
   drive = new FakeDrive("mock");
+  gmail = new FakeGmail();
 }
 
 let fo: FoClient;
@@ -60,6 +68,7 @@ const reader = config.claudeMode === "live" ? new ClaudeReader(config.anthropicM
 const app = createApp({
   db,
   drive,
+  gmail,
   reader,
   fo,
   anthropicModel: config.anthropicModel,

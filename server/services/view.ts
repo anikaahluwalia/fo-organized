@@ -47,6 +47,7 @@ import { projectIndexRows } from "./indexfile.ts";
 import { getUserName } from "./outreach.ts";
 import { activeWorkspace, docFacts } from "./workspace.ts";
 import { notifyOutcome, notifyPurpose, notifyText, replyState } from "./notify.ts";
+import { foundAttachments } from "./attachments.ts";
 
 const STATUS_WORD: Record<string, string> = { current: "current", superseded: "superseded", unresolved: "not yet confirmed", proposed: "proposed" };
 
@@ -347,6 +348,7 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       planId,
       error: o.error,
       ignoredRequests: interp?.requests_to_ignore ?? [],
+      emailAttachments: foundAttachments(ctx, o.id).map((a, index) => ({ index, filename: a.filename, from: a.from, subject: a.subject, date: a.date, saved: a.saved })),
     };
   });
 

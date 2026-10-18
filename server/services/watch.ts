@@ -8,7 +8,6 @@ import {
   tx,
   type DispatchRow,
   type DocumentRow,
-  type FileRow,
   type ObservedTurnRow,
   type OutcomeRow,
   type OutreachVersionRow,
@@ -18,7 +17,7 @@ import {
 import { describeQuote } from "../domain/outreach.ts";
 import { sourceLabel, type Outcome } from "../domain/outcome.ts";
 import { buildConfirmCurrentPlan, buildVersionUpdatePlan } from "../domain/plan.ts";
-import { diffQuotes, findRevisionCandidates, money, type Candidate, type VersionDoc } from "../domain/reconcile.ts";
+import { diffQuotes, money, type Candidate } from "../domain/reconcile.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
 import { ReadError } from "../extractor.ts";
 import { insertTask } from "../fo/engine.ts";
@@ -27,6 +26,8 @@ import { FoCallError, type FoTurn } from "../fo/types.ts";
 import type { Ctx } from "./context.ts";
 import { indexFiles, planDoc, planFiles, refreshOrganizeProposal, savePlanVersion } from "./plans.ts";
 import { docFacts, runInventory, runReading } from "./workspace.ts";
+import { searchEmailedAttachments } from "./attachments.ts";
+import { rejectCandidates, revisionCandidates, versionDocs, waitingForRevision } from "./holds.ts";
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -202,32 +203,39 @@ export async function runOutcome(ctx: Ctx, outcomeId: string): Promise<void> {
   }
 }
 
-function versionDocs(ctx: Ctx, wsId: string): VersionDoc[] {
-  const files = new Map(all<FileRow>(ctx.db, "SELECT * FROM files WHERE workspace_id = ? AND present = 1", wsId).map((f) => [f.file_id, f]));
-  return all<DocumentRow>(ctx.db, "SELECT * FROM documents WHERE workspace_id = ? AND read_status = 'read' AND doc_type = 'quote'", wsId)
-    .filter((d) => files.has(d.file_id))
-    .map((d) => ({ docId: d.id, fileId: d.file_id, name: files.get(d.file_id)!.name, facts: docFacts(d)!, createdTime: files.get(d.file_id)!.created_time, versionStatus: d.version_status }));
-}
-
 /** Finds the revised quote in the workspace. One match: propose. None or several: ask. */
 export async function reconcileOutcome(ctx: Ctx, outcomeId: string): Promise<void> {
-  const { ws, d, asked, v } = load(ctx, outcomeId);
+  const { o, ws, asked, v } = load(ctx, outcomeId);
   // The revised quote may have just arrived: refresh what Kiki knows first (read-only).
   await runInventory(ctx, ws.id);
   await runReading(ctx, ws.id);
-  const docs = versionDocs(ctx, ws.id);
-  const askedDoc = docs.find((x) => x.docId === asked.id);
-  if (!askedDoc) {
+  const docs = versionDocs(ctx.db, ws.id);
+  if (!docs.some((x) => x.docId === asked.id)) {
     setOutcome(ctx, outcomeId, { status: "needs_clarification", question: "The quote Fo asked about isn't in the workspace anymore, so Kiki can't link a revision to it." });
     return;
   }
-  const candidates = findRevisionCandidates(askedDoc, docs, d.created_at);
+  const candidates = revisionCandidates(ctx.db, o, docs);
   if (candidates.length === 1) {
     proposeVersionUpdate(ctx, outcomeId, candidates[0]!.docId, candidates);
   } else if (candidates.length === 0) {
+    let found: { filename: string }[] = [];
+    let gmailProblem: string | null = null;
+    if (ctx.gmail?.available()) {
+      try {
+        found = await searchEmailedAttachments(ctx, outcomeId);
+      } catch (err) {
+        gmailProblem = err instanceof Error ? err.message : String(err);
+      }
+    }
     setOutcome(ctx, outcomeId, {
       status: "needs_clarification",
-      question: `Kiki couldn't find the revised quote in the workspace yet. Fo mentioning it doesn't give Kiki access to it: save the attachment from ${v.recipient_name}'s email into the workspace folder, then press "Check again".`,
+      question: found.length
+        ? `The revised quote isn't in the folder yet, but Kiki found ${found.length === 1 ? `"${found[0]!.filename}"` : `${found.length} attachments`} in ${v.recipient_name}'s email since Fo asked. Save the right one to the folder?`
+        : gmailProblem
+          ? `Kiki couldn't find the revised quote in the folder, and couldn't look in Gmail just now (${gmailProblem}). When you add it to the folder, Kiki will pick it up.`
+          : ctx.gmail?.available()
+          ? `Kiki couldn't find the revised quote in the folder, and there's nothing from ${v.recipient_name} with an attachment in Gmail since Fo asked. When you add it to the folder, Kiki will pick it up.`
+          : `Kiki couldn't find the revised quote in the folder yet. Fo mentioning it doesn't give Kiki access to it: save the attachment from ${v.recipient_name}'s email into the folder (or let Kiki look in Gmail) and she'll pick it up.`,
       candidates: [],
     });
   } else {
@@ -332,12 +340,18 @@ export function resolveOutcome(ctx: Ctx, outcomeId: string, documentId: string |
   if (o.status !== "needs_clarification") throw conflict("This update doesn't need a choice right now.");
   const candidates = o.candidates_json ? (JSON.parse(o.candidates_json) as Candidate[]) : [];
   if (documentId === null) {
-    setOutcome(ctx, outcomeId, {
-      status: "needs_clarification",
-      question: "Okay. Save the right file into the workspace folder, then press \"Check again\".",
-      candidates: [],
+    const wsId = one<WatchRow>(ctx.db, "SELECT * FROM watches WHERE id = ?", o.watch_id)!.workspace_id;
+    tx(ctx.db, () => {
+      rejectCandidates(ctx.db, outcomeId, candidates.map((c) => c.docId));
+      setOutcome(ctx, outcomeId, {
+        status: "needs_clarification",
+        question: "Okay. When the right file is in the folder, Kiki will pick it up.",
+        candidates: [],
+      });
+      logEvent(ctx.db, wsId, "clarified", "You said none of the candidates is the revised quote. Kiki will file them as ordinary documents.");
     });
-    logEvent(ctx.db, one<WatchRow>(ctx.db, "SELECT * FROM watches WHERE id = ?", o.watch_id)!.workspace_id, "clarified", "You said none of the candidates is the revised quote.");
+    // They're ordinary documents again: let Kiki propose where they go.
+    ctx.jobs.enqueue("read", `read:${wsId}`, { workspaceId: wsId });
     return;
   }
   if (!candidates.some((c) => c.docId === documentId)) throw badRequest("Choose one of the documents Kiki listed.");
@@ -357,6 +371,28 @@ export function dismissOutcome(ctx: Ctx, outcomeId: string): void {
   const o = getOutcome(ctx, outcomeId);
   if (o.status === "resolved") throw conflict("This update was already applied.");
   setOutcome(ctx, outcomeId, { status: "dismissed" });
+  // Quotes held for this update are ordinary documents again.
+  const wsId = one<WatchRow>(ctx.db, "SELECT * FROM watches WHERE id = ?", o.watch_id)!.workspace_id;
+  ctx.jobs.enqueue("read", `read:${wsId}`, { workspaceId: wsId });
+}
+
+/**
+ * The revised quote Kiki was waiting for landed in the folder (dropped in Drive, or saved from
+ * Gmail): link it to the follow-up right away instead of waiting for "Check again".
+ */
+export async function pickUpArrivals(ctx: Ctx, wsId: string): Promise<number> {
+  let picked = 0;
+  for (const { outcome, candidates } of waitingForRevision(ctx.db, wsId)) {
+    // Only updates where Kiki asked for the file (not, say, a question Fo is waiting on).
+    if (outcome.status !== "needs_clarification" || outcome.candidates_json === null || !candidates.length) continue;
+    const shown = new Set((JSON.parse(outcome.candidates_json) as Candidate[]).map((c) => c.docId));
+    if (candidates.every((c) => shown.has(c.docId))) continue;
+    const { v } = load(ctx, outcome.id);
+    logEvent(ctx.db, wsId, "arrived", `A quote that could be ${v.recipient_name}'s revision landed in the folder. Kiki is linking it to Fo's conversation.`);
+    await reconcileOutcome(ctx, outcome.id);
+    picked++;
+  }
+  return picked;
 }
 
 /** Asks Fo something in the mapped conversation (never into a working turn). */

@@ -8,6 +8,7 @@ import { MockReader } from "../server/extractor.ts";
 import { MockFoClient } from "../server/fo/mock.ts";
 import type { FoClient, FoConnection, FoConversationSummary, FoReply, FoTurn } from "../server/fo/types.ts";
 import { FakeDrive } from "../server/google/fake.ts";
+import type { GmailAdapter } from "../server/google/gmail.ts";
 
 export type AskArgs = { message: string; conversationId?: string; newConversation?: boolean };
 export type PollArgs = { conversationId: string; waitSeconds: number };
@@ -64,7 +65,7 @@ export interface TestRig {
  * An app wired to an in-memory Drive (FakeDrive), the pattern reader and a mock or scripted Fo.
  * Background folder polling is off: tests call app.settle() to run due jobs deterministically.
  */
-export function makeRig(opts: { drive?: FakeDrive; fo?: FoClient; db?: Db | string } = {}): TestRig {
+export function makeRig(opts: { drive?: FakeDrive; fo?: FoClient; db?: Db | string; gmail?: GmailAdapter; watchIntervalSeconds?: number } = {}): TestRig {
   const db = opts.db === undefined ? openDb(":memory:") : typeof opts.db === "string" ? openDb(opts.db) : opts.db;
   const drive = opts.drive ?? new FakeDrive("mock");
   const fo = opts.fo ?? new MockFoClient({ stepMs: 5, replyDelayMs: 0 });
@@ -73,10 +74,12 @@ export function makeRig(opts: { drive?: FakeDrive; fo?: FoClient; db?: Db | stri
     drive,
     reader: new MockReader(),
     fo,
+    gmail: opts.gmail ?? null,
     anthropicModel: "test-model",
     claudeCredentialsDetected: false,
     engineOptions: { pollWaitSeconds: 0, backoffBaseMs: 1 },
-    watchIntervalSeconds: 0,
+    // A followed conversation is checked once, then again only when a test asks (0 would spin).
+    watchIntervalSeconds: opts.watchIntervalSeconds ?? 0,
     workspacePollSeconds: 0,
   });
   return { app, db, drive, fo };

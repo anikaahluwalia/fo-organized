@@ -57,7 +57,7 @@ export class GoogleAuth {
     return this.scopes.filter((s) => !granted.has(s));
   }
 
-  beginAuth(): string {
+  beginAuth(extraScopes: string[] = []): string {
     if (!this.configured()) throw new DriveError("Google sign-in isn't configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.", "auth", { delivery: "not_sent" });
     const state = randomBytes(24).toString("hex");
     const verifier = randomBytes(48).toString("base64url");
@@ -68,7 +68,7 @@ export class GoogleAuth {
       client_id: this.clientId!,
       redirect_uri: this.redirectUri,
       response_type: "code",
-      scope: this.scopes.join(" "),
+      scope: [...new Set([...this.scopes, ...extraScopes])].join(" "),
       access_type: "offline",
       prompt: "consent",
       include_granted_scopes: "true",

@@ -22,6 +22,7 @@ import { buildOrganizePlan, buildUndoPlan, parseRef, planHash, refKey, type Plan
 import { badRequest, conflict, notFound } from "../errors.ts";
 import type { Ctx } from "./context.ts";
 import { docFacts, requireWorkspace } from "./workspace.ts";
+import { heldFileIds } from "./holds.ts";
 
 export function getPlan(db: Db, id: string): PlanRow {
   const plan = one<PlanRow>(db, "SELECT * FROM plans WHERE id = ?", id);
@@ -174,6 +175,8 @@ function pendingReads(db: Db, wsId: string): number {
 }
 
 function organizeDraft(db: Db, ws: WorkspaceRow): PlanDraft {
+  // So are quotes that could be the revision Kiki is following up on.
+  const held = heldFileIds(db, ws.id);
   // Files a pending quote update will move are that plan's business, not this one's.
   const reserved = new Set(
     all<{ file_id: string }>(
@@ -183,7 +186,7 @@ function organizeDraft(db: Db, ws: WorkspaceRow): PlanDraft {
     ).map((r) => r.file_id),
   );
   const docs = all<DocumentRow>(db, "SELECT * FROM documents WHERE workspace_id = ?", ws.id)
-    .filter((d) => !reserved.has(d.file_id))
+    .filter((d) => !reserved.has(d.file_id) && !held.has(d.file_id))
     .map(planDoc);
   return buildOrganizePlan({ rootId: ws.root_file_id, files: planFiles(db, ws.id), docs, indexFiles: indexFiles(db, ws.id) });
 }

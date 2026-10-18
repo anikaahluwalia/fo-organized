@@ -378,8 +378,49 @@ export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act
               </div>
             </>
           )}
+          {u.candidates.length <= 1 && u.emailAttachments.length > 0 && (
+            <div className="stack">
+              {u.emailAttachments.map((a) => (
+                <div key={a.index} className="item">
+                  <div className="item-head">
+                    <span className="item-label">{a.filename}</span>
+                    {a.saved && <span className="chip chip--confirmed">Saved to folder</span>}
+                  </div>
+                  <p className="hint">
+                    {a.subject || "(no subject)"} · {a.from}
+                    {a.date ? ` · ${time(a.date)}` : ""}
+                    {view.integrations.drive.gmail === "mock" ? " · mock Gmail" : ""}
+                  </p>
+                  {!a.saved && (
+                    <button className="btn btn--primary btn--small" disabled={act.busy !== null} onClick={() => act.run(`save-att-${a.index}`, () => post(`/api/updates/${u.id}/gmail/save`, { index: a.index }))}>
+                      Save to the folder
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {u.candidates.length <= 1 && (
             <div className="row">
+              {(view.integrations.drive.gmail === "connected" || view.integrations.drive.gmail === "mock") && u.emailAttachments.length === 0 && (
+                <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("gmail-search", () => post(`/api/updates/${u.id}/gmail/search`))}>
+                  Look in Gmail
+                </button>
+              )}
+              {view.integrations.drive.gmail === "not_connected" && (
+                <button
+                  className="btn btn--small"
+                  disabled={act.busy !== null}
+                  onClick={() =>
+                    act.run("gmail-connect", async () => {
+                      const r = await post<{ authorizationUrl: string }>("/api/google/connect", { gmail: true });
+                      window.location.href = r.authorizationUrl;
+                    })
+                  }
+                >
+                  Let Kiki look in Gmail (read-only)
+                </button>
+              )}
               <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("recheck", () => post(`/api/updates/${u.id}/recheck`))}>
                 Check again
               </button>

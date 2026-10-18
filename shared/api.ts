@@ -10,7 +10,16 @@ export interface KikiView {
 }
 
 export interface IntegrationsView {
-  drive: { mode: Mode; connection: "connected" | "needs_auth" | "not_configured" | "error"; account: string | null; message?: string; scopes: "narrow" | "full"; missingScopes: string[] };
+  drive: {
+    mode: Mode;
+    connection: "connected" | "needs_auth" | "not_configured" | "error";
+    account: string | null;
+    message?: string;
+    scopes: "narrow" | "full";
+    missingScopes: string[];
+    /** Optional read-only Gmail access, used to find a contractor's emailed attachment. */
+    gmail: "connected" | "not_connected" | "mock" | "off";
+  };
   claude: { mode: Mode; credentialsDetected: boolean; model: string };
   fo: { mode: Mode; connection: "connected" | "needs_auth" | "error"; message?: string };
 }
@@ -239,6 +248,8 @@ export interface UpdateView {
   planId: string | null;
   error: string | null;
   ignoredRequests: string[];
+  /** Attachments Kiki found in the contractor's email (read-only), if she looked. */
+  emailAttachments: { index: number; filename: string; from: string; subject: string; date: string | null; saved: boolean }[];
 }
 
 export interface TurnView {

@@ -5,6 +5,7 @@ import type { Reader } from "./extractor.ts";
 import { FoEngine, type EngineOptions } from "./fo/engine.ts";
 import type { FoClient } from "./fo/types.ts";
 import type { DriveAdapter, DriveConnection } from "./google/types.ts";
+import type { GmailAdapter } from "./google/gmail.ts";
 import { JobQueue } from "./jobs.ts";
 import type { Ctx } from "./services/context.ts";
 import { executePlan } from "./services/executor.ts";
@@ -24,12 +25,14 @@ import {
 import { approvePlan, autoPropose, discardPlan, proposeOrganize, proposeUndo, resumePlan, revisePlan } from "./services/plans.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
-import { dismissOutcome, followUp, pasteReply, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
+import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
+import { dismissOutcome, followUp, pasteReply, pickUpArrivals, recheckOutcome, resolveOutcome, runOutcome, setWatching, watchJob } from "./services/watch.ts";
 import { activeWorkspace, createDemoWorkspace, requireWorkspace, runInventory, runReading, selectWorkspace, stageRevisedQuote } from "./services/workspace.ts";
 
 export interface AppDeps {
   db: Db;
   drive: DriveAdapter;
+  gmail?: GmailAdapter | null;
   reader: Reader;
   fo: FoClient;
   anthropicModel: string;
@@ -45,7 +48,7 @@ export interface AppDeps {
 export function createApp(deps: AppDeps) {
   const { db, drive, reader, fo } = deps;
   const jobs = new JobQueue(db);
-  const ctx = { db, drive, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30 } as Ctx;
+  const ctx = { db, drive, gmail: deps.gmail ?? null, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30 } as Ctx;
   ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler(ctx) }, deps.engineOptions);
 
   const pollSeconds = deps.workspacePollSeconds ?? 10;
@@ -57,7 +60,10 @@ export function createApp(deps: AppDeps) {
   });
   // After reading something new, she prepares a proposal herself and (if allowed) has Fo text you.
   jobs.register("read", async (p) => {
-    await runReading(ctx, String(p.workspaceId));
+    const wsId = String(p.workspaceId);
+    await runReading(ctx, wsId);
+    // A revised quote Kiki was waiting for goes to its follow-up first, not into a filing plan.
+    await pickUpArrivals(ctx, wsId);
     const proposal = autoPropose(ctx);
     if (proposal?.created) autoNotifyProposal(ctx, proposal.plan);
   });
@@ -83,6 +89,7 @@ export function createApp(deps: AppDeps) {
         ...("message" in d ? { message: d.message } : {}),
         scopes: deps.google?.scopes ?? "narrow",
         missingScopes: d.state === "connected" ? (deps.google?.missingScopes() ?? []) : [],
+        gmail: !ctx.gmail ? "off" : ctx.gmail.mode === "mock" ? "mock" : ctx.gmail.available() ? "connected" : "not_connected",
       },
       claude: { mode: reader.mode, credentialsDetected: deps.claudeCredentialsDetected, model: deps.anthropicModel },
       fo: { mode: fo.mode, connection: f.state, ...(f.state === "error" ? { message: f.message } : {}) },
@@ -167,6 +174,8 @@ export function createApp(deps: AppDeps) {
     },
     resolveOutcome: (outcomeId: string, documentId: string | null) => resolveOutcome(ctx, outcomeId, documentId),
     recheckOutcome: (outcomeId: string) => recheckOutcome(ctx, outcomeId),
+    searchGmail: (outcomeId: string) => searchEmailedAttachments(ctx, outcomeId).then((found) => ({ found: found.length })),
+    saveGmailAttachment: (outcomeId: string, index: number) => saveEmailedAttachment(ctx, outcomeId, index),
     dismissOutcome: (outcomeId: string) => dismissOutcome(ctx, outcomeId),
 
     /**

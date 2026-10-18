@@ -7,7 +7,7 @@ import { AppError, badRequest, notFound } from "./errors.ts";
 import { createPairingCode, extensionPaired, pairExtension, unpairAll, verifyExtensionToken } from "./extension.ts";
 
 export interface OAuthFlow {
-  begin(): Promise<string>; // returns the URL to send the browser to
+  begin(opts?: { gmail?: boolean }): Promise<string>; // returns the URL to send the browser to
   finish(code: string, state: string | null): Promise<void>;
   disconnect(): Promise<void> | void;
 }
@@ -111,15 +111,20 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   route("POST", "/api/watches/:id/watching", ([id], b) => app.setWatching(id!, b.watching === true));
   route("POST", "/api/updates/:id/resolve", ([id], b) => app.resolveOutcome(id!, typeof b.documentId === "string" ? b.documentId : null));
   route("POST", "/api/updates/:id/recheck", ([id]) => app.recheckOutcome(id!));
+  route("POST", "/api/updates/:id/gmail/search", ([id]) => app.searchGmail(id!));
+  route("POST", "/api/updates/:id/gmail/save", ([id], b) => {
+    if (typeof b.index !== "number") throw badRequest("Choose an attachment.");
+    return app.saveGmailAttachment(id!, b.index);
+  });
   route("POST", "/api/updates/:id/dismiss", ([id]) => app.dismissOutcome(id!));
   for (const [name, flow] of [
     ["google", oauth.google],
     ["fo", oauth.fo],
   ] as const) {
-    route("POST", `/api/${name}/connect`, async (_p, _b, _u, origin) => {
+    route("POST", `/api/${name}/connect`, async (_p, b, _u, origin) => {
       if (!flow) throw badRequest(`${name === "google" ? "Google Drive" : "Fo"} is in mock mode; there is nothing to connect.`);
       if (origin && allowedOrigins.has(origin)) returnTo = origin;
-      return { authorizationUrl: await flow.begin() };
+      return { authorizationUrl: await flow.begin({ gmail: b.gmail === true }) };
     });
     route("POST", `/api/${name}/disconnect`, async () => {
       if (!flow) throw badRequest("Mock mode: nothing to disconnect.");

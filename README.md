@@ -10,6 +10,7 @@ Brief: [docs/FO-RGANIZED-BRIEF.md](docs/FO-RGANIZED-BRIEF.md) · Character: [doc
 - **Notice new files.** Kiki watches the folder. When a new invoice or quote lands, she reads it, recognizes the supplier from what's already filed, and proposes where it goes.
 - **Text you through Fo.** With "Text me when Kiki finds something new" on, Fo texts you what Kiki found. Reply "go ahead" and Kiki files it, then Fo texts back that it's done. You can always approve in the app instead.
 - **Ask a contractor if a quote is final.** From a quote in the index, Kiki drafts a short, honest email; you approve the exact message, and Fo sends it. Kiki then follows that Fo conversation, picks up the reply, finds the revised quote in Drive (asking you if two files could match), and proposes filing it as current, moving the old one to `Quotes/Superseded`, with the price and scope differences shown. "Current" never means "price accepted": you mark that yourself.
+- **Find the emailed revision.** If the contractor says "I emailed it" and it isn't in Drive, Kiki can look in Gmail (read-only, only once you allow it) for attachments from that contractor's exact address since Fo asked. Saving one into the folder waits for your click. If you drop the file into the folder yourself, she notices and links it without being asked again.
 - **Undo.** Any applied plan can be reversed (after its own approval) where nothing changed since; folders Kiki created stay, and nothing is ever deleted.
 
 ## Run it
@@ -28,6 +29,7 @@ Connect Google Drive and Fo from the top of the page, then set up the renovation
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Claude reads documents and Fo messages. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client of type "Web application", redirect URI `http://localhost:8787/api/google/oauth/callback`. Enable the Drive API; consent screen in Testing with your account as a test user. Testing consents expire after 7 days. |
+| Gmail (optional) | To let Kiki find emailed revisions, enable the Gmail API in the same Google Cloud project and add the `gmail.readonly` scope to the consent screen. Kiki asks for it only when you press "Let Kiki look in Gmail (read-only)", on top of your existing Google sign-in. She never sends or changes mail. |
 | `GOOGLE_DRIVE_SCOPES` | Optional. Default is the full `drive` scope, because moving files you added to Drive yourself needs it (with `drive.readonly` + `drive.metadata` + `drive.file`, Google refuses with "The user has not granted the app write access to the file"). `narrow` keeps that narrower set, which only works for files Kiki uploaded. Kiki is restricted to one folder by the app itself, not by the OAuth scope. |
 | `KIKI_MODE`, `DRIVE_MODE`, `CLAUDE_MODE`, `FO_MODE` | `live` (default) or `mock`. Mock is labelled everywhere and never stands in for a live integration that fails. |
 | `WORKSPACE_POLL_SECONDS`, `WATCH_INTERVAL_SECONDS` | How often Kiki looks at the folder (default 10 s live) and at a followed Fo conversation (default 30 s live). |
@@ -63,6 +65,6 @@ npm run typecheck
 ## Known limits
 
 - One user, one workspace folder, renovation projects; quotes and invoices are the best-supported document types.
-- Gmail isn't integrated: a revised quote has to be saved into the workspace folder (or pasted reply text used) before Kiki can file it.
+- Gmail is read-only and only searched for the contractor's exact address since Fo asked; attachments over 5 MB have to be saved into the folder by hand.
 - How Fo records your text replies has only been exercised with the mock; approving in the app always works.
 - The earlier Paper Chase prototype is preserved at the git tag `paper-chase-wip`; its brief is in `docs/archive/`.
