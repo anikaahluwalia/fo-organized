@@ -1308,7 +1308,10 @@ function Connection({ view, act }: { view: AppView; act: Act }) {
       ) : drive.connection === "connected" ? (
         <p className="connection__line">
           <span className="status-dot status-dot--ok" aria-hidden="true" />
-          {drive.account ? `Live Drive, ${drive.account}` : "Live Drive"}
+          <span>
+            Connected to Drive
+            {drive.account && <span className="connection__account">{drive.account}</span>}
+          </span>
         </p>
       ) : drive.connection === "not_configured" ? (
         <p className="connection__line">
@@ -1323,7 +1326,6 @@ function Connection({ view, act }: { view: AppView; act: Act }) {
           </button>
         </p>
       )}
-      {view.workspace && <p className="connection__ws">{view.workspace.name}</p>}
     </div>
   );
 }

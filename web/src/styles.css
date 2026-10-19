@@ -101,7 +101,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 16px;
+  /* Every size is in rem, so this one number sets the scale of the whole app. */
+  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -184,7 +185,7 @@ p {
 
 .shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -274,13 +275,20 @@ p {
 }
 .connection__line {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 10px;
 }
-.connection__ws {
-  margin-top: 8px;
+/* The dot sits on the first line, even when the account wraps under it. */
+.connection__line > .status-dot {
+  margin-top: 0.45em;
+}
+.connection__line > span:not(.status-dot) {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+.connection__account {
+  display: block;
+  font-size: 0.85rem;
 }
 
 .status-dot {
@@ -304,7 +312,7 @@ p {
   padding: 56px 64px 72px;
 }
 .content__inner {
-  max-width: 1040px;
+  max-width: 960px;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -1459,9 +1467,6 @@ details > summary {
     flex-wrap: wrap;
     gap: 4px 16px;
     font-size: 0.85rem;
-  }
-  .connection__ws {
-    margin-top: 0;
   }
   .content {
     padding: 20px 16px 48px;
