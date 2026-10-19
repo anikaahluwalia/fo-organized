@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-label="Fo, a white face with two oval eyes and a small smile">
+  <title>Fo</title>
+  <!-- Fo's avatar as it appears in Messages, redrawn; the thin outline keeps it visible on white. -->
+  <circle cx="90" cy="90" r="87" fill="#FFFFFF" stroke="#2A1D19" stroke-width="4"/>
+  <ellipse cx="51" cy="80" rx="17" ry="27" fill="#111111"/>
+  <ellipse cx="129" cy="80" rx="17" ry="27" fill="#111111"/>
+  <path d="M76 123Q90 137 104 123" fill="none" stroke="#111111" stroke-width="8" stroke-linecap="round"/>
+</svg>
