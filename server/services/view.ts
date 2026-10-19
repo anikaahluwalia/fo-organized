@@ -45,7 +45,7 @@ import { getTask } from "../fo/engine.ts";
 import type { Ctx } from "./context.ts";
 import { projectIndexRows } from "./indexfile.ts";
 import { getUserName, requestOf } from "./outreach.ts";
-import { activeWorkspace, docFacts } from "./workspace.ts";
+import { activeWorkspace, docFacts, wholeDrive } from "./workspace.ts";
 import { notifyOutcome, notifyPlanId, notifyPurpose, notifyText, replyState } from "./notify.ts";
 import { foundAttachments } from "./attachments.ts";
 import { attentionItems } from "./attention.ts";
@@ -426,7 +426,17 @@ export function buildAppView(ctx: Ctx, integrations: IntegrationsView): AppView 
       mode: ws.mode,
       link: ws.mode === "live" ? `https://drive.google.com/drive/folders/${ws.root_file_id}` : null,
       lastInventoryAt: ws.last_inventory_at,
+      whole: wholeDrive(db, ws.id),
     },
+    // Finished for a folder you chose before: kept in view, so switching folders doesn't lose it.
+    earlier: all<PlanRow & { ws_name: string }>(
+      db,
+      "SELECT p.*, w.name AS ws_name FROM plans p JOIN workspaces w ON w.id = p.workspace_id WHERE p.workspace_id <> ? AND p.status IN ('applied', 'partial', 'failed', 'stale') ORDER BY COALESCE(p.finished_at, p.created_at) DESC LIMIT 5",
+      ws.id,
+    ).map((p) => {
+      const ops = all<{ state: string }>(db, "SELECT state FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", p.id);
+      return { id: p.id, title: p.title, status: p.status, finishedAt: p.finished_at, workspace: p.ws_name, verified: ops.filter((o) => o.state === "verified").length, total: ops.length };
+    }),
     inventory: {
       status: lastRun ? lastRun.status : "never",
       lastError: lastRun?.error ?? null,

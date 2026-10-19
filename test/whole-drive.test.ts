@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { all } from "../server/db.ts";
-import { makeRig } from "./helpers.ts";
+import { makeRig, organized } from "./helpers.ts";
 
 const INVOICE = "INVOICE\nNorthside Building Supply\nInvoice No: N-5602\nDate: 2026-10-17\nProject: Flooring\nTotal (CAD): $96.40";
 
@@ -30,4 +30,21 @@ test("whole Drive: loose files are proposed, files in your own folders are left 
   const moved = plan.ops.filter((o) => o.kind === "move_rename").map((o) => o.before?.name);
   assert.deepEqual(moved.sort(), ["Northside invoice.txt", "invoice (1).txt"].sort());
   assert.ok(plan.ops.filter((o) => o.kind === "move_rename").every((o) => o.after?.path.startsWith("Projects/Flooring")));
+});
+
+test("switching folders keeps what Kiki finished before in view, labelled with its folder", async (t) => {
+  const r = makeRig();
+  r.app.ctx.watchIntervalSeconds = 3600;
+  t.after(() => r.app.close());
+  await organized(r);
+  const before = (await r.app.view()).plans.find((p) => p.status === "applied")!;
+  await r.app.selectWorkspace("root");
+  await r.app.settle();
+  const view = await r.app.view();
+  assert.equal(view.workspace?.whole, true);
+  const earlier = view.earlier?.find((p) => p.id === before.id);
+  assert.ok(earlier, "the plan from the folder before is still listed");
+  assert.equal(earlier.status, "applied");
+  assert.ok(earlier.verified > 0 && earlier.verified === earlier.total);
+  assert.notEqual(earlier.workspace, "My Drive");
 });

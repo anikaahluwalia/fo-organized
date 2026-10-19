@@ -1024,9 +1024,7 @@ function WorkspaceMenu({ view, act, onBrowse }: { view: AppView; act: Act; onBro
     <div className="ws">
       <button className="ws__toggle" aria-expanded={open} aria-controls="ws-panel" onClick={() => setOpen(!open)}>
         <Icon name="folderCheck" size={22} />
-        <span>
-          Managing {list.length} folder{list.length === 1 ? "" : "s"}
-        </span>
+        <span>{ws.whole ? "Watching your whole Drive" : `Watching "${ws.name}"`}{list.length > 0 && <span className="muted">{`, ${list.length} folder${list.length === 1 ? "" : "s"} organized`}</span>}</span>
         <span className={`chev ${open ? "chev--open" : ""}`}>
           <Icon name="chevronDown" size={18} />
         </span>
@@ -1206,7 +1204,7 @@ function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; on
               <div className="panel">{inProgress}</div>
             </section>
           )}
-          {(finished.length > 0 || completed.length > 0) && (
+          {(finished.length > 0 || completed.length > 0 || (view.earlier?.length ?? 0) > 0) && (
             <section className="block" aria-labelledby="recent-title">
               <h2 id="recent-title">Recent</h2>
               {completed}
@@ -1229,6 +1227,26 @@ function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; on
                   </li>
                 ))}
               </ul>
+              {/* Finished for a folder you chose before: still yours to see. */}
+              {(view.earlier?.length ?? 0) > 0 && (
+                <ul className="recent-list">
+                  {view.earlier!.map((p) => (
+                    <li key={p.id} className="recent">
+                      <span className="recent__icon">
+                        <Icon name={p.status === "applied" ? "check" : "alert"} />
+                      </span>
+                      <div className="recent__text">
+                        <span className="recent__title">{p.title}</span>
+                        <span className="muted">
+                          {`In "${p.workspace}" · `}
+                          {p.status === "applied" ? "Verified in Drive" : p.status === "stale" ? `Stopped: something changed, ${p.verified} of ${p.total} steps verified` : `${p.status === "failed" ? "Failed" : "Partly applied"}, ${p.verified} of ${p.total} steps verified in Drive`}
+                        </span>
+                      </div>
+                      {p.finishedAt && <time className="muted nowrap">{ago(p.finishedAt)}</time>}
+                    </li>
+                  ))}
+                </ul>
+              )}
               <details className="fold">
                 <summary>Everything Kiki did</summary>
                 <ul className="history-list">

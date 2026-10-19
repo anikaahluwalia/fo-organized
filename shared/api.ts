@@ -30,6 +30,20 @@ export interface WorkspaceView {
   mode: Mode;
   link: string | null;
   lastInventoryAt: string | null;
+  /** Kiki watches your whole Drive (loose files), not one folder. */
+  whole?: boolean;
+}
+
+/** A plan Kiki finished for a folder you had chosen before (so switching doesn't lose it). */
+export interface EarlierPlanView {
+  id: string;
+  title: string;
+  status: string;
+  finishedAt: string | null;
+  /** The folder it was for. */
+  workspace: string;
+  verified: number;
+  total: number;
 }
 
 export interface FactView {
@@ -345,6 +359,8 @@ export interface AppView {
   outreach: OutreachView[];
   updates: UpdateView[];
   activity: { events: EventView[]; turns: TurnView[] };
+  /** Plans finished for folders you had chosen before. */
+  earlier?: EarlierPlanView[];
   /** What Kiki learned from your answers; each can be forgotten. */
   lessons: LessonView[];
   busy: { inventory: boolean; reading: boolean; executing: boolean; interpreting: boolean };
