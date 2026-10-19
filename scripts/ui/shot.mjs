@@ -1,15 +1,16 @@
 // Screenshot a page at a given size with real mobile emulation (headless windows can't go below
 // 500px wide), and report horizontal overflow and where each heading sits.
-//   node scripts/ui/shot.mjs http://localhost:8796 out.png [width=1280] [height=1600]
+//   node scripts/ui/shot.mjs http://localhost:8796 out.png [width=1280] [height=1600] [light|dark]
 import fs from "node:fs";
 import { LIVE_PORT, openOverPort, sleep } from "./chrome.mjs";
 
-const [url, out, width = "1280", height = "1600"] = process.argv.slice(2);
+const [url, out, width = "1280", height = "1600", scheme] = process.argv.slice(2);
 if (!url || !out) throw new Error("usage: shot.mjs <url> <out.png> [width] [height]");
 if (new URL(url).port === String(LIVE_PORT)) console.warn("Note: this is the user's live Kiki. Only look; don't click or post anything.");
 const { send, close } = await openOverPort();
 try {
   await send("Emulation.setDeviceMetricsOverride", { width: Number(width), height: Number(height), deviceScaleFactor: 1, mobile: Number(width) < 700 });
+  if (scheme === "light" || scheme === "dark") await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
   await send("Page.enable");
   await send("Page.navigate", { url });
   await sleep(3500);

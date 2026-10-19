@@ -127,31 +127,31 @@ export function ExtensionPairing({ paired: pairedProp, pairedAt: pairedAtProp }:
 
   return (
     <div>
-      <div className="item-head">
-        <span className="item-label">Chrome side panel</span>
+      <div className="section-head">
+        <h2>Chrome side panel</h2>
         {paired !== null && <span className={`chip ${paired ? "chip--confirmed" : "chip--not_searched"}`}>{paired ? "Paired" : "Not paired"}</span>}
       </div>
       <div>
         {showing && (
-          <div className="notice notice--info" style={{ marginTop: 12 }}>
+          <div className="notice notice--info">
             <p>Type this code in Kiki's side panel:</p>
-            <p style={{ fontFamily: "var(--mono)", fontSize: "2rem", fontWeight: 700, letterSpacing: "0.18em", margin: "6px 0" }}>
+            <p className="pair-code">
               <span aria-hidden="true">
                 {showing.code.slice(0, 3)} {showing.code.slice(3)}
               </span>
               <span className="visually-hidden">{showing.code.split("").join(" ")}</span>
             </p>
-            <p className="hint">
+            <p className="muted small">
               Works once. Expires at {clock(showing.expiresAt)} (in {minutesLeft} min).
             </p>
           </div>
         )}
         {expired && (
-          <div className="notice notice--warn" style={{ marginTop: 12 }}>
+          <div className="notice notice--warn">
             <p>That code expired. Make a new one.</p>
           </div>
         )}
-        {note && <p className="hint">{note}</p>}
+        {note && <p className="muted small">{note}</p>}
         {error && (
           <p className="error-text" role="alert">
             {error}

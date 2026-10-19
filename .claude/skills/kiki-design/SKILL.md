@@ -23,7 +23,10 @@ The character, her states and her motion are specified in `docs/KIKI-DESIGN.md`;
 
 ## Layout
 
-- One column at every width, same order: the status strip (Kiki, her state, the one next action), the plan (Approve in its sticky footer), With Fo, Needs a look, the index, then Files, History and Settings collapsed.
+- A left sidebar (Kiki in a circle, "kiki" and her status line, the only live region; Activity, Browse, Settings; the Fo and Drive connection with Live or Mock at the bottom) and one content column up to 1040px. At 760px and below the sidebar is a top bar and the nav a row of tabs.
+- Activity: breadcrumb, "Your Drive, organized.", one muted line, the folder control, then tabs With Fo (waiting on you), In progress, Completed. Each item is a card: icon, type and time, a one-sentence headline, one muted sentence, a footer with who it's with and View details. Then Needs a look, Recently completed, and the last-checked line.
+- A plan opens as its own page: breadcrumb, the status badge, the plan's title, "Review exactly what Kiki will change.", one row per change (new folders folded into the moves), then Approve N changes and Request a change. Browse holds the folders, their files and project indexes; Settings holds the theme and connections.
+- Dark and light themes from the tokens in `web/src/styles.css`, following the system unless you pick one in Settings. Kiki's pink is the only accent; status colours appear only as text or a thin line.
 - Works at 390px wide with no horizontal scroll; long file names and paths wrap.
 - Kiki's expression follows persisted state only, never a timer; respect reduced motion.
 - Every control has a label; status changes are announced (`aria-live`); focus is visible.

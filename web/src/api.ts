@@ -28,6 +28,17 @@ export async function post<T = unknown>(path: string, body: unknown = {}): Promi
 
 export const newId = () => crypto.randomUUID();
 
+/** "just now", "4 minutes ago", "2 hours ago", then the date. */
+export function ago(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 export function time(iso: string | null | undefined): string {
   if (!iso) return "";
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });

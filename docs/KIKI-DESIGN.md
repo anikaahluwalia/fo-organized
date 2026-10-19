@@ -50,20 +50,16 @@ Respect prefers-reduced-motion. Never wiggle approval controls. Keep a readable 
 
 ## Page design
 
-Build one calm page, not a dense admin dashboard: a single 720px column at every width, in the same order on desktop and phone. Sections are divided by a rule; only the plan and a message draft are boxed.
+A calm, near-monochrome app in dark or light, following the system unless you choose in Settings. Dark: near-black background, dark grey cards with a subtle border, white and grey text. Light: off-white and white surfaces, dark chocolate text (#33211C). Kiki's pink is the only accent (her name, the status badges); status colours (verified, needs review, failed) appear only as text or a thin line, never a coloured slab. One sans-serif family (the system font). No floating sparkles, confetti loops, gradient glass, or fabricated metrics.
 
-Order:
-1. Header: Kiki, and the Live or Mock badges
-2. Status strip: Kiki, one honest status sentence, the one next action
-3. The plan, with Approve in its sticky footer
-4. With Fo: message drafts and what came back
-5. Needs a look
-6. The project index
-7. Files, History and Settings, collapsed
+Layout:
+1. Sidebar: Kiki in a circle, "kiki" and her status line; Activity, Browse, Settings; at the bottom the Fo and Drive connection (Live or Mock) and the folder's name. On a phone it becomes a top bar with the nav as tabs.
+2. Activity: breadcrumb, "Your Drive, organized.", one muted line, "Managing N folders" (opens the folder list and Change folder), then tabs: With Fo (what waits on you: a proposed plan, a question, an offer, a message draft), In progress (applying, Fo texting, waiting on a reply, reading), Completed (applied plans and everything Kiki did). Each item is a card: icon, type and time, a one-sentence headline, one muted sentence, a footer with who it's with and View details. Then Needs a look, Recently completed, and "Last checked" with Find a file.
+3. A plan, opened from its card: breadcrumb, the status badge ("Awaiting your approval"), the plan's title, "Review exactly what Kiki will change.", one row per change (icon, a plain title like "Move and rename the invoice", the old and new name, the folder, the amount; a new folder is folded into the move), "Needs a folder" rows with Choose a folder, then Approve N changes (white pill in dark, chocolate in light), Request a change, and "Nothing changes until you approve."
+4. A correction: "A small correction?", a labelled textarea, Send correction, and "Sending a correction doesn't approve any file changes."
+5. Browse: each folder with its file count, Open in Drive, its files and its project index; then every file Kiki sees. Settings: theme, texts, what Kiki learned, the side panel, Google, Fo, the folder, sign out.
 
-White canvas, pale pink cards, restrained cream accents, dark readable text, rounded corners, generous spacing. Use a system sans-serif font. No floating sparkles, confetti loops, gradient-heavy glass panels, or fabricated metrics.
-
-Primary buttons use dark chocolate with white text. Clearly separate Approve and send from Change message and Not now. Recipient and message must be visible before approval. Mark Live, Demo input, and Mock explicitly.
+The answer page Fo's texts link to uses the same look, in the phone's own light or dark setting. Approve and send stays clearly separate from Change message and Not now; recipient and message are visible before approval. Mark Live, Demo input, and Mock explicitly.
 
 ## Voice and naming
 

@@ -98,44 +98,77 @@ export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   // Kiki's word on your last answer, if it didn't settle anything (a yes to "where does it go?").
   const note = notice ?? state?.note;
   const question = task?.state === "needs_user_input" && task.question ? task.question.replace(/^\W*KIKI-(DECISION|STATUS)\s*:.*$/gim, "").trim() : null;
+  const where = Boolean(plan && isQuestion(ctx, plan));
   const body = status
     ? `<section class="status">
-  ${status.done ? `<div class="check" aria-hidden="true">&#10003;</div>` : ""}
+  ${status.done ? `<div class="check" aria-hidden="true">${ICON.check}</div>` : ""}
   <h1>${esc(status.title)}</h1>
   <p>${esc(status.text)}</p>
   ${status.next ? `<p class="next">${esc(status.next)}</p>` : ""}
 </section>
 ${status.done && recent ? `<details><summary>The proposal</summary>${plan ? cards(ctx, plan) : `<pre>${esc(proposal)}</pre>`}</details>` : ""}`
-    : `<h1>Kiki</h1><p class="muted">Your answer goes to Fo, and Fo texts you what happens.</p>
+    : `<span class="pill">${where ? "Kiki needs a folder" : "Awaiting your answer"}</span>
+<h1>${esc(lead ? lead[0]!.toUpperCase() + lead.slice(1) : proposal)}</h1>
+<p class="lede">${where ? "Pick where it goes. Nothing moves until you answer." : "Review exactly what Kiki will change."}</p>
 ${note ? `<p class="note">${esc(note)}</p>` : ""}
 ${question ? `<div class="ask"><strong>Fo asks:</strong><br>${esc(question)}</div>` : ""}
-<p class="lead">${esc(lead ? lead[0]!.toUpperCase() + lead.slice(1) : proposal)}</p>
 ${plan ? cards(ctx, plan) : ""}
-${plan && isQuestion(ctx, plan) ? whereForm(unplacedNotes(plan)) : decideForm}`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kiki</title>
+${where ? whereForm(unplacedNotes(plan!)) : decideForm}
+<p class="foot">Your answer goes to Fo, and Fo texts you what happens.</p>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Kiki</title>
 <style>
-:root{--bg:#fff7f9;--ink:#3a2620;--muted:#7a6460;--line:#f0d5dc;--accent:#3a2620;--ok:#2f7d4f}
-@media (prefers-color-scheme:dark){:root{--bg:#1f1719;--ink:#f7e9ec;--muted:#c9b3b8;--line:#4a3438;--accent:#f4b6c4;--ok:#8fd4a8}}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,system-ui,sans-serif}
-main{max-width:560px;margin:0 auto;padding:20px 16px 40px}
-h1{font-size:20px;margin:0 0 4px}.muted{color:var(--muted);font-size:14px;margin:0 0 16px}
-pre{white-space:pre-wrap;font:inherit;background:transparent;border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 16px}
-.ask{border-left:3px solid var(--accent);padding:4px 12px;margin:0 0 16px}
-.row{display:flex;gap:8px;margin:0 0 16px}button{font:inherit;padding:12px 16px;border-radius:999px;border:1px solid var(--ink);background:transparent;color:var(--ink)}
-.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);flex:1}
-label{display:block;font-size:14px;color:var(--muted);margin:0 0 6px}textarea{width:100%;box-sizing:border-box;font:inherit;border:1px solid var(--line);border-radius:12px;padding:10px;background:transparent;color:var(--ink);margin:0 0 10px}
-.note{border:1px solid var(--line);border-radius:12px;padding:12px}
-.status{text-align:center;padding:48px 8px 32px}.status h1{font-size:24px;margin:0 0 8px}.status p{margin:0 auto;max-width:34ch;color:var(--muted)}.status .next{margin-top:16px;color:var(--ink);font-weight:600}
-.check{width:56px;height:56px;margin:0 auto 16px;border-radius:50%;background:var(--ok);color:var(--bg);font-size:30px;line-height:56px}
-.lead{font-size:17px;margin:0 0 14px}.cards{list-style:none;padding:0;margin:0 0 12px}.card{border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 8px}
-.card .name{font-size:14px;color:var(--muted);word-break:break-word}.card .to{margin:2px 0}.small{font-size:14px;word-break:break-word}.why{font-size:13px;color:var(--muted);margin-top:4px}
-.steps{border-top:0;padding-top:0;margin:0 0 16px}.steps pre{font-size:13px}
-.label{font-weight:600;margin:0 0 10px}.place{display:block;width:100%;text-align:left;margin:0 0 8px;border-radius:12px;border-color:var(--line)}
-details{border-top:1px solid var(--line);padding-top:12px}summary{color:var(--muted);font-size:14px;cursor:pointer;margin:0 0 12px}
-</style></head><body><main>
+:root{--bg:#fbfaf9;--surface:#fff;--ink:#33211c;--muted:#6b5a54;--line:#e6dfdb;--strong-line:#d3c8c3;--accent:#b0435c;--pill-bg:#fae6eb;--pill-ink:#7f2c41;--primary:#33211c;--on-primary:#fff;--avatar:#fff;--ok:#2f7a4a;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0f0f0f;--surface:#171717;--ink:#f2f0ef;--muted:#a8a3a0;--line:#2e2e2e;--strong-line:#3d3d3d;--accent:#f0b3c1;--pill-bg:#33242a;--pill-ink:#f3cbd5;--primary:#ededed;--on-primary:#141414;--avatar:#f6eeee;--ok:#93d3a6;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.top{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--strong-line)}
+.avatar{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--avatar);overflow:hidden;flex:none}
+.brand{color:var(--accent);font-size:30px;font-weight:500;letter-spacing:-.04em;line-height:1}
+.from{margin-left:auto;color:var(--muted);font-size:15px}
+main{max-width:720px;margin:0 auto;padding:28px 20px 48px;display:flex;flex-direction:column;align-items:flex-start;gap:18px}
+main>*{max-width:100%}
+h1{margin:0;font-size:26px;line-height:1.25;font-weight:600;letter-spacing:-.02em;overflow-wrap:anywhere}
+p{margin:0}.lede,.foot{color:var(--muted)}.foot{font-size:15px}
+.pill{display:inline-block;padding:7px 14px;border-radius:8px;background:var(--pill-bg);color:var(--pill-ink);font-size:15px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:14px;color:var(--muted);margin:0}
+.ask{border-left:2px solid var(--accent);padding:2px 0 2px 14px;overflow-wrap:anywhere}
+.note{border-left:2px solid var(--accent);padding:2px 0 2px 14px}
+form{display:flex;flex-direction:column;gap:12px;width:100%}form>button:not(.place){align-self:flex-start}
+.row{display:flex;flex-wrap:wrap;gap:10px}
+button{font:inherit;font-size:17px;min-height:52px;padding:12px 26px;border-radius:999px;border:1px solid var(--strong-line);background:var(--surface);color:var(--ink);cursor:pointer}
+.primary{background:var(--primary);color:var(--on-primary);border-color:var(--primary)}
+button:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+label{display:block;font-size:17px;font-weight:500;margin:10px 0 0}
+textarea{width:100%;font:inherit;font-size:17px;border:1px solid var(--strong-line);border-radius:16px;padding:14px 16px;background:var(--surface);color:var(--ink);min-height:110px;resize:vertical}
+textarea::placeholder{color:var(--muted)}
+.status{align-self:stretch;text-align:center;padding:40px 0 24px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.status h1{font-size:30px}.status p{max-width:34ch;color:var(--muted)}.status .next{margin-top:8px;color:var(--ink);font-weight:500}
+.check{display:grid;place-items:center;width:60px;height:60px;margin-bottom:8px;border-radius:50%;border:1.5px solid var(--ok);color:var(--ok)}
+.cards{list-style:none;padding:0;margin:0;width:100%;border-top:1px solid var(--strong-line)}
+.card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 18px;padding:18px 0;border-bottom:1px solid var(--strong-line)}
+.card svg,.check svg{display:block}.card .icon{color:var(--muted);padding-top:2px}
+.card .name{font-size:17px;font-weight:500;overflow-wrap:anywhere}.card .to,.small,.why{color:var(--muted);overflow-wrap:anywhere}.card .to strong{color:var(--ink);font-weight:500}.why{font-size:14px;margin-top:4px}
+.more{color:var(--muted);font-size:15px}
+.place{width:100%;text-align:left;border-radius:14px}
+details{width:100%;border-top:1px solid var(--line);padding-top:12px}summary{color:var(--muted);font-size:15px;cursor:pointer}details[open] summary{margin-bottom:12px}
+.steps{border-top:0;padding-top:0}
+</style></head><body>
+<header class="top"><span class="avatar">${KIKI}</span><span class="brand">kiki</span><span class="from">Review from Fo</span></header>
+<main>
 ${body}
 </main></body></html>`;
 }
+
+/** Kiki's face for the page's header (decorative). */
+const KIKI = `<svg viewBox="148 218 920 740" width="40" height="32" aria-hidden="true" focusable="false"><path fill="#F59FAC" d="M1045 600C1047 646 1045 697 1029 740C1014 782 985 826 952 855C918 885 870 902 829 916C789 929 747 930 709 934C670 938 636 938 600 939C564 940 529 941 490 938C451 935 408 933 368 919C328 905 281 885 250 854C219 824 194 779 181 736C167 694 166 644 169 600C172 556 182 509 199 470C216 430 241 390 271 361C300 331 340 309 377 293C413 276 454 270 491 264C528 257 563 255 600 254C637 252 671 255 711 258C752 260 804 251 842 267C881 282 914 318 943 351C972 384 999 423 1016 465C1033 506 1043 554 1045 600Z"/><ellipse cx="412" cy="622" rx="39" ry="52" fill="#3A2620"/><ellipse cx="787" cy="604" rx="39" ry="52" fill="#3A2620"/><path d="M585 710C612 711 640 700 668 666" fill="none" stroke="#3A2620" stroke-width="22" stroke-linecap="round"/></svg>`;
+
+const svg = (d: string, size = 22) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="${d}"/></svg>`;
+const ICON = {
+  check: svg("M5 12.5l4.5 4.5L19 7", 30),
+  move: svg("M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 14h6M13 12l2 2-2 2"),
+  copy: svg("M9 9h10v12H9zM5 15V3h10"),
+  where: svg("M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM10.5 11.5a1.5 1.5 0 1 1 2 1.4c-.4.2-.5.5-.5.9M12 16.5v.01"),
+};
 
 /**
  * The proposal as you'd check it on a phone: each file you just added, where it goes and any new
@@ -147,17 +180,17 @@ function cards(ctx: Ctx, plan: PlanRow): string {
   const card = (o: PlanOpRow) => {
     const copy = Boolean(o.new_path && inDuplicatesFolder(o.new_path));
     const renamed = o.new_name && o.pre_name && o.new_name !== o.pre_name && !copy;
-    return `<li class="card"><div class="name">${esc(o.pre_name ?? o.new_name ?? "")}</div>
+    return `<li class="card"><span class="icon">${copy ? ICON.copy : ICON.move}</span><div><div class="name">${esc(o.pre_name ?? o.new_name ?? "")}</div>
   <div class="to">${copy ? "Set aside as a copy" : `&rarr; <strong>${esc(displayFolder(o.new_path) || "the main folder")}</strong>`}</div>
   ${renamed ? `<div class="small">New name: ${esc(o.new_name!)}</div>` : ""}
-  ${o.reason ? `<div class="why">${esc(o.reason)}</div>` : ""}</li>`;
+  ${o.reason ? `<div class="why">${esc(o.reason)}</div>` : ""}</div></li>`;
   };
   const tidy = moves.length - fresh.length;
   // Files Kiki asks about: which one, and why she can't tell.
-  const asked = unplacedNotes(plan).map((n) => `<li class="card"><div class="name">${esc(n.name)}</div><div class="why">Kiki couldn't tell which project or folder it belongs to.</div></li>`);
+  const asked = unplacedNotes(plan).map((n) => `<li class="card"><span class="icon">${ICON.where}</span><div><div class="name">${esc(n.name)}</div><div class="why">Kiki couldn't tell which project or folder it belongs to.</div></div></li>`);
   if (!moves.length) return asked.length ? `<ul class="cards">${asked.join("")}</ul>` : "";
   return `${fresh.length || asked.length ? `<ul class="cards">${fresh.map(card).join("")}${asked.join("")}</ul>` : ""}
-${tidy ? `<p class="muted">Also tidies ${tidy} file${tidy === 1 ? "" : "s"} already filed.</p>` : ""}
+${tidy ? `<p class="more">Also tidies ${tidy} file${tidy === 1 ? "" : "s"} already filed.</p>` : ""}
 <details class="steps"><summary>Every step</summary><pre>${esc(proposalLines(ctx, plan))}\nNothing is deleted.</pre></details>`;
 }
 

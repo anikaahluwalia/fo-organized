@@ -92,7 +92,7 @@ test("the History row of an applied plan doesn't count the step you skipped as u
   const row = text(web.renderToStaticMarkup(web.createElement(web.HistoryRow, { plan, act: idleAct })));
   assert.match(row, /Show steps/, "the row is collapsed");
   assert.doesNotMatch(row, /IMG_2041\.pdf/, "no steps until you ask for them");
-  assert.match(row, /Applied and verified 8 of 8 /, `the row reads: "${row}"`);
+  assert.match(row, /Applied and verified in Drive: 8 of 8 changes/, `the row reads: "${row}"`);
 });
 
 test("after Skip this, the plan's summary counts only the moves that will happen", async (t) => {
