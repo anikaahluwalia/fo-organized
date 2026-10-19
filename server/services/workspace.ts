@@ -312,13 +312,19 @@ const MAX_READ_BYTES = 8 * 1024 * 1024;
  * Documents read before the facts gained fields are read again in the background: if their
  * content is unchanged, only the new fields are taken, so names and folders never shift.
  */
-export async function runReading(ctx: Ctx, wsId: string): Promise<number> {
+/**
+ * Reads what's new in the folder. Re-reading documents for newer kinds of facts is a separate,
+ * later pass (`upgrades`), so a file you just dropped is read, and proposed, first.
+ */
+export async function runReading(ctx: Ctx, wsId: string, opts: { upgrades?: boolean } = {}): Promise<number> {
   const pending = all<DocumentRow>(
     ctx.db,
-    `SELECT d.* FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
-     WHERE d.workspace_id = ? AND f.present = 1
-       AND (d.read_status IN ('pending', 'reading')
-            OR (d.read_status = 'read' AND d.facts_json IS NOT NULL AND COALESCE(json_extract(d.facts_json, '$.version'), 1) < ?))`,
+    opts.upgrades
+      ? `SELECT d.* FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
+         WHERE d.workspace_id = ? AND f.present = 1
+           AND d.read_status = 'read' AND d.facts_json IS NOT NULL AND COALESCE(json_extract(d.facts_json, '$.version'), 1) < ?`
+      : `SELECT d.* FROM documents d JOIN files f ON f.workspace_id = d.workspace_id AND f.file_id = d.file_id
+         WHERE d.workspace_id = ? AND f.present = 1 AND d.read_status IN ('pending', 'reading') AND ? > 0`,
     wsId,
     FACTS_VERSION,
   );

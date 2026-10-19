@@ -79,6 +79,14 @@ export function createApp(deps: AppDeps) {
     const proposal = autoPropose(ctx);
     // A kind of document you said she may file on her own is filed now (she texts after); the rest is asked.
     if (proposal?.created && !fileAlone(ctx, proposal.plan)) autoNotifyProposal(ctx, proposal.plan);
+    // Then, in the background, older documents get any newer kinds of facts.
+    jobs.enqueue("upgrade_facts", `upgrade_facts:${wsId}`, { workspaceId: wsId });
+  });
+  jobs.register("upgrade_facts", async (p) => {
+    await runReading(ctx, String(p.workspaceId), { upgrades: true });
+    // What she now knows may place files she couldn't before (where a résumé or a screenshot goes).
+    const proposal = autoPropose(ctx);
+    if (proposal?.created && !fileAlone(ctx, proposal.plan)) autoNotifyProposal(ctx, proposal.plan);
   });
   jobs.register("execute_plan", async (p, job) => {
     await executePlan(ctx, String(p.planId), job.attempts + 1);
