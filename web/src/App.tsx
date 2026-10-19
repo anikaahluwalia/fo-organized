@@ -50,8 +50,16 @@ function WorkspaceSetup({ view, act }: { view: AppView; act: Act }) {
           <p>{view.integrations.drive.message}</p>
         </div>
       )}
+      <div className="stack">
+        <div className="row">
+          <button className="btn btn--primary" disabled={!driveReady || act.busy !== null} onClick={() => act.run("select", () => post("/api/workspace/select", { folder: "root" }))}>
+            Watch my whole Drive
+          </button>
+        </div>
+        <p className="hint">Kiki organizes loose files and leaves what's in your own folders where it is.</p>
+      </div>
       <div className="row">
-        <button className="btn btn--primary" disabled={!driveReady || act.busy !== null} onClick={() => act.run("demo", () => post("/api/workspace/demo"))}>
+        <button className="btn" disabled={!driveReady || act.busy !== null} onClick={() => act.run("demo", () => post("/api/workspace/demo"))}>
           {act.busy === "demo" ? "Setting up…" : "Set up the demo folder"}
         </button>
         <Badge kind="demo">Staged demo files</Badge>
@@ -62,7 +70,7 @@ function WorkspaceSetup({ view, act }: { view: AppView; act: Act }) {
           void act.run("select", () => post("/api/workspace/select", { folder }));
         }}
       >
-        <label htmlFor="folder">Or paste a Drive folder link</label>
+        <label htmlFor="folder">Or just one folder: paste its link</label>
         <div className="edit-row">
           <input id="folder" type="text" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" />
           <button className="btn" disabled={!driveReady || !folder.trim() || act.busy !== null}>

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { all, kvGet, kvSet, logEvent, now, one, run, tx, type Db, type DocumentRow, type FileOrigin, type FileRow, type ProjectRow, type WorkspaceRow } from "../db.ts";
 import { DEMO_WORKSPACE_NAME, demoFileContent, MESSY_FOLDER, NEW_SUPPLIER_INVOICE, REVISED_QUOTE, SECOND_REVISION, type DemoDoc } from "../demo/renovation.ts";
 import { FACTS_VERSION, toFacts, type DocFacts } from "../domain/documents.ts";
-import { isSameCollection } from "../domain/collections.ts";
+import { isFiledPath, isSameCollection, KIKI_ROOTS } from "../domain/collections.ts";
 import { CATEGORY } from "../domain/naming.ts";
 import { join } from "../domain/plan.ts";
 import { badRequest, conflict } from "../errors.ts";
@@ -88,8 +88,17 @@ function ensureDocument(db: Db, wsId: string, f: DriveFile): void {
   }
 }
 
+/**
+ * Kiki watches your whole Drive (My Drive): she organizes loose files, the ones at its top level or
+ * in catch-all folders like Downloads, and leaves what's in your own folders where it is.
+ */
+export function wholeDrive(db: Db, wsId: string): boolean {
+  return kvGet(db, `workspace.whole.${wsId}`) === "1";
+}
+
 export async function selectWorkspace(ctx: Ctx, input: string): Promise<WorkspaceRow> {
-  const id = parseFolderId(input);
+  const whole = /^(root|my drive|whole)$/i.test(input.trim());
+  const id = whole ? "root" : parseFolderId(input);
   if (!id) throw badRequest("Paste a Google Drive folder link (it contains /folders/).");
   let folder: DriveFile;
   try {
@@ -100,7 +109,7 @@ export async function selectWorkspace(ctx: Ctx, input: string): Promise<Workspac
   }
   if (folder.mimeType !== FOLDER_MIME) throw badRequest("That link is a file, not a folder.");
   if (folder.trashed) throw badRequest("That folder is in the trash.");
-  if (folder.parents.length === 0 && !folder.driveId) throw badRequest("Choose a specific folder, not your whole Drive.");
+  if (!whole && folder.parents.length === 0 && !folder.driveId) throw badRequest("To watch your whole Drive, choose \"Watch my whole Drive\".");
   const ws = tx(ctx.db, () => {
     run(ctx.db, "UPDATE workspaces SET active = 0 WHERE active = 1");
     const wsId = randomUUID();
@@ -109,12 +118,20 @@ export async function selectWorkspace(ctx: Ctx, input: string): Promise<Workspac
       "INSERT INTO workspaces (id, root_file_id, name, drive_id, mode, origin, active, created_at) VALUES (?, ?, ?, ?, ?, 'selected', 1, ?)",
       wsId,
       folder.id,
-      folder.name,
+      whole ? "My Drive" : folder.name,
       folder.driveId,
       ctx.drive.mode,
       now(),
     );
-    logEvent(ctx.db, wsId, "workspace", `You chose "${folder.name}" as the workspace. Kiki will only organize files inside it.`);
+    if (whole) kvSet(ctx.db, `workspace.whole.${wsId}`, "1");
+    logEvent(
+      ctx.db,
+      wsId,
+      "workspace",
+      whole
+        ? "You chose your whole Drive. Kiki organizes loose files (at the top of My Drive, or in folders like Downloads) and leaves what's in your own folders where it is."
+        : `You chose "${folder.name}" as the workspace. Kiki will only organize files inside it.`,
+    );
     return one<WorkspaceRow>(ctx.db, "SELECT * FROM workspaces WHERE id = ?", wsId)!;
   });
   ctx.jobs.enqueue("inventory", `inventory:${ws.id}`, { workspaceId: ws.id });
@@ -201,14 +218,19 @@ export async function runInventory(ctx: Ctx, wsId: string): Promise<{ seen: numb
     if (root.trashed || root.mimeType !== FOLDER_MIME) throw new Error("The workspace folder is gone or in the trash.");
     const found = new Map<string, { file: DriveFile; path: string }>();
     const queue: { id: string; path: string }[] = [{ id: root.id, path: "" }];
+    // Your whole Drive: Kiki opens only what can hold loose files (catch-all folders) and her own
+    // folders; your own folders are known by name (as places to file into), not opened.
+    const whole = wholeDrive(ctx.db, wsId);
+    const opens = (path: string) => !whole || KIKI_ROOTS.includes(path.split("/")[0]!) || !isFiledPath(path);
     while (queue.length) {
       const { id, path } = queue.shift()!;
       for (const child of await ctx.drive.listChildren(id, ws.drive_id)) {
         if (found.has(child.id)) continue;
         found.set(child.id, { file: child, path });
-        if (child.mimeType === FOLDER_MIME) queue.push({ id: child.id, path: join(path, child.name) });
+        const childPath = join(path, child.name);
+        if (child.mimeType === FOLDER_MIME && opens(childPath)) queue.push({ id: child.id, path: childPath });
       }
-      if (found.size > 5000) throw new Error("The workspace has more than 5,000 items. Choose a smaller folder for now.");
+      if (found.size > 5000) throw new Error(whole ? "There are more than 5,000 loose items in your Drive. Kiki can't keep up with that many yet." : "The workspace has more than 5,000 items. Choose a smaller folder for now.");
     }
     const before = new Map(all<FileRow>(ctx.db, "SELECT * FROM files WHERE workspace_id = ?", wsId).map((f) => [f.file_id, f]));
     let added = 0;
