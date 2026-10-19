@@ -11,6 +11,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { kvGet, kvSet } from "../db.ts";
 import type { Ctx } from "./context.ts";
+import { emailScoutOn, handoffFileIds } from "./emailscout.ts";
 import { TEXT_CHANNELS } from "./textreply.ts";
 
 const TOLERANCE_SECONDS = 5 * 60;
@@ -43,7 +44,19 @@ export function receiveFoEvent(ctx: Ctx, deliveryId: string, event: unknown): vo
     kvSet(ctx.db, "fo.webhook.tested", new Date().toISOString());
     return;
   }
-  if (e?.type !== "conversation.reply" || !e.reply) return;
+  // Fo handing a file from your email to Kiki: a hand-over line in any reply or message of Fo's.
+  const said = (e as { reply?: { text?: unknown; textTruncated?: unknown; conversationId?: unknown; runId?: unknown }; message?: { text?: unknown } }).reply ?? (e as { message?: { text?: unknown } }).message;
+  if (emailScoutOn(ctx) && said && typeof said.text === "string") {
+    for (const fileId of handoffFileIds(said.text)) ctx.jobs.enqueue("handoff", `handoff:${fileId}`, { fileId });
+    // A long reply comes cut at 2,000 characters: read the whole turn for lines past the cut.
+    const r = said as { textTruncated?: unknown; conversationId?: unknown; runId?: unknown };
+    if (r.textTruncated === true && typeof r.conversationId === "string" && /KIKI-HANDOFF|Kiki email check/i.test(said.text)) {
+      ctx.jobs.enqueue("handoff_lookup", `handoff_lookup:${r.conversationId}:${String(r.runId ?? deliveryId)}`, { conversationId: r.conversationId, runId: typeof r.runId === "string" ? r.runId : null });
+    }
+  }
+  if ((e?.type !== "conversation.reply" && e?.type !== "schedule.fired") || !e.reply) return;
+  // Your text was a yes to Fo's email check (Fo's reply hands files over): not an answer to a proposal.
+  if (typeof e.reply.text === "string" && handoffFileIds(e.reply.text).length) return;
   const { conversationId, runId, channel, trigger } = e.reply;
   if (trigger !== "inbound_text" || typeof conversationId !== "string" || typeof channel !== "string" || !TEXT_CHANNELS.has(channel)) return;
   const at = typeof e.occurredAt === "string" && !Number.isNaN(Date.parse(e.occurredAt)) ? e.occurredAt : new Date().toISOString();

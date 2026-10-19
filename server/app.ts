@@ -28,6 +28,7 @@ import { askThroughFo, handleChangeRequest } from "./services/askfo.ts";
 import { refreshPlan } from "./services/refresh.ts";
 import { textFromWebhook, watchTextReplies } from "./services/textreply.ts";
 import { fileAlone, forgetLesson, learnFromPlan, setFilesAlone } from "./services/lessons.ts";
+import { acceptHandoff, checkEmailNow, emailScoutOn, lookupHandoff, scoutHandler, setEmailScout } from "./services/emailscout.ts";
 import { autoNotifyProposal, autoTextEnabled, checkTextReply, composeAndSend, notifyHandler, notifyPreview, notifySend, sendDoneText, setAutoText, reopenQuestions } from "./services/notify.ts";
 import { buildAppView } from "./services/view.ts";
 import { saveEmailedAttachment, searchEmailedAttachments } from "./services/attachments.ts";
@@ -58,7 +59,7 @@ export function createApp(deps: AppDeps) {
   const { db, drive, reader, fo } = deps;
   const jobs = new JobQueue(db);
   const ctx = { db, drive, gmail: deps.gmail ?? null, reader, fo, jobs, watchIntervalSeconds: deps.watchIntervalSeconds ?? 30, publicUrl: deps.publicUrl ?? null, foWebhook: deps.foWebhook ?? false } as Ctx;
-  ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler(ctx) }, deps.engineOptions);
+  ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler(ctx), scout: scoutHandler }, deps.engineOptions);
 
   const pollSeconds = deps.workspacePollSeconds ?? 10;
   // Kiki keeps looking at the selected folder (read-only) so she notices new files on her own.
@@ -92,6 +93,9 @@ export function createApp(deps: AppDeps) {
   jobs.register("compose_text", async (p) => composeAndSend(ctx, String(p.taskId)));
   // You asked Fo for changes to a proposal: Kiki makes the new version and sends it back to Fo.
   // A text you send Fo while a proposal waits: Kiki has Fo read it and report your decision.
+  // Fo handed a file from your email to Kiki: she copies it into the folder (then it's a new file like any other).
+  jobs.register("handoff", async (p) => acceptHandoff(ctx, String(p.fileId)));
+  jobs.register("handoff_lookup", async (p) => lookupHandoff(ctx, String(p.conversationId), p.runId ? String(p.runId) : null));
   jobs.register("text_watch", async (p) => watchTextReplies(ctx, String(p.taskId)));
   // Fo's webhook said Fo answered a text of yours: if a proposal waits on you, Fo reads it for Kiki.
   jobs.register("text_hook", async (p) => textFromWebhook(ctx, { conversationId: String(p.conversationId), channel: String(p.channel), at: String(p.at), key: String(p.key) }));
@@ -151,6 +155,10 @@ export function createApp(deps: AppDeps) {
     forgetLesson(id: string) {
       forgetLesson(ctx, id);
     },
+    /** Fo checks your email for files (twice a day, asking you first), or stops. */
+    setEmailScout: (on: boolean) => setEmailScout(ctx, on),
+    checkEmailNow: () => checkEmailNow(ctx),
+    emailScoutOn: () => emailScoutOn(ctx),
     /** You let Kiki file a kind of document on her own, or take that back. */
     setFilesAlone(id: string, on: boolean) {
       setFilesAlone(ctx, id, on);

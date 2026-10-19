@@ -335,7 +335,7 @@ export interface LessonView {
 export interface AppView {
   notifications: NotificationView[];
   integrations: IntegrationsView;
-  settings: { userName: string | null; autoText?: boolean };
+  settings: { userName: string | null; autoText?: boolean; /** Fo checks your email for files and hands them to Kiki. */ emailScout?: boolean };
   workspace: WorkspaceView | null;
   inventory: InventoryView;
   plans: PlanView[];

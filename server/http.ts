@@ -105,7 +105,7 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
 
   route("GET", "/api/state", async () => {
     const view = await app.view();
-    return { ...view, settings: { ...view.settings, autoText: app.autoTextEnabled() }, extension: extensionStatus(app.db), signedIn: Boolean(config.password) };
+    return { ...view, settings: { ...view.settings, autoText: app.autoTextEnabled(), emailScout: app.emailScoutOn() }, extension: extensionStatus(app.db), signedIn: Boolean(config.password) };
   });
   route("POST", "/api/settings", (_p, b) => app.updateSettings({ userName: str(b, "userName"), autoText: typeof b.autoText === "boolean" ? b.autoText : undefined }));
   route("POST", "/api/workspace/select", (_p, b) => app.selectWorkspace(str(b, "folder") ?? "").then(() => ({ ok: true })));
@@ -124,6 +124,8 @@ export function createHttpServer(app: App, config: Config, oauth: { google: OAut
   route("POST", "/api/plans/:id/undo", ([id]) => app.proposeUndo(id!));
   route("POST", "/api/plans/:id/ask-fo", ([id]) => app.askThroughFo(id!));
   route("POST", "/api/plans/:id/refresh", ([id]) => app.refreshPlan(id!));
+  route("POST", "/api/email-scout", (_p, b) => app.setEmailScout(b.on === true));
+  route("POST", "/api/email-scout/check", () => app.checkEmailNow());
   route("POST", "/api/lessons/:id/forget", ([id]) => app.forgetLesson(id!));
   route("POST", "/api/lessons/:id/alone", ([id], b) => app.setFilesAlone(id!, b.on === true));
   route("POST", "/api/plans/:id/place", ([id], b) => app.placeFile(id!, str(b, "fileId") ?? "", str(b, "place") ?? ""));
