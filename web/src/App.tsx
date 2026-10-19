@@ -1063,10 +1063,7 @@ function WorkspaceMenu({ view, act, onBrowse }: { view: AppView; act: Act; onBro
   );
 }
 
-type Tab = "fo" | "progress" | "done";
-
 function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; onOpen: (id: string) => void; onBrowse: () => void }) {
-  const [tab, setTab] = useState<Tab>("fo");
   const ws = view.workspace;
   const fo = foName(view);
   const now = nowFor(view);
@@ -1179,13 +1176,11 @@ function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; on
     );
   }
 
-  const counts: Record<Tab, number | null> = { fo: withFo.length, progress: inProgress.length, done: null };
-  const labels: Record<Tab, string> = { fo: "With Fo", progress: "In progress", done: "Completed" };
   const appliedNow = now?.kind === "applied" ? now.plan : null;
 
   return (
     <>
-      <Crumbs home="Workspace" onHome={() => setTab("fo")} items={["Activity"]} />
+      <Crumbs home="Workspace" onHome={() => window.scrollTo({ top: 0 })} items={["Activity"]} />
       <header className="hero">
         <h1 className="display">Your Drive, organized.</h1>
         <p className="lede">{ws ? "Kiki proposes, you approve, and she checks every change in Drive." : "Choose a folder and Kiki will propose how to organize it."}</p>
@@ -1196,67 +1191,35 @@ function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; on
       ) : (
         <>
           <WorkspaceMenu view={view} act={act} onBrowse={onBrowse} />
-          <div
-            className="tabs"
-            role="tablist"
-            aria-label="Activity"
-            onKeyDown={(e) => {
-              // Arrow keys move between tabs, as tabs do.
-              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-              const order = Object.keys(labels) as Tab[];
-              const next = order[(order.indexOf(tab) + (e.key === "ArrowRight" ? 1 : order.length - 1)) % order.length]!;
-              setTab(next);
-              document.getElementById(`tab-${next}`)?.focus();
-            }}
-          >
-            {(Object.keys(labels) as Tab[]).map((t) => (
-              <button key={t} id={`tab-${t}`} role="tab" aria-selected={tab === t} aria-controls={`panel-${t}`} tabIndex={tab === t ? 0 : -1} className="tab" onClick={() => setTab(t)}>
-                {labels[t]}
-                {counts[t] !== null && <span className="tab__count">{counts[t]}</span>}
-              </button>
-            ))}
-          </div>
-          <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`} className="panel">
-            {tab === "fo" && (
-              <>
-                {withFo.length ? withFo : <p className="empty">Nothing needs you right now.</p>}
-                {now?.kind === "propose" && proposeBody(now, act)}
-                <NeedsALook view={view} act={act} />
-              </>
-            )}
-            {tab === "progress" && (inProgress.length ? inProgress : <p className="empty">Nothing is in progress.</p>)}
-            {tab === "done" && (
-              <>
-                {appliedNow && (
-                  <div className="row">
-                    <NotifyDecision view={view} act={act} />
-                  </div>
-                )}
-                {completed}
-                {finished.length > 0 ? (
-                  <ul className="history-list">
-                    {finished.map((p) => (
-                      <HistoryRow key={p.id} plan={p} act={act} view={view} />
-                    ))}
-                  </ul>
-                ) : (
-                  !completed.length && <p className="empty">Nothing finished yet.</p>
-                )}
-                <Timeline view={view} />
-              </>
-            )}
-          </div>
-          {tab !== "done" && finished.length > 0 && (
+          {/* One page, no tabs: what needs you, what's happening, what happened. */}
+          <section className="block" aria-labelledby="needs-title">
+            <h2 id="needs-title">Needs you</h2>
+            <div className="panel">
+              {withFo.length ? withFo : <p className="empty">Nothing needs you right now.</p>}
+              {now?.kind === "propose" && proposeBody(now, act)}
+            </div>
+          </section>
+          <NeedsALook view={view} act={act} />
+          {inProgress.length > 0 && (
+            <section className="block" aria-labelledby="working-title">
+              <h2 id="working-title">Working on it</h2>
+              <div className="panel">{inProgress}</div>
+            </section>
+          )}
+          {(finished.length > 0 || completed.length > 0) && (
             <section className="block" aria-labelledby="recent-title">
-              <h2 id="recent-title">Recently completed</h2>
+              <h2 id="recent-title">Recent</h2>
+              {completed}
               <ul className="recent-list">
-                {finished.slice(0, 3).map((p) => (
+                {finished.slice(0, 5).map((p) => (
                   <li key={p.id} className="recent">
                     <span className="recent__icon">
                       <Icon name={p.status === "applied" ? "check" : "alert"} />
                     </span>
                     <div className="recent__text">
-                      <span className="recent__title">{p.title}</span>
+                      <button className="recent__title link-btn" onClick={() => onOpen(p.id)}>
+                        {p.title}
+                      </button>
                       <span className="muted">
                         {approvedVia(view, p)} · {p.status === "applied" ? "Verified in Drive" : `Partly applied, ${p.counts.verified} of ${toRun(p)} verified in Drive`}
                       </span>
@@ -1266,6 +1229,15 @@ function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; on
                   </li>
                 ))}
               </ul>
+              <details className="fold">
+                <summary>Everything Kiki did</summary>
+                <ul className="history-list">
+                  {finished.map((p) => (
+                    <HistoryRow key={p.id} plan={p} act={act} view={view} />
+                  ))}
+                </ul>
+                <Timeline view={view} />
+              </details>
             </section>
           )}
           <footer className="foot">
