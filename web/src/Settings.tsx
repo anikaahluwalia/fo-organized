@@ -23,10 +23,23 @@ export function Settings({ view, act, theme, setTheme }: { view: AppView; act: A
   const liveDrive = drive.mode === "live" && drive.connection === "connected";
   return (
     <div className="settings">
-      {/* TODO(email): another developer is adding the email feature here. Keep this section first. */}
-      <section className="setting" aria-labelledby="set-email">
-        <h2 id="set-email">Email</h2>
-      </section>
+      {ws && (
+        <section className="setting" aria-labelledby="set-email">
+          <h2 id="set-email">Email</h2>
+          <label className="check">
+            <input type="checkbox" checked={Boolean(view.settings.emailScout)} disabled={act.busy !== null} onChange={(e) => act.run("email-scout", () => post("/api/email-scout", { on: e.target.checked }))} />
+            <span>Check my email for files</span>
+          </label>
+          <p className="muted">{fo.mode === "mock" ? "Mock Fo" : "Fo"} looks at 9:00 and 17:00 and texts you first. Files you say yes to come to this folder.</p>
+          {view.settings.emailScout && (
+            <div className="row">
+              <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run("email-check", () => post("/api/email-scout/check"))}>
+                Check now
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="setting" aria-labelledby="set-theme">
         <h2 id="set-theme">Theme</h2>
