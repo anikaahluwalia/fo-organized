@@ -109,7 +109,7 @@ export async function learnFromPlan(ctx: Ctx, planId: string): Promise<void> {
 async function describe(ctx: Ctx, name: string, facts: DocFacts | null, place: string): Promise<Pattern | null> {
   const claude = await ctx.reader.describeKind(name, facts, place).catch(() => null);
   const pattern = claude && checkPattern(claude, name, facts).length === 0 ? claude : plainPattern(name, facts);
-  return pattern && checkPattern(pattern, name, facts).length === 0 ? { description: inert(pattern.description.toLowerCase(), 40), keywords: pattern.keywords.map((k) => k.toLowerCase()) } : null;
+  return pattern && checkPattern(pattern, name, facts).length === 0 ? { description: inert(pattern.description, 40), keywords: pattern.keywords.map((k) => k.toLowerCase()) } : null;
 }
 
 /** Keeps a lesson: the same kind of document again moves it or backs it up; a new kind adds one. */
