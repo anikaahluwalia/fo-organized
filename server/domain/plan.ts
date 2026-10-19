@@ -179,16 +179,23 @@ function placesThatFit(facts: DocFacts, files: PlanFile[], roots: string[]): str
 function placementReason(dest: Destination): string | null {
   if (dest.how === "choice") return dest.kind === "user" ? `Into your "${dest.path}" folder, as you asked.` : `${dest.name}, as you asked.`;
   if (dest.how === "supplier") return dest.because;
-  if (dest.how === "suggested") return `${dest.kind === "user" ? `Your "${dest.path}" folder` : dest.name}: Kiki's suggestion for a ${dest.because.toLowerCase()}.`;
+  if (dest.how === "suggested") return `${dest.kind === "user" ? `Your "${dest.path}" folder` : dest.name}: Kiki's suggestion for ${withArticle(dest.because.toLowerCase())}.`;
   if (dest.how === "learned") return `${dest.kind === "user" ? `Into your "${dest.path}" folder` : dest.name}, like the ${dest.because} you filed there before.`;
   if (dest.kind === "user") return `Into your "${dest.path}" folder: it says "${dest.because}".`;
   if (dest.how === "title") return `Goes with ${dest.name}: its title is "${dest.because}".`;
   return dest.because === dest.name ? null : `${dest.name}: it says "${dest.because}".`;
 }
 
+/** "a bank statement", "an invoice", "notes" (a plural takes none). */
+function withArticle(kind: string): string {
+  if (/[^s]s$/.test(kind) || /^(notes|minutes|records|papers)\b/.test(kind)) return kind;
+  return `${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind}`;
+}
+
 function describeFacts(f: DocFacts): string {
   const bits = [f.issuer.value, f.reference.value, f.date.value].filter(Boolean);
-  const type = f.docType === "unknown" ? "document" : f.revision.isRevision && f.docType === "quote" ? "revised quote" : f.docType;
+  // An "other" document is called what it is ("bank statement"), not "other".
+  const type = f.docType === "unknown" ? "document" : f.revision.isRevision && f.docType === "quote" ? "revised quote" : f.docType === "other" ? (f.kind?.toLowerCase() ?? "document") : f.docType;
   return bits.length ? `${type} (${bits.join(", ")})` : type;
 }
 
