@@ -11,7 +11,7 @@ import { makeRig } from "../helpers.ts";
 // The side panel's view model (plain JavaScript, no type declarations).
 type Step = { title: string; from: string | null; stateLabel: string; error: string | null };
 const EXTENSION_LIB = "../../extension/lib.js";
-const { buildModel } = (await import(EXTENSION_LIB)) as { buildModel: (view: AppView) => { done: { steps: Step[] } | null } };
+const { buildModel } = (await import(EXTENSION_LIB)) as { buildModel: (view: AppView) => { broken: { steps: Step[] } | null } };
 
 test("after the retries run out, a step Drive refused isn't labelled as Kiki checking Drive", async (t) => {
   const rig = makeRig();
@@ -34,8 +34,8 @@ test("after the retries run out, a step Drive refused isn't labelled as Kiki che
   assert.equal(view.plans.find((p) => p.id === plan.id)?.status, "partial");
   assert.equal(view.busy.executing, false, "nothing is running any more");
 
-  // The side panel and the web app share these step labels.
-  const step = buildModel(view).done?.steps.find((s) => s.from === "Oakline invoice deposit.pdf");
+  // The side panel and the web app share these step labels; the panel lists the unfinished steps under Needs you.
+  const step = buildModel(view).broken?.steps.find((s) => s.from === "Oakline invoice deposit.pdf");
   assert.ok(step, "the refused step is listed");
   assert.doesNotMatch(step.stateLabel, /checking Drive/, `the step reads "${step.stateLabel}" (error: ${step.error})`);
 });

@@ -3,41 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <title>Kiki</title>
     <link rel="stylesheet" href="panel.css" />
     <script type="module" src="panel.js"></script>
   </head>
   <body>
-    <header>
-      <div class="brand">kiki<span>a little order.</span></div>
-      <button id="about" type="button" class="icon" aria-label="About this side panel" aria-haspopup="dialog">···</button>
-    </header>
-    <main>
-      <div class="modes" id="modes" hidden></div>
-      <section class="hello" aria-live="polite">
-        <img id="kiki" src="kiki.png" alt="" width="160" height="131" />
-        <p class="state" id="state-name" hidden></p>
-        <h1 id="status">Connecting to Kiki…</h1>
-        <p id="detail" hidden></p>
-      </section>
-      <div id="screen"></div>
-      <div class="privacy">♧ &nbsp; You review. Kiki organizes.<br /><span>Originals stay available. No surprise changes.</span></div>
-    </main>
-    <footer>
-      <a class="open" href="http://localhost:8787/" target="_blank" rel="noopener noreferrer">Open Kiki</a>
-      <small id="foot" hidden></small>
-    </footer>
-    <dialog id="dialog" aria-labelledby="dtitle">
-      <div class="dialogbody">
-        <button id="close" type="button" class="icon" aria-label="Close">×</button>
-        <h2 id="dtitle">About this side panel</h2>
-        <p>This panel shows what Kiki is doing and lets you approve her plans. It talks only to the Kiki app running on this computer, at localhost:8787. Kiki does the organizing in Google Drive, and only after you approve.</p>
-        <p>When your current tab is a Google Drive folder, the panel reads that tab's address and title so it can offer to organize it. It doesn't read pages, files or other sites.</p>
-        <p>The pairing key stays in this browser's extension storage. To revoke it, click Unpair in the Kiki app.</p>
-        <button id="forget" type="button" class="secondary" hidden>Forget the pairing on this browser</button>
-        <button id="dismiss" type="button" class="primary">Got it</button>
-      </div>
-    </dialog>
+    <div class="app">
+      <header class="top">
+        <span class="avatar" id="avatar"></span>
+        <div class="who">
+          <h1 class="name">kiki</h1>
+          <p class="status" role="status" aria-live="polite"><span id="status-text">Connecting to Kiki…</span><span id="status-said" class="sr"></span></p>
+        </div>
+      </header>
+      <main id="screen"></main>
+    </div>
   </body>
 </html>

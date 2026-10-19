@@ -71,5 +71,7 @@ export function createApi({ base, fetch: fetchFn, getToken, timeoutMs = 15000 })
     // Selecting a folder asks Google Drive about it first, so it can take a little longer.
     selectFolder: (folder) => request("POST", "/api/workspace/select", { folder }, 45000),
     setAutoText: (on) => request("POST", "/api/settings", { autoText: Boolean(on) }),
+    /** Your answer to Fo's question, or a correction to a plan Fo asked you about: it goes to Fo, and approves nothing. */
+    answer: (taskId, answer) => request("POST", `/api/tasks/${encodeURIComponent(taskId)}/reply`, { answer }),
   };
 }

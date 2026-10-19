@@ -3,19 +3,8 @@
 
 export const KIKI_ORIGIN = "http://localhost:8787";
 export const REFRESH_MS = 2000;
-export const PAIRING_HINT = "In the Kiki app, click Pair side panel and type the 6-digit code here.";
-export const OFFLINE_HINT = "Start Kiki on your computer: npm start in the project folder.";
-
-export const STATE_NAMES = Object.freeze({
-  idle: "Idle",
-  reading: "Reading",
-  organizing: "Organizing",
-  needs_approval: "Needs your approval",
-  waiting: "Waiting for someone",
-  needs_clarification: "Needs clarification",
-  verified: "Verified",
-  error: "Error",
-});
+export const PAIRING_HINT = "In Kiki, open Settings. Under Chrome side panel, click Pair side panel, then type the code here.";
+export const OFFLINE_HINT = "Start Kiki on your computer: npm start in the project folder. The panel keeps checking.";
 
 const OP_STATE = {
   pending: "Proposed",
@@ -32,7 +21,17 @@ const OP_TONE = { pending: "plain", running: "busy", verified: "ok", failed: "ba
 
 const NOTE_STATUS = { already_organized: "Already organized", needs_review: "Needs review", left_in_place: "Left in place", waiting: "Still reading" };
 
-const PURPOSE = { find: "About a new find", done: "Done message", summary: "Summary note" };
+/** A finished plan, as Recent says it. */
+const FINISHED = {
+  applied: { label: "Applied and verified", tone: "ok" },
+  partial: { label: "Partly applied", tone: "warn" },
+  failed: { label: "Failed", tone: "bad" },
+  stale: { label: "Stopped: files changed", tone: "warn" },
+  discarded: { label: "You said no", tone: "muted" },
+};
+
+/** How long a finished text through Fo stays news. */
+const RECENT_MS = 30 * 60_000;
 
 const LINK_HOSTS = new Set(["drive.google.com", "docs.google.com"]);
 const FOLDER_PATH = /^\/drive\/(?:u\/\d{1,3}\/)?folders\/([A-Za-z0-9_-]{10,200})\/?$/;
@@ -88,6 +87,10 @@ export function place(loc) {
   return parts.length ? parts.join(" / ") : null;
 }
 
+/** "Projects / Flooring" for a folder path; "the main folder" for the top. */
+const folderOf = (path) => place({ path, name: "" }) ?? "the main folder";
+const joinPath = (path, name) => (path ? `${path}/${name}` : name);
+
 export function plural(n, one, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -125,7 +128,7 @@ export function foText(n, now = new Date()) {
   } else if (r?.status === "stale") {
     label = "The proposal changed since Fo asked. Review the new version.";
   } else if (r?.status === "waiting" && n.outcome === "reported_sent") {
-    label = `${fo} reports it texted you. Answer in the Kiki app: yes, a change, or no.`;
+    label = `${fo} reports it texted you about it. Reply there, or decide here.`;
   } else if (r?.status === "expired") {
     label = "This request expired before a decision came back. Ask again from the Kiki app.";
   } else if (n.outcome === "reported_sent") {
@@ -156,22 +159,38 @@ export function foText(n, now = new Date()) {
     fo,
     label,
     tone,
-    text: n.text || null,
     more: n.question || n.failureDetail || (n.pollPaused ? n.pollError : null) || null,
     progress: n.state === "working" ? n.progress || null : null,
-    purpose: PURPOSE[n.purpose] ?? null,
     time: formatTime(n.createdAt, now),
   };
 }
 
-function stepModel(op) {
-  const kind = op.kind;
+/** Fo asked you something you can answer here, as in the app: not while Kiki is already acting on an answer. */
+const answerable = (n) => n.state === "needs_user_input" && (!n.reply || n.reply.status === "waiting");
+
+/** A text that went wrong, or that Kiki can't settle without you. */
+const textNeedsYou = (n) =>
+  n.state === "needs_user_input" || n.state === "failed" || n.state === "uncertain" || n.pollPaused || n.outcome === "not_sent" || ["stale", "expired", "not_changed"].includes(n.reply?.status);
+
+const foBusy = (n) => n.state === "pending" || n.state === "asking" || n.state === "working";
+
+/**
+ * Fo's latest text belongs on screen while it's about the plan on screen (proposed or running),
+ * while Fo is still on it, or for a while after it finished.
+ */
+function textIsCurrent(n, proposedId, runningId, now) {
+  if (n.purpose === "find" || n.purpose === "decide") return Boolean(n.planId && (n.planId === proposedId || n.planId === runningId));
+  if (n.state !== "complete") return true;
+  return now.getTime() - Date.parse(n.createdAt) < RECENT_MS;
+}
+
+function opRow(op, title, from, to, where) {
   return {
     seq: op.seq,
-    title: String(op.title ?? ""),
-    from: kind === "move_rename" ? place(op.before) : kind === "set_status" ? (op.before?.name ?? null) : null,
-    to: kind === "set_status" ? (op.after?.name ?? null) : place(op.after),
-    reason: kind === "create_folder" ? null : op.reason || null,
+    title,
+    from,
+    to,
+    where,
     state: op.state,
     stateLabel: OP_STATE[op.state] ?? String(op.state ?? ""),
     tone: OP_TONE[op.state] ?? "plain",
@@ -179,33 +198,66 @@ function stepModel(op) {
   };
 }
 
+/**
+ * A plan's changes in plain words, one row each, as in the app: "old → new" and the folder. A new
+ * folder is folded into the moves into it; it gets a row of its own only when nothing moves into
+ * it or its step went wrong.
+ */
+export function changeRows(plan) {
+  const ops = (Array.isArray(plan?.ops) ? plan.ops : []).filter((o) => o.state !== "excluded");
+  const folders = ops.filter((o) => o.kind === "create_folder" && o.after);
+  const newFolders = new Set(folders.map((o) => joinPath(o.after.path, o.after.name)));
+  const rows = [];
+  const into = [];
+  for (const op of ops) {
+    const { before, after } = op;
+    if (op.kind === "create_folder") continue;
+    if (op.kind === "move_rename" && before && after) {
+      const moved = before.path !== after.path;
+      const renamed = before.name !== after.name;
+      if (moved) into.push(after.path);
+      const where = moved ? `into ${folderOf(after.path)}${newFolders.has(after.path) ? ", a new folder" : ""}` : null;
+      rows.push(opRow(op, null, renamed ? String(before.name) : null, String(after.name), where));
+    } else if (op.kind === "write_index" && after) {
+      into.push(after.path);
+      rows.push(opRow(op, String(op.title ?? "").startsWith("Create") ? "Create the project index" : "Update the project index", null, String(after.name), `in ${folderOf(after.path)}`));
+    } else if (op.kind === "set_status") {
+      rows.push(opRow(op, String(op.title ?? ""), before?.name ?? null, after?.name ?? null, op.reason || null));
+    } else {
+      rows.push(opRow(op, String(op.title ?? ""), null, null, null));
+    }
+  }
+  for (const op of folders) {
+    const path = joinPath(op.after.path, op.after.name);
+    const used = into.some((p) => p === path || p.startsWith(`${path}/`));
+    if (!used || op.error || (op.state !== "pending" && op.state !== "verified")) rows.push(opRow(op, "Make a new folder", null, folderOf(path), null));
+  }
+  return rows;
+}
+
 function totals(plan) {
   const ops = Array.isArray(plan.ops) ? plan.ops : [];
   const excluded = plan.counts?.excluded ?? ops.filter((o) => o.state === "excluded").length;
   const total = (plan.counts?.total ?? ops.length) - excluded;
   const verified = plan.counts?.verified ?? ops.filter((o) => o.state === "verified").length;
-  return { ops, total, verified };
+  return { total, verified };
 }
 
-function driveLabel(d) {
-  if (d.mode === "mock") return "Mock";
-  if (d.connection === "connected") return "Live";
-  if (d.connection === "needs_auth") return "Not connected";
-  if (d.connection === "not_configured") return "Not set up";
-  return "Problem";
+function driveMode(d) {
+  if (d.mode === "mock") return { label: "Mock Drive", ok: true };
+  if (d.connection === "connected") return { label: "Live Drive", ok: true };
+  if (d.connection === "needs_auth") return { label: "Drive not connected", ok: false };
+  if (d.connection === "not_configured") return { label: "Drive not set up", ok: false };
+  return { label: "Drive problem", ok: false };
 }
 
-function foLabel(f) {
-  if (f.mode === "mock") return "Mock";
-  if (f.connection === "connected") return "Live";
-  if (f.connection === "needs_auth") return "Not connected";
-  return "Problem";
+function foMode(f) {
+  if (f.mode === "mock") return { label: "Mock Fo", ok: true };
+  if (f.connection === "connected") return { label: "Live Fo", ok: true };
+  if (f.connection === "needs_auth") return { label: "Fo not connected", ok: false };
+  return { label: "Fo problem", ok: false };
 }
 
-/**
- * Everything the panel shows, from the app's view and the active tab ({ url, title } or null).
- * Plain data only, so the panel can compare it between refreshes and skip redrawing.
- */
 /** The chip for each kind of thing Kiki points out, as in the app's "Needs a look". */
 const ATTENTION_CHIP = {
   missing: { label: "Missing", tone: "bad" },
@@ -218,6 +270,17 @@ const ATTENTION_CHIP = {
   unplaced: { label: "Where?", tone: "warn" },
 };
 
+function planType(p) {
+  if (p.kind === "undo") return "Proposed undo";
+  if (p.kind === "version_update") return "Proposed quote update";
+  return p.version > 1 ? `Revised plan, version ${p.version}` : "Proposed plan";
+}
+
+/**
+ * Everything the panel shows, from the app's view and the active tab ({ url, title } or null), in
+ * the panel's order: what needs you, what Kiki is working on, and what happened recently. Plain
+ * data only, so the panel can compare it between refreshes and skip redrawing.
+ */
 export function buildModel(view, { tab = null, now = new Date() } = {}) {
   const v = view ?? {};
   const drive = v.integrations?.drive ?? {};
@@ -225,18 +288,16 @@ export function buildModel(view, { tab = null, now = new Date() } = {}) {
   const ws = v.workspace ?? null;
   const plans = Array.isArray(v.plans) ? v.plans : [];
   const files = Array.isArray(v.inventory?.files) ? v.inventory.files : [];
+  const notifications = Array.isArray(v.notifications) ? v.notifications : [];
   const reading = Number(v.inventory?.reading) || 0;
+  const busy = v.busy ?? {};
   const mockDrive = drive.mode === "mock";
   const driveReady = mockDrive || drive.connection === "connected";
   const foReady = fo.mode === "mock" || fo.connection === "connected";
   const autoTextOn = Boolean(v.settings?.autoText);
+  const inDrive = mockDrive ? "in the mock Drive" : "in Drive";
 
-  const kiki = {
-    state: v.kiki?.state ?? "idle",
-    name: STATE_NAMES[v.kiki?.state] ?? "",
-    label: String(v.kiki?.label ?? ""),
-    detail: v.kiki?.detail ? String(v.kiki.detail) : null,
-  };
+  const kiki = { state: v.kiki?.state ?? "idle", label: String(v.kiki?.label ?? "") };
 
   const alerts = [];
   if (!mockDrive && drive.connection === "needs_auth") alerts.push({ tone: "warn", title: "Google Drive isn't connected.", body: "Connect it in the Kiki app, then come back here.", openKiki: true });
@@ -254,20 +315,12 @@ export function buildModel(view, { tab = null, now = new Date() } = {}) {
   }
 
   const docs = files.filter((f) => f.kind !== "folder");
-  const workspace = ws
-    ? {
-        name: String(ws.name ?? ""),
-        link: safeLink(ws.link),
-        mock: ws.mode === "mock",
-        pill: reading > 0 ? `Reading ${reading}…` : ws.lastInventoryAt ? plural(docs.length, "file") : "Looking…",
-      }
-    : null;
+  const workspace = ws ? { name: String(ws.name ?? ""), link: safeLink(ws.link), mock: ws.mode === "mock", files: ws.lastInventoryAt ? docs.length : null } : null;
 
   const proposedPlan = plans.find((p) => p.status === "proposed");
   const runningPlan = plans.find((p) => p.status === "approved" || p.status === "executing");
   const idle = !proposedPlan && !runningPlan;
   const brokenPlan = idle ? plans.find((p) => p.status === "failed" || p.status === "partial" || p.status === "stale") : undefined;
-  const appliedPlan = idle ? plans.find((p) => p.status === "applied" || p.status === "partial") : undefined;
 
   // The active tab, when it's a Drive folder: where it sits relative to the workspace.
   let here = null;
@@ -289,90 +342,125 @@ export function buildModel(view, { tab = null, now = new Date() } = {}) {
     }
   }
 
+  // Fo's latest text goes where it matters: a question to answer here, a problem that needs you,
+  // a line while Fo is on it, or next to the plan it's about.
+  const latest = notifications[0];
+  const text = latest && textIsCurrent(latest, proposedPlan?.id ?? null, runningPlan?.id ?? null, now) ? latest : null;
+  const said = text ? foText(text, now) : null;
+  let question = null;
+  let foNeeds = null;
+  let foWorking = null;
+  let foNote = null;
+  if (text && answerable(text)) {
+    question = { taskId: String(text.taskId), fo: said.fo, question: text.question ? String(text.question) : null, time: said.time, planId: text.planId ?? null };
+  } else if (text && textNeedsYou(text)) {
+    foNeeds = { ...said, openKiki: text.state === "needs_user_input" };
+  } else if (text && foBusy(text)) {
+    foWorking = { label: said.label, detail: said.progress };
+  } else if (text) {
+    foNote = { planId: text.planId ?? null, label: said.label, tone: said.tone, time: said.time, at: text.createdAt };
+  }
+
   let proposed = null;
   if (proposedPlan) {
-    const { ops } = totals(proposedPlan);
     const ev = proposedPlan.evidence;
+    const rows = changeRows(proposedPlan);
+    // Fo's request about this plan that you can still answer: a correction goes back through it.
+    const request = notifications.find((n) => n.planId === proposedPlan.id && (n.purpose === "find" || n.purpose === "decide") && n.reply?.status === "waiting");
     proposed = {
       id: proposedPlan.id,
       key: `${proposedPlan.id}:${proposedPlan.contentHash}`,
       contentHash: proposedPlan.contentHash,
       title: String(proposedPlan.title ?? ""),
-      summary: proposedPlan.summary ? String(proposedPlan.summary) : null,
-      version: Number(proposedPlan.version) || 1,
-      eyebrow: proposedPlan.kind === "undo" ? "UNDO, IF YOU WANT IT" : proposedPlan.kind === "version_update" ? "AN UPDATE TO REVIEW" : "YOUR ORGANIZING PLAN",
-      steps: ops.map(stepModel),
-      count: ops.filter((o) => o.state !== "excluded").length,
-      notes: (Array.isArray(proposedPlan.notes) ? proposedPlan.notes : []).map((n) => ({ name: String(n.name ?? ""), status: NOTE_STATUS[n.status] ?? String(n.status ?? ""), reason: String(n.reason ?? "") })),
+      type: planType(proposedPlan),
+      time: formatTime(proposedPlan.createdAt, now),
+      rows,
+      count: rows.length,
+      notes: (Array.isArray(proposedPlan.notes) ? proposedPlan.notes : []).map((n) => ({
+        name: String(n.name ?? ""),
+        status: n.unplaced ? "Needs a folder" : (NOTE_STATUS[n.status] ?? String(n.status ?? "")),
+        reason: String(n.reason ?? ""),
+      })),
       evidence: ev?.statement ? { statement: String(ev.statement), source: ev.source ? String(ev.source) : null } : null,
       diff: Array.isArray(proposedPlan.diff?.lines) && proposedPlan.diff.lines.length ? proposedPlan.diff.lines.map(String) : null,
       conflict: proposedPlan.conflict ? String(proposedPlan.conflict) : null,
+      fo: foNote?.planId === proposedPlan.id ? foNote.label : null,
+      request: request && !foBusy(request) ? { taskId: String(request.taskId), fo: request.mode === "mock" ? "Mock Fo" : "Fo" } : null,
     };
   }
 
   let running = null;
   if (runningPlan) {
-    const { ops, total, verified } = totals(runningPlan);
-    running = {
-      id: runningPlan.id,
-      title: String(runningPlan.title ?? ""),
-      label: `Applying… ${verified} of ${total} verified so far.`,
-      steps: ops.filter((o) => o.state !== "excluded").map(stepModel),
-    };
+    const { total, verified } = totals(runningPlan);
+    running = { id: runningPlan.id, title: String(runningPlan.title ?? ""), label: `Applying… ${verified} of ${plural(total, "step")} verified so far.` };
   }
 
   let broken = null;
   if (brokenPlan) {
-    const { ops } = totals(brokenPlan);
     const stale = brokenPlan.status === "stale";
+    const rows = changeRows(brokenPlan).filter((r) => r.state !== "verified");
     broken = {
       id: brokenPlan.id,
       title: String(brokenPlan.title ?? ""),
+      type: FINISHED[brokenPlan.status].label,
       heading: stale ? "Something changed since the plan was made." : "Some changes didn't go through.",
-      error: ops.find((o) => o.error)?.error ?? null,
+      steps: rows,
+      error: rows.find((r) => r.error)?.error ?? null,
       action: stale ? "refresh" : brokenPlan.canResume ? "resume" : null,
       actionLabel: stale ? "Refresh the plan" : "Try again",
     };
   }
 
-  let done = null;
-  if (appliedPlan) {
-    const { ops, total, verified } = totals(appliedPlan);
-    const partial = appliedPlan.status === "partial";
-    done = {
-      id: appliedPlan.id,
-      partial,
-      label: `${partial ? "Partly done" : "Done"}: ${verified} of ${total} changes verified in ${mockDrive ? "the mock Drive" : "Drive"}.`,
-      title: String(appliedPlan.title ?? ""),
-      when: formatTime(appliedPlan.finishedAt, now),
-      steps: ops.filter((o) => o.state !== "excluded").map(stepModel),
-    };
+  // One line while something is happening, the most specific first.
+  let working = null;
+  if (running) working = { label: running.label, detail: null };
+  else if (foWorking) working = foWorking;
+  else if (reading > 0) working = { label: `Reading ${plural(reading, "file")}…`, detail: null };
+  else if (busy.reading) working = { label: "Reading your documents…", detail: null };
+  else if (busy.interpreting) working = { label: "Reading Fo's update…", detail: null };
+  else if (busy.inventory && ws && !files.length) working = { label: "Looking through the folder…", detail: null };
+
+  // The last few finished plans, newest first, then Fo's latest report if it's about none of them.
+  const finished = plans
+    .filter((p) => FINISHED[p.status] && p.id !== brokenPlan?.id)
+    .map((p) => ({ p, at: p.finishedAt ?? p.createdAt ?? "" }))
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+    .slice(0, 4);
+  const recent = finished.map(({ p, at }) => {
+    const counts = totals(p);
+    const f = FINISHED[p.status];
+    // Applied means every step was read back from Drive; anything less says exactly how many were.
+    const label = p.status === "partial" || p.status === "failed" ? `${f.label}: ${counts.verified} of ${plural(counts.total, "step")} verified ${inDrive}` : f.label;
+    return { id: p.id, kind: "plan", status: p.status, title: String(p.title ?? ""), label, counts, tone: f.tone, time: formatTime(at, now), fo: foNote?.planId === p.id ? foNote.label : null };
+  });
+  if (foNote && foNote.planId !== proposedPlan?.id && !recent.some((r) => r.id === foNote.planId)) {
+    recent.unshift({ id: `fo:${foNote.at}`, kind: "fo", status: null, title: foNote.label, label: null, counts: null, tone: foNote.tone, time: foNote.time, fo: null });
   }
 
-  const readingDone = Boolean(ws) && files.length > 0 && reading === 0 && !v.busy?.reading;
-  const check = ws && idle ? { label: appliedPlan ? "Check for anything new" : "Propose a plan", ready: readingDone } : null;
-
-  const latest = Array.isArray(v.notifications) ? v.notifications[0] : undefined;
+  const readingDone = Boolean(ws) && files.length > 0 && reading === 0 && !busy.reading;
+  const anyApplied = plans.some((p) => p.status === "applied" || p.status === "partial");
 
   return {
     kiki,
-    modes: `Drive: ${driveLabel(drive)} · Fo: ${foLabel(fo)}`,
+    modes: { drive: driveMode(drive), fo: foMode(fo) },
     alerts,
     workspace,
     here,
     offer,
-    fo: latest ? foText(latest, now) : null,
+    question,
+    fo: foNeeds,
     proposed,
     running,
     broken,
-    done,
-    check,
-    // Without a connected Drive, the alert above already says what to do.
+    working,
+    recent,
+    check: ws && idle ? { label: anyApplied ? "Check for anything new" : "Propose a plan", ready: readingDone } : null,
+    // Without a connected Drive, the alert already says what to do.
     empty: ws ? null : mockDrive ? "Kiki is using a mock Drive. Open Kiki to set up the renovation folder." : driveReady ? "Open a Google Drive folder in this tab, and I'll offer to organize it." : null,
     autoText: ws ? { on: autoTextOn } : null,
     // What Kiki noticed in the folder; the app has the details and the actions.
     attention: (Array.isArray(v.attention) ? v.attention : []).slice(0, 4).map((a) => ({ title: String(a.title ?? ""), detail: a.detail ? String(a.detail) : null, chip: ATTENTION_CHIP[a.kind] ?? null })),
     attentionMore: Math.max(0, (Array.isArray(v.attention) ? v.attention.length : 0) - 4),
-    events: (Array.isArray(v.activity?.events) ? v.activity.events : []).slice(0, 50).map((e) => ({ time: formatTime(e.at, now), message: String(e.message ?? "") })),
+    events: (Array.isArray(v.activity?.events) ? v.activity.events : []).slice(0, 30).map((e) => ({ time: formatTime(e.at, now), message: String(e.message ?? "") })),
   };
 }

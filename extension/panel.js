@@ -1,10 +1,11 @@
-// Kiki's side panel: a client of the Kiki app running on this computer. It shows Kiki's status,
-// her latest plan and what Fo last texted you, and lets you approve or set aside a plan. The app
-// does all the work; this panel never touches Google Drive itself.
+// Kiki's side panel: a client of the Kiki app running on this computer. It shows what needs you
+// (a plan to approve, a question from Fo), what Kiki is working on and what happened recently, and
+// lets you approve or set aside a plan. The app does all the work; this panel never touches Google
+// Drive itself.
 
 import { createApi } from "./api.js";
-import { KIKI_ORIGIN, REFRESH_MS, buildModel, cleanCode } from "./lib.js";
-import { renderMain, renderOffline, renderPairing, renderProblem } from "./ui.js";
+import { KIKI_ORIGIN, REFRESH_MS, buildModel, cleanCode, formatTime } from "./lib.js";
+import { kikiFace, renderMain, renderOffline, renderPairing, renderProblem, renderSettings } from "./ui.js";
 
 const TOKEN_KEY = "kikiToken";
 const FLASH_MS = 8000;
@@ -24,17 +25,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     return v === "window" || v === "popup" ? v : "side";
   })();
   doc.documentElement?.classList.add(`as-${openedAs}`);
-  const el = {
-    screen: $("#screen"),
-    modes: $("#modes"),
-    state: $("#state-name"),
-    status: $("#status"),
-    detail: $("#detail"),
-    foot: $("#foot"),
-    kiki: $("#kiki"),
-    dialog: $("#dialog"),
-    forget: $("#forget"),
-  };
+  const el = { screen: $("#screen"), status: $("#status-text"), said: $("#status-said"), avatar: $("#avatar") };
 
   let token; // undefined until read from storage, then a string or null
   let screen = "loading"; // loading | pairing | offline | problem | main
@@ -42,14 +33,16 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
   let tab = null;
   let problem = null;
   let checking = false;
-  const ui = { tab: "organize", busy: null, error: null, loadError: null, flash: null, flashAt: 0, confirmSwitch: null };
+  let lastChecked = null;
+  const ui = { settings: false, busy: null, error: null, loadError: null, flash: null, flashAt: 0, confirmSwitch: null, correcting: null };
   const pairing = { busy: false, error: null, info: null, offline: false };
   const requestIds = new Map(); // plan id + hash -> clientRequestId, so a repeated approve is the same approval
   let shownPlan = null;
   let replacedAt = 0;
   let lastSig = null;
-  let lastKiki = null;
+  let lastFace = null;
   let pendingFocus = null;
+  let forceFocus = null;
   let timer = null;
   let stopped = false;
   let inflight = null;
@@ -84,6 +77,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
 
   const api = createApi({ base, fetch: fetchFn, getToken: loadToken });
 
+
   async function readTab() {
     try {
       let query = { active: true, currentWindow: true };
@@ -103,28 +97,19 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
   // Drawing -------------------------------------------------------------------------------------
 
   const setText = (node, text) => {
-    if (!node) return;
-    const value = text ?? "";
-    if (node.textContent !== value) node.textContent = value;
-    node.hidden = !value;
+    if (node && node.textContent !== (text ?? "")) node.textContent = text ?? "";
   };
 
+  /** The header: Kiki's face and her status line, the panel's one live region (with what an action just did). */
   function setHero(hero) {
-    setText(el.modes, hero.modes);
-    setText(el.state, hero.name);
     setText(el.status, hero.label);
-    el.status.hidden = false;
-    setText(el.detail, hero.detail);
-    setText(el.foot, hero.foot);
-    if (hero.state && lastKiki && hero.state !== lastKiki && el.kiki) {
-      const motion = hero.state === "verified" ? "bob" : hero.state === "needs_approval" || hero.state === "needs_clarification" ? "tilt" : null;
-      el.kiki.classList.remove("bob", "tilt");
-      if (motion) {
-        void el.kiki.offsetWidth; // restart the one-time animation
-        el.kiki.classList.add(motion);
-      }
+    setText(el.said, ui.flash ? ` ${ui.flash}` : "");
+    const state = hero.state ?? "idle";
+    if (el.avatar && state !== lastFace) {
+      const motion = lastFace === null ? null : state === "verified" ? "bob" : state === "needs_approval" || state === "needs_clarification" ? "tilt" : null;
+      el.avatar.replaceChildren(kikiFace(doc, state, motion));
+      lastFace = state;
     }
-    if (hero.state) lastKiki = hero.state;
   }
 
   /**
@@ -135,15 +120,14 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     const root = el.screen;
     const active = doc.activeElement;
     const lost = !active || active === doc.body;
-    const focusKey = active && root.contains(active) ? (active.closest("[data-key]")?.dataset.key ?? null) : lost ? pendingFocus : null;
-    const typed = new Map([...root.querySelectorAll("input[type=text][data-key]")].map((i) => [i.dataset.key, { value: i.value, start: i.selectionStart, end: i.selectionEnd }]));
+    const focusKey = forceFocus ?? (active && root.contains(active) ? (active.closest("[data-key]")?.dataset.key ?? null) : lost ? pendingFocus : null);
+    const typed = new Map([...root.querySelectorAll("input[type=text][data-key], textarea[data-key]")].map((i) => [i.dataset.key, { value: i.value, start: i.selectionStart, end: i.selectionEnd }]));
     const open = new Set([...root.querySelectorAll("details[open][data-key]")].map((d) => d.dataset.key));
-    root.replaceChildren(...nodes);
-    for (const input of root.querySelectorAll("input[type=text][data-key]")) {
+    root.replaceChildren(...nodes.filter(Boolean));
+    for (const input of root.querySelectorAll("input[type=text][data-key], textarea[data-key]")) {
       const t = typed.get(input.dataset.key);
       if (!t) continue;
       input.value = t.value;
-      if (doc.activeElement !== input && focusKey === input.dataset.key) input.focus();
       try {
         input.setSelectionRange(t.start ?? t.value.length, t.end ?? t.value.length);
       } catch {
@@ -152,6 +136,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     }
     for (const d of root.querySelectorAll("details[data-key]")) if (open.has(d.dataset.key)) d.open = true;
     pendingFocus = null;
+    forceFocus = null;
     if (focusKey) {
       const target = [...root.querySelectorAll("[data-key]")].find((n) => n.dataset.key === focusKey);
       if (target && target.disabled) pendingFocus = focusKey;
@@ -173,40 +158,45 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     } catch (err) {
       console.error("Kiki side panel: couldn't draw this view.", err);
       lastSig = null;
-      el.screen.replaceChildren(Object.assign(doc.createElement("p"), { className: "err", textContent: `The side panel couldn't show this: ${err instanceof Error ? err.message : String(err)}` }));
+      el.screen.replaceChildren(Object.assign(doc.createElement("p"), { className: "tone bad", textContent: `The side panel couldn't show this: ${err instanceof Error ? err.message : String(err)}` }));
     }
   }
 
   function draw() {
+    if (ui.flash && Date.now() - ui.flashAt > FLASH_MS) ui.flash = null;
+    const model = screen === "main" && view ? buildModel(view, { tab }) : null;
+    if (model) trackPlan(model.proposed);
+    const ctx = {
+      checked: lastChecked ? formatTime(lastChecked.toISOString()) : null,
+      modes: model?.modes ?? null,
+      workspace: model?.workspace ?? null,
+      here: model?.here ?? null,
+    };
     let hero;
-    let sig;
     let build;
-    if (screen === "main" && view) {
-      const model = buildModel(view, { tab });
-      trackPlan(model.proposed);
-      if (ui.flash && Date.now() - ui.flashAt > FLASH_MS) ui.flash = null;
-      hero = { modes: model.modes, name: model.kiki.name, label: model.kiki.label, detail: model.kiki.detail, state: model.kiki.state, foot: "Paired with Kiki on this computer." };
-      sig = JSON.stringify(["main", model, ui]);
-      build = () => renderMain(doc, model, ui, actions);
+    if (model) {
+      hero = { label: model.kiki.label, state: model.kiki.state };
+      build = () => renderMain(doc, model, ui, actions, ctx);
     } else if (screen === "pairing") {
-      hero = { name: "Not paired yet", label: "Let's pair this side panel.", foot: "Kiki runs on this computer at localhost:8787." };
-      sig = JSON.stringify(["pairing", pairing]);
-      build = () => renderPairing(doc, pairing, actions);
+      hero = { label: "Let's pair this side panel." };
+      build = () => renderPairing(doc, pairing, actions, ctx);
     } else if (screen === "offline") {
-      hero = { name: "Can't reach Kiki", label: "I can't reach Kiki on this computer.", foot: "Kiki runs on this computer at localhost:8787." };
-      sig = JSON.stringify(["offline", checking]);
-      build = () => renderOffline(doc, { busy: checking }, actions);
+      hero = { label: "I can't reach Kiki.", state: "error" };
+      build = () => renderOffline(doc, { busy: checking }, actions, ctx);
     } else if (screen === "problem") {
-      hero = { name: "Error", label: "Kiki answered with an error.", foot: "Kiki runs on this computer at localhost:8787." };
-      sig = JSON.stringify(["problem", problem, checking]);
-      build = () => renderProblem(doc, { message: problem, busy: checking }, actions);
+      hero = { label: "Kiki answered with an error.", state: "error" };
+      build = () => renderProblem(doc, { message: problem, busy: checking }, actions, ctx);
     } else {
       hero = { label: "Connecting to Kiki…" };
-      sig = "loading";
       build = () => [];
     }
+    if (ui.settings) {
+      const settings = { paired: Boolean(token), autoText: model?.autoText ?? null, busy: ui.busy };
+      build = () => renderSettings(doc, settings, actions, ctx);
+    }
     setHero(hero);
-    if (sig === lastSig) return;
+    const sig = JSON.stringify([screen, ui.settings ? "settings" : "", model, ui, pairing, problem, checking, ctx, Boolean(token)]);
+    if (sig === lastSig && !forceFocus) return;
     replaceScreen(build());
     lastSig = sig;
   }
@@ -219,9 +209,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     screen = "pairing";
     pairing.info = message;
     pairing.error = null;
-    ui.busy = null;
-    ui.error = null;
-    ui.confirmSwitch = null;
+    Object.assign(ui, { busy: null, error: null, confirmSwitch: null, correcting: null });
     render();
   }
 
@@ -267,6 +255,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     view = result.v;
     problem = null;
     ui.loadError = null;
+    lastChecked = new Date();
     screen = "main";
     render();
   }
@@ -336,11 +325,13 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     return requestIds.get(planKey);
   }
 
+  /** Empties a text box after what was typed in it went through. */
+  const clearTyped = (key) => {
+    const box = [...el.screen.querySelectorAll("textarea[data-key]")].find((n) => n.dataset.key === key);
+    if (box) box.value = "";
+  };
+
   const actions = {
-    setTab(id) {
-      ui.tab = id;
-      render();
-    },
     dismissError() {
       ui.error = null;
       render();
@@ -358,6 +349,48 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     discard(p) {
       return act("discard", () => api.discard(p.id), () => "Set aside. Nothing in Drive changed.");
     },
+    startCorrection(p) {
+      ui.correcting = p.key;
+      forceFocus = "correction";
+      render();
+    },
+    cancelCorrection() {
+      ui.correcting = null;
+      forceFocus = "correct";
+      render();
+    },
+    correct(p, text) {
+      if (!p.request) return;
+      if (!String(text ?? "").trim()) {
+        ui.error = "Write what Kiki should change.";
+        render();
+        return;
+      }
+      return act(
+        "correct",
+        () => api.answer(p.request.taskId, String(text)),
+        () => {
+          clearTyped("correction");
+          ui.correcting = null;
+          return `Sent to ${p.request.fo}. You'll review the new version before anything changes.`;
+        },
+      );
+    },
+    answer(q, text) {
+      if (!String(text ?? "").trim()) {
+        ui.error = `Write an answer for ${q.fo}.`;
+        render();
+        return;
+      }
+      return act(
+        "answer",
+        () => api.answer(q.taskId, String(text)),
+        () => {
+          clearTyped(`answer-${q.taskId}`);
+          return `Your answer is on its way to ${q.fo}.`;
+        },
+      );
+    },
     askSwitch(o) {
       ui.confirmSwitch = o.folderId;
       render();
@@ -372,7 +405,6 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
         () => api.selectFolder(o.url),
         () => {
           ui.confirmSwitch = null;
-          ui.tab = "organize";
           return "Kiki is looking through the folder. She'll propose a plan before anything moves.";
         },
       );
@@ -390,11 +422,26 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     setAutoText(on) {
       return act("autotext", () => api.setAutoText(on), () => (on ? "Fo will text you when Kiki finds something new." : "Fo won't text you about new finds."));
     },
+    openSettings() {
+      ui.settings = true;
+      forceFocus = "settings-title";
+      render();
+    },
+    closeSettings() {
+      ui.settings = false;
+      forceFocus = "settings";
+      render();
+    },
+    async forget() {
+      ui.settings = false;
+      forceFocus = "code";
+      await unpaired("This browser forgot the pairing. To revoke it in Kiki too, click Unpair in Kiki's Settings.");
+    },
     async pair(raw) {
       if (pairing.busy) return;
       const code = cleanCode(raw);
       if (!code) {
-        pairing.error = "Type the 6-digit code from the Kiki app.";
+        pairing.error = "Type the 6-digit code from Kiki's Settings.";
         render();
         return;
       }
@@ -451,20 +498,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
   doc.addEventListener("visibilitychange", () => {
     if (doc.visibilityState === "visible") void refresh();
   });
-
-  const closeDialog = () => (typeof el.dialog?.close === "function" ? el.dialog.close() : el.dialog?.removeAttribute("open"));
-  $("#about")?.addEventListener("click", () => {
-    if (el.forget) el.forget.hidden = !token;
-    if (typeof el.dialog?.showModal === "function") el.dialog.showModal();
-    else el.dialog?.setAttribute("open", "");
-  });
-  $("#close")?.addEventListener("click", closeDialog);
-  $("#dismiss")?.addEventListener("click", closeDialog);
-  el.forget?.addEventListener("click", async () => {
-    closeDialog();
-    await unpaired("This browser forgot the pairing. To revoke it in Kiki too, click Unpair in the Kiki app.");
-  });
-  el.kiki?.addEventListener("animationend", () => el.kiki.classList.remove("bob", "tilt"));
+  el.avatar?.addEventListener("animationend", (e) => e.target?.classList?.remove?.("kiki--bob", "kiki--tilt"));
 
   // Tell the toolbar button that this side panel is open and can be seen: its next click then
   // closes it, and a browser that opens the panel without ever showing it gets a Kiki window.

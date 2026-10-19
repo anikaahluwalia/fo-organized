@@ -33,7 +33,7 @@ node scripts/ui/extension.mjs 8796 /tmp            # load, pair with a real code
 node scripts/ui/extension.mjs 8796 /tmp --approve  # also click Approve on a waiting plan
 ```
 
-It copies `extension/`, points it at the mock's port, loads it into headless Chrome over the DevTools pipe (branded Chrome 137+ ignores `--load-extension`), pairs it and saves `panel-*.png`. It can't click the toolbar button itself: the button's logic (side panel, or a window where the browser shows no side panel, such as Arc) is covered by `test/extension-background.test.mjs`.
+It copies `extension/`, points it at the mock's port, loads it into headless Chrome over the DevTools pipe (branded Chrome 137+ ignores `--load-extension`), pairs it and saves `panel-<view>-<theme>.png` (unpaired, paired, settings; light and dark at 400px unless `--theme=` or `--width=` says otherwise), each as tall as its content, and says whether the panel scrolls sideways at 360px. It can't click the toolbar button itself: the button's logic (side panel, or a window where the browser shows no side panel, such as Arc) is covered by `test/extension-background.test.mjs`.
 
 ## 4. Clean up
 

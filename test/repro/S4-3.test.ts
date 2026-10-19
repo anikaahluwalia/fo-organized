@@ -15,7 +15,7 @@ import { makeRig, type TestRig } from "../helpers.ts";
 const APP = fileURLToPath(new URL("../../web/src/App.tsx", import.meta.url));
 // The side panel's view model (plain JavaScript, no type declarations).
 const EXTENSION_LIB = "../../extension/lib.js";
-const { buildModel } = (await import(EXTENSION_LIB)) as { buildModel: (view: AppView) => { done: { label: string } | null } };
+const { buildModel } = (await import(EXTENSION_LIB)) as { buildModel: (view: AppView) => { recent: { label: string | null; counts: { verified: number; total: number } | null }[] } };
 
 interface WebApp {
   HistoryRow: (props: { plan: PlanView; act: FakeAct }) => unknown;
@@ -106,5 +106,7 @@ test("evidence: the strip and the side panel already count only the steps meant 
   const web = await webApp();
   const decisions = text(web.renderToStaticMarkup(web.createElement(web.Decisions, { view, act: idleAct })));
   assert.match(decisions, /8 of 8 changes applied and verified in Drive\./);
-  assert.match(buildModel(view).done?.label ?? "", /Done: 8 of 8 changes verified/);
+  const [latest] = buildModel(view).recent;
+  assert.equal(latest?.label, "Applied and verified");
+  assert.deepEqual(latest?.counts, { verified: 8, total: 8 });
 });
