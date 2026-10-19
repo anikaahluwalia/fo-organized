@@ -158,7 +158,7 @@ function CollectionRow({ c, view, act, allStaged }: { c: Collection; view: AppVi
   );
 }
 
-/** Every folder Kiki keeps, its files and project index, then everything she sees in one list. */
+/** Every folder Kiki keeps, its files and project index, then everything Kiki sees in one list. */
 export function Browse({ view, act }: { view: AppView; act: Act }) {
   if (!view.workspace) return <p className="muted">Choose a folder first. Kiki shows what's in it here.</p>;
   const files = view.inventory.files.filter((f) => f.kind !== "folder");

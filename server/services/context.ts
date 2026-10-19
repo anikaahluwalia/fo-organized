@@ -17,7 +17,7 @@ export interface Ctx {
   engine: FoEngine;
   jobs: JobQueue;
   watchIntervalSeconds: number;
-  /** Kiki's public https address for answer links in texts, if she has one. */
+  /** Kiki's public https address for answer links in texts, if there is one. */
   publicUrl?: string | null;
   /** Fo's webhook is set up: Wajo tells Kiki when you text Fo, so a text reply can be an answer. */
   foWebhook?: boolean;

@@ -51,8 +51,8 @@ function settled(ctx: Ctx, taskId: string): Status | null {
   const r = replyState(ctx, taskId);
   if (!r) return { title: "Nothing to answer", text: "There's nothing waiting for you here.", done: false };
   if (notifyPurpose(ctx, taskId) === "offer") {
-    // An offer to file a kind of document on her own: there's no plan, only that lesson.
-    if (r.status === "approved") return { title: "You said yes", text: "Kiki will file these on her own and text you each time. You can stop that in the Kiki app.", next: "You can close this tab.", done: true };
+    // An offer to file a kind of document without asking: there's no plan, only that lesson.
+    if (r.status === "approved") return { title: "You said yes", text: "Kiki will file these without asking and text you each time. You can stop that in the Kiki app.", next: "You can close this tab.", done: true };
     if (r.status === "declined") return { title: "Got it", text: "Kiki will keep asking you first.", next: "You can close this tab.", done: true };
     const l = one<{ auto: number }>(ctx.db, "SELECT auto FROM lessons WHERE id = ?", r.planId);
     if (r.status !== "waiting" || !l || l.auto) return { title: "This one's settled", text: "You can change it in the Kiki app.", done: false };
@@ -78,15 +78,18 @@ function settled(ctx: Ctx, taskId: string): Status | null {
   return null;
 }
 
+/** The "where does it go" lines as texts sent before Kiki was gender neutral worded them, so their pages drop them too. */
+const EARLIER_WHERE = ["Please tap the link to tell her: text replies can't be processed.", "Tap the link to tell her, or just reply to this text."];
+
 /** The answer page: the proposal Fo texted you, Fo's question if it asked one, and the answer form; once you've answered, where things stand. */
 export function answerPage(ctx: Ctx, token: string, notice?: string): string {
   const taskId = requestFor(ctx, token);
   const task = getTask(ctx.db, taskId);
   // The text as Fo sent it, without its own link (you're on that page).
   let proposal = (notifyText(ctx, taskId) ?? "").replace(LINK_LINE, "").replace(/\s*Answer here: \S+\s*$/, "");
-  for (const line of [LINK_ONLY, LINK_OR_TEXT, LINK_ONLY_WHERE, LINK_OR_TEXT_WHERE]) proposal = proposal.replace(line, "");
+  for (const line of [LINK_ONLY, LINK_OR_TEXT, LINK_ONLY_WHERE, LINK_OR_TEXT_WHERE, ...EARLIER_WHERE]) proposal = proposal.replace(line, "");
   proposal = proposal.trim();
-  // On the page itself: no "Kiki:" (it's her page) and no "tap to answer" (the answers are right here).
+  // On the page itself: no "Kiki:" (it's Kiki's page) and no "tap to answer" (the answers are right here).
   const lead = proposal.replace(/^Kiki:\s*/, "").replace(/\s*(?:Reply|Tap)\b[^?!]*$/, "").trim();
   const status = settled(ctx, taskId);
   const state = replyState(ctx, taskId);
@@ -186,7 +189,7 @@ function cards(ctx: Ctx, plan: PlanRow): string {
   ${o.reason ? `<div class="why">${esc(o.reason)}</div>` : ""}</div></li>`;
   };
   const tidy = moves.length - fresh.length;
-  // Files Kiki asks about: which one, and why she can't tell.
+  // Files Kiki asks about: which one, and why Kiki can't tell.
   const asked = unplacedNotes(plan).map((n) => `<li class="card"><span class="icon">${ICON.where}</span><div><div class="name">${esc(n.name)}</div><div class="why">Kiki couldn't tell which project or folder it belongs to.</div></div></li>`);
   if (!moves.length) return asked.length ? `<ul class="cards">${asked.join("")}</ul>` : "";
   return `${fresh.length || asked.length ? `<ul class="cards">${fresh.map(card).join("")}${asked.join("")}</ul>` : ""}

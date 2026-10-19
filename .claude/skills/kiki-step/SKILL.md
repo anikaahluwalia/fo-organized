@@ -5,7 +5,7 @@ description: How work on Kiki is planned and finished, one roadmap step at a tim
 
 # Building Kiki one step at a time
 
-Kiki keeps a workspace organized; **Fo is who the user talks to**. Kiki reads files, prepares proposals and hands them to Fo; Fo explains them to the user and relays the user's decision, bound to the exact proposal; Kiki applies only what was approved, reads Drive back, and reports the verified result through Fo. Kiki organizes anything she can read; renovation paperwork is the first use case, not the boundary.
+Kiki keeps a workspace organized; **Fo is who the user talks to**. Kiki reads files, prepares proposals and hands them to Fo; Fo explains them to the user and relays the user's decision, bound to the exact proposal; Kiki applies only what was approved, reads Drive back, and reports the verified result through Fo. Kiki organizes anything readable; renovation paperwork is the first use case, not the boundary.
 
 The plan, the acceptance check of every step and the open findings filed under each step live in `docs/ROADMAP.md`. Read it first.
 

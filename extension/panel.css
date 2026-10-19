@@ -693,7 +693,7 @@ textarea::placeholder {
   border-color: var(--bad);
 }
 
-/* Kiki. Motion follows her state; none at all under reduced motion. -------------------------- */
+/* Kiki. Motion follows Kiki's state; none at all under reduced motion. ----------------------- */
 
 .kiki {
   overflow: visible;

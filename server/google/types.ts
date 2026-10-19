@@ -74,7 +74,7 @@ export interface DriveAdapter {
 }
 
 /**
- * What Kiki compares to tell whether someone changed a file since she looked: the content
+ * What Kiki compares to tell whether someone changed a file since the last look: the content
  * fingerprint (md5 for uploaded files, modified time for Google Docs). Drive's own "version"
  * counter also moves for background processing (e.g. right after an upload), which would make
  * safe operations look stale. Renames and moves are checked separately by name and parent.

@@ -99,7 +99,7 @@ test("a yes you text Fo, even in an old iMessage thread, approves the proposal F
   assert.match(s.note.text ?? "", /Reply yes, or tap to change it:/, "with the webhook, the text invites a reply");
   foReads(s, "yes go ahead");
   assert.equal(await deliver(s, textEvent()), 204);
-  assert.equal(asked(s), 1, "Kiki asked Fo, in her conversation, to read your text");
+  assert.equal(asked(s), 1, "Kiki asked Fo, in Kiki's conversation, to read your text");
   assert.equal(s.fo.asks.find((a) => a.message.includes("answered this by text"))?.conversationId, "kiki-1");
   assert.equal(status(s), "applied");
 });

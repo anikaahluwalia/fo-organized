@@ -138,7 +138,7 @@ export function createCopyRequestDraft(ctx: Ctx, documentId: string, input: { re
     throw conflict("There's already a message about this document. Finish or discard it first.");
   }
   const userName = getUserName(ctx.db);
-  if (!userName) throw badRequest("Add your first name so Kiki can say who she's helping.");
+  if (!userName) throw badRequest("Add your first name so Kiki can tell the contractor who's asking.");
   const name = (input.contractorName ?? "").trim();
   if (!name) throw badRequest("Add the contractor's name.");
   if (input.consent !== true) throw badRequest("Only contact someone who has agreed to hear from your assistant.", "consent_required");
@@ -163,11 +163,11 @@ export function createCopyRequestDraft(ctx: Ctx, documentId: string, input: { re
 export function createOutreachDraft(ctx: Ctx, documentId: string, input: { contractorName?: string; contractorEmail?: string; consent?: boolean }): string {
   const doc = getDoc(ctx.db, documentId);
   const facts = docFacts(doc);
-  if (doc.doc_type !== "quote" || !facts) throw conflict("Kiki can only ask about a quote she has read.");
+  if (doc.doc_type !== "quote" || !facts) throw conflict("Kiki can only ask about a quote that's been read.");
   const existing = currentOutreach(ctx.db, documentId);
   if (existing) return existing.id;
   const userName = getUserName(ctx.db);
-  if (!userName) throw badRequest("Add your first name so Kiki can say who she's helping.");
+  if (!userName) throw badRequest("Add your first name so Kiki can tell the contractor who's asking.");
   const name = (input.contractorName ?? "").trim();
   if (!name) throw badRequest("Add the contractor's name.");
   if (input.consent !== true) throw badRequest("Only contact someone who has agreed to hear from your assistant.", "consent_required");
@@ -302,7 +302,7 @@ export function replyToTask(ctx: Ctx, taskId: string, answer: string): Promise<v
     const approval = replyState(ctx, taskId);
     if (approval?.requestId) {
       if (notifyPurpose(ctx, taskId) === "offer") {
-        // An offer to file a kind of document on her own: still open while that lesson is as offered.
+        // An offer to file a kind of document without asking: still open while that lesson is as offered.
         const l = one<import("../db.ts").LessonRow>(ctx.db, "SELECT * FROM lessons WHERE id = ?", approval.planId);
         if (approval.status !== "waiting" || !l || l.auto || offerHash(l) !== approval.contentHash) throw conflict("That offer isn't waiting for your answer anymore.");
       } else {

@@ -70,8 +70,8 @@ export function recordFile(db: Db, wsId: string, f: DriveFile, path: string, ori
 }
 
 /**
- * Files Kiki couldn't read get another try: when she starts (a setting may have been fixed, like the
- * Claude key) and when you ask her to look again. Not on every look, so a file that can't be read
+ * Files Kiki couldn't read get another try: when Kiki starts (a setting may have been fixed, like the
+ * Claude key) and when you ask for another look. Not on every look, so a file that can't be read
  * doesn't cost a Claude call every few seconds.
  */
 export function retryFailedReads(db: Db, wsId: string): number {
@@ -89,8 +89,8 @@ function ensureDocument(db: Db, wsId: string, f: DriveFile): void {
 }
 
 /**
- * Kiki watches your whole Drive (My Drive): she organizes loose files, the ones at its top level or
- * in catch-all folders like Downloads, and leaves what's in your own folders where it is.
+ * Kiki watches your whole Drive (My Drive) and organizes loose files, the ones at the top level or
+ * in catch-all folders like Downloads, leaving what's in your own folders where it is.
  */
 export function wholeDrive(db: Db, wsId: string): boolean {
   return kvGet(db, `workspace.whole.${wsId}`) === "1";
@@ -218,7 +218,7 @@ export async function runInventory(ctx: Ctx, wsId: string): Promise<{ seen: numb
     if (root.trashed || root.mimeType !== FOLDER_MIME) throw new Error("The workspace folder is gone or in the trash.");
     const found = new Map<string, { file: DriveFile; path: string }>();
     const queue: { id: string; path: string }[] = [{ id: root.id, path: "" }];
-    // Your whole Drive: Kiki opens only what can hold loose files (catch-all folders) and her own
+    // Your whole Drive: Kiki opens only what can hold loose files (catch-all folders) and Kiki's own
     // folders; your own folders are known by name (as places to file into), not opened.
     const whole = wholeDrive(ctx.db, wsId);
     const opens = (path: string) => !whole || KIKI_ROOTS.includes(path.split("/")[0]!) || !isFiledPath(path);
@@ -291,7 +291,7 @@ async function upgradeFacts(ctx: Ctx, doc: DocumentRow): Promise<boolean> {
     );
     return true;
   } catch (err) {
-    // A document Kiki can't read again keeps what she knew; she doesn't keep retrying it. A
+    // A document Kiki can't read again keeps what was known and isn't retried over and over. A
     // passing problem (rate limit, network) is retried later, so the new facts aren't lost.
     if ((err instanceof ReadError && !err.retryable) || (err instanceof DriveError && err.kind === "not_found")) {
       markDone();

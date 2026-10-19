@@ -169,7 +169,7 @@ export function assignCollections(input: {
   /** Filed documents and where they are, so a supplier's next invoice goes where its others went. */
   filed: { facts: DocFacts | null; collection: string | null }[];
   files: Folder[];
-  /** Kiki's own top-level folders here ("Renovations" only when she made it). */
+  /** Kiki's own top-level folders here ("Renovations" only when Kiki made it). */
   roots?: string[];
 }): Map<string, Destination> {
   const out = new Map<string, Destination>();

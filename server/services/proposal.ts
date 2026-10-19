@@ -1,6 +1,6 @@
 /**
  * A proposal as Fo shows it to the account holder: every change, the files Kiki would move
- * numbered so an answer can refer to them ("skip number 3"), and the files she couldn't place.
+ * numbered so an answer can refer to them ("skip number 3"), and the files Kiki couldn't place.
  * File names, folder names and reasons come from documents, so each is one inert line.
  */
 import { itemLine, type ProposalItem } from "../domain/adjust.ts";

@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS lessons (
   place TEXT,
   examples INTEGER NOT NULL DEFAULT 1,
   from_plan_id TEXT,
-  -- You said Kiki may file these on her own (standing permission), and whether she offered.
+  -- You said Kiki may file these without asking (standing permission), and whether Kiki offered.
   auto INTEGER NOT NULL DEFAULT 0,
   offer TEXT CHECK (offer IN ('offered', 'declined')),
   created_at TEXT NOT NULL,

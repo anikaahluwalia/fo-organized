@@ -62,29 +62,29 @@ export function createApp(deps: AppDeps) {
   ctx.engine = new FoEngine(db, fo, { dispatch: dispatchHandler(ctx), followup: followUpHandler, notify: notifyHandler(ctx), scout: scoutHandler }, deps.engineOptions);
 
   const pollSeconds = deps.workspacePollSeconds ?? 10;
-  // Kiki keeps looking at the selected folder (read-only) so she notices new files on her own.
+  // Kiki keeps looking at the selected folder (read-only) to notice new files as they arrive.
   jobs.register("inventory", async (p) => {
     const wsId = String(p.workspaceId);
     await runInventory(ctx, wsId);
     return pollSeconds > 0 && activeWorkspace(db)?.id === wsId ? { rescheduleSeconds: pollSeconds } : undefined;
   });
-  // After reading something new, she prepares a proposal herself and (if allowed) has Fo text you.
+  // After reading something new, Kiki prepares a proposal unasked and (if allowed) has Fo text you.
   jobs.register("read", async (p) => {
     const wsId = String(p.workspaceId);
     await runReading(ctx, wsId);
     // A revised quote Kiki was waiting for goes to its follow-up first, not into a filing plan;
-    // a copy she asked for closes its request (and is filed like any new document).
+    // a copy Kiki asked for closes its request (and is filed like any new document).
     await pickUpArrivals(ctx, wsId);
     pickUpCopies(ctx, wsId);
     const proposal = autoPropose(ctx);
-    // A kind of document you said she may file on her own is filed now (she texts after); the rest is asked.
+    // A kind of document you said Kiki may file without asking is filed now (with a text after); the rest is asked.
     if (proposal?.created && !fileAlone(ctx, proposal.plan)) autoNotifyProposal(ctx, proposal.plan);
     // Then, in the background, older documents get any newer kinds of facts.
     jobs.enqueue("upgrade_facts", `upgrade_facts:${wsId}`, { workspaceId: wsId });
   });
   jobs.register("upgrade_facts", async (p) => {
     await runReading(ctx, String(p.workspaceId), { upgrades: true });
-    // What she now knows may place files she couldn't before (where a résumé or a screenshot goes).
+    // What Kiki now knows may place files that couldn't be placed before (where a résumé or a screenshot goes).
     const proposal = autoPropose(ctx);
     if (proposal?.created && !fileAlone(ctx, proposal.plan)) autoNotifyProposal(ctx, proposal.plan);
   });
@@ -101,7 +101,7 @@ export function createApp(deps: AppDeps) {
   jobs.register("compose_text", async (p) => composeAndSend(ctx, String(p.taskId)));
   // You asked Fo for changes to a proposal: Kiki makes the new version and sends it back to Fo.
   // A text you send Fo while a proposal waits: Kiki has Fo read it and report your decision.
-  // Fo handed a file from your email to Kiki: she copies it into the folder (then it's a new file like any other).
+  // Fo handed a file from your email to Kiki, who copies it into the folder (then it's a new file like any other).
   jobs.register("handoff", async (p) => acceptHandoff(ctx, String(p.fileId)));
   jobs.register("handoff_lookup", async (p) => lookupHandoff(ctx, String(p.conversationId), p.runId ? String(p.runId) : null));
   jobs.register("text_watch", async (p) => watchTextReplies(ctx, String(p.taskId)));
@@ -159,7 +159,7 @@ export function createApp(deps: AppDeps) {
     forgetConnectionCache() {
       driveConn = null;
     },
-    /** Kiki forgets what she learned: the next proposal is made without it. */
+    /** Kiki forgets a lesson: the next proposal is made without it. */
     forgetLesson(id: string) {
       forgetLesson(ctx, id);
     },
@@ -167,7 +167,7 @@ export function createApp(deps: AppDeps) {
     setEmailScout: (on: boolean) => setEmailScout(ctx, on),
     checkEmailNow: () => checkEmailNow(ctx),
     emailScoutOn: () => emailScoutOn(ctx),
-    /** You let Kiki file a kind of document on her own, or take that back. */
+    /** You let Kiki file a kind of document without asking, or take that back. */
     setFilesAlone(id: string, on: boolean) {
       setFilesAlone(ctx, id, on);
     },
@@ -242,7 +242,7 @@ export function createApp(deps: AppDeps) {
       run(db, "UPDATE workspaces SET active = 0 WHERE active = 1 AND mode <> ?", drive.mode);
       jobs.recover();
       ctx.engine.recover();
-      run(db, "UPDATE plan_ops SET state = 'uncertain', error = 'Kiki restarted during this step; she will check Drive before doing anything.' WHERE state = 'running'");
+      run(db, "UPDATE plan_ops SET state = 'uncertain', error = 'Kiki restarted during this step and will check Drive before doing anything.' WHERE state = 'running'");
       for (const p of db.prepare("SELECT * FROM plans WHERE status IN ('approved', 'executing')").all() as unknown as PlanRow[]) {
         jobs.enqueue("execute_plan", `execute:${p.id}`, { planId: p.id });
       }

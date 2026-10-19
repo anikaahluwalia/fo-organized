@@ -135,7 +135,7 @@ export interface ReplyState {
   requestId?: string;
   requestedAt?: string;
   clarification?: string;
-  /** After you asked for changes: the version Kiki made from them, or why she couldn't. */
+  /** After you asked for changes: the version Kiki made from them, or why that wasn't possible. */
   revision?: { planId: string | null; version: number | null; note: string | null };
   /** What you answered Fo in Kiki, in order. A decision counts only as Fo's reply to the latest. */
   answers?: { text: string; at: string; via?: string }[];
@@ -184,7 +184,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
   const state = replyState(ctx, taskId);
   const task = getTask(ctx.db, taskId);
   if (!state || state.status !== "waiting" || !task) return;
-  // An offer to file a kind of document on her own: bound to that lesson as it stood when offered.
+  // An offer to file a kind of document without asking: bound to that lesson as it stood when offered.
   const offer = notifyPurpose(ctx, taskId) === "offer" ? one<LessonRow>(ctx.db, "SELECT * FROM lessons WHERE id = ?", state.planId) : null;
   if (notifyPurpose(ctx, taskId) === "offer" && (!offer || offer.auto || offerHash(offer) !== state.contentHash)) {
     saveReply(ctx, taskId, { ...state, status: "stale" });
@@ -248,7 +248,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     if (report.decision === "clarification") {
       saveReply(ctx, taskId, { ...state, clarification: report.userReply });
       // Fo may report a change you asked for as a clarification. Kiki reads your words once: if they
-      // ask for a change she makes the new version; a question just waits for your next answer.
+      // ask for a change Kiki makes the new version; a question just waits for your next answer.
       if (plan.kind === "organize" && state.interpretedAt !== answer.at) ctx.jobs.enqueue("adjust", `adjust:${taskId}`, { taskId, quiet: true });
       return decide ? undefined : { rescheduleSeconds: 6 };
     }
@@ -280,7 +280,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
     if (!one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id)) {
       // A question ("where does this go?") has nothing to approve: the request stays open for a place.
       saveReply(ctx, taskId, { ...state, note: NEEDS_PLACE });
-      logEvent(ctx.db, plan.workspace_id, "fo_reply", `You said "${reply.text}", but Kiki needs to know where it goes. She's still waiting for a place.`);
+      logEvent(ctx.db, plan.workspace_id, "fo_reply", `You said "${reply.text}", but Kiki needs to know where it goes and is still waiting for a place.`);
       return;
     }
     try {
@@ -309,7 +309,7 @@ export async function checkTextReply(ctx: Ctx, taskId: string): Promise<{ resche
  */
 export function sendDoneText(ctx: Ctx, planId: string): void {
   const requestTask = kvGet(ctx.db, `notify.approved_by_text.${planId}`);
-  // Filed on your standing OK (texts on): Kiki says what she did, after.
+  // Filed on your standing OK (texts on): Kiki says what was done, after.
   const standing = Boolean(kvGet(ctx.db, `standing.plan.${planId}`)) && autoTextEnabled(ctx);
   if (!requestTask && !standing) return;
   const plan = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE id = ?", planId);
@@ -399,7 +399,7 @@ function describeDoc(f: DocFacts | null): string {
   return `a new ${type}${f.issuer.value ? ` from ${f.issuer.value}` : ""}${details ? ` (${details})` : ""}`;
 }
 
-/** What Fo texts: what Kiki found, where she'd put it, and how to say yes. */
+/** What Fo texts: what Kiki found, where it would go, and how to say yes. */
 /** Moves that file a document, as opposed to setting an exact copy aside. */
 /** Already inside the folders Kiki files into (Projects, or the earlier Renovations). */
 /** In a project (not loose in Projects itself, where a file you drop isn't filed yet). */
@@ -448,14 +448,14 @@ function findSummary(ctx: Ctx, plan: PlanRow): string {
   if (!one(ctx.db, "SELECT id FROM plan_ops WHERE plan_id = ? AND state <> 'excluded'", plan.id)) {
     const notes = ((plan.details_json ? (JSON.parse(plan.details_json) as { notes?: { name: string; unplaced?: boolean }[] } | null) : null)?.notes ?? []).filter((n) => n.unplaced);
     const which = notes.length === 1 ? `"${inert(notes[0]!.name)}"` : `${notes.length} documents`;
-    return `Kiki: she can't tell where ${which} in "${inert(ws.name)}" should go. Reply to this text, or answer in Kiki: tell her a project or folder, or say to leave ${notes.length === 1 ? "it" : "them"} where ${notes.length === 1 ? "it is" : "they are"}.`;
+    return `Kiki: I can't tell where ${which} in "${inert(ws.name)}" should go. Reply to this text, or answer in Kiki: tell me a project or folder, or say to leave ${notes.length === 1 ? "it" : "them"} where ${notes.length === 1 ? "it is" : "they are"}.`;
   }
   // A quote update from a contractor's answer isn't a new document: say what changes.
   if (plan.kind === "version_update") return `Kiki: ${inert(plan.title)} in "${inert(ws.name)}". ${inert(plan.summary, 400)} Reply to this text, or answer in Kiki: yes, a change, or no.`;
   const { fresh, refiled, copies, freshCopies } = filingMoves(ctx, plan.id);
   const questions = openQuestionNames(plan);
   const asks = questions.length
-    ? ` She can't tell where ${questions.length === 1 ? `"${inert(questions[0]!)}" goes` : `${questions.length} documents go`}: tell her a project or folder, or say to leave ${questions.length === 1 ? "it" : "them"}.`
+    ? ` I can't tell where ${questions.length === 1 ? `"${inert(questions[0]!)}" goes` : `${questions.length} documents go`}: tell me a project or folder, or say to leave ${questions.length === 1 ? "it" : "them"}.`
     : "";
   const answer = " Reply to this text, or answer in Kiki: yes, a change, or no.";
   if (!fresh.length && freshCopies.length) {
@@ -490,8 +490,8 @@ export function newFindText(ctx: Ctx, plan: PlanRow): string {
 export const LINK_ONLY = "Please tap the link to approve or ask for changes: text replies can't be processed.";
 export const LINK_OR_TEXT = "Tap the link to approve or ask for changes, or just reply to this text.";
 /** The same for "where does this go?". */
-export const LINK_ONLY_WHERE = "Please tap the link to tell her: text replies can't be processed.";
-export const LINK_OR_TEXT_WHERE = "Tap the link to tell her, or just reply to this text.";
+export const LINK_ONLY_WHERE = "Please tap the link to answer: text replies can't be processed.";
+export const LINK_OR_TEXT_WHERE = "Tap the link to answer, or just reply to this text.";
 
 /** The answer link on the last line of a text. */
 export const LINK_LINE = /\n(https:\/\/\S+\/a\/[A-Za-z0-9_-]+)$/;

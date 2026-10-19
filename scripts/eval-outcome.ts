@@ -1,6 +1,6 @@
 /**
  * Step 7 evaluation: how Kiki reads a new message in a Fo conversation about a contractor's quote,
- * and whether she ever claims the contractor said something the message doesn't say.
+ * and whether a reading ever claims the contractor said something the message doesn't say.
  *
  *   node --disable-warning=ExperimentalWarning scripts/eval-outcome.ts            # mock interpreter
  *   node --env-file=.env --disable-warning=ExperimentalWarning scripts/eval-outcome.ts --live

@@ -565,7 +565,7 @@ describe("plan.ts buildOrganizePlan", () => {
     const note = (name: string) => plan.notes.find((n) => n.name === name);
     assert.deepEqual(note("blurry.jpg"), { fileId: "id-blurry", name: "blurry.jpg", path: "", status: "needs_review", reason: "This file has no readable content." });
     assert.equal(note("broken.pdf")?.status, "needs_review");
-    assert.equal(note("broken.pdf")?.reason, "Kiki couldn't read this file, so she won't guess where it goes.");
+    assert.equal(note("broken.pdf")?.reason, "Kiki couldn't read this file and won't guess where it goes.");
     assert.equal(note("mystery.pdf")?.status, "needs_review");
     assert.equal(note("mystery.pdf")?.reason, "Kiki couldn't tell what kind of document this is.");
     assert.equal(note("Business licence 2026.pdf")?.status, "left_in_place");

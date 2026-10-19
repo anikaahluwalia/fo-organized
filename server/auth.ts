@@ -1,7 +1,7 @@
 /**
- * Signing in to Kiki, for when she's online and anyone can reach her address. There's one account
+ * Signing in to Kiki, for when Kiki is online and anyone can reach the app's address. There's one account
  * holder and one password (KIKI_PASSWORD, server-side only). A session is a random token in an
- * HttpOnly cookie; Kiki keeps only its hash, so a copy of her database can't sign anyone in. The
+ * HttpOnly cookie; Kiki keeps only its hash, so a copy of the database can't sign anyone in. The
  * password itself is kept only as a slow salted hash (to notice when it changes).
  * Answer links and Fo's webhook carry their own proof (the link's token, Wajo's signature) and
  * don't need it; neither does the paired side panel, which has its own token.
@@ -21,7 +21,7 @@ const key = (token: string) => `session.${digest(token).toString("hex")}`;
 /**
  * Which password is in use, as a random tag. When KIKI_PASSWORD changes, so does the tag, and every
  * session made under the old one ends (`changed` tells the caller to end side-panel pairings too).
- * Kiki recognizes the password by a slow salted hash, so a copy of her database doesn't make
+ * Kiki recognizes the password by a slow salted hash, so a copy of the database doesn't make
  * guessing it cheap.
  */
 export function passwordGeneration(db: Db, password: string): { generation: string; changed: boolean } {

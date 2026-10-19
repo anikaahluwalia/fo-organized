@@ -4,7 +4,7 @@
 
 Help a person or a small business find the right document, and know which version is current, without maintaining their Drive by hand. Kiki keeps a workspace organized as work happens; Fo is who the user talks to. Kiki does the document work and brings only the decisions that need the user, through Fo.
 
-Kiki organizes anything she can read (business paperwork, school and research files, work projects, personal documents). The renovation paperwork of the author's parents is the first real use case, not the boundary.
+Kiki organizes anything readable (business paperwork, school and research files, work projects, personal documents). The renovation paperwork of the author's parents is the first real use case, not the boundary.
 
 ## How it works
 

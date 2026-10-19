@@ -270,7 +270,7 @@ export interface UpdateView {
   planId: string | null;
   error: string | null;
   ignoredRequests: string[];
-  /** Attachments Kiki found in the contractor's email (read-only), if she looked. */
+  /** Attachments Kiki found in the contractor's email (read-only), if Kiki looked. */
   emailAttachments: { index: number; filename: string; from: string; subject: string; date: string | null; saved: boolean }[];
 }
 
@@ -302,7 +302,7 @@ export interface NotificationView {
     source: "text_reply" | "relayed_by_fo" | null;
     /** Fo couldn't settle your answer and asked Kiki about it. */
     clarification?: string;
-    /** After you asked for changes: the version Kiki made, or why she couldn't. */
+    /** After you asked for changes: the version Kiki made, or why that wasn't possible. */
     revision?: { planId: string | null; version: number | null; note: string | null };
   } | null;
   mode: Mode;
@@ -340,7 +340,7 @@ export interface LessonView {
   /** Filings it rests on. */
   examples: number;
   since: string;
-  /** Kiki files these on her own (you said so); she texts you after. */
+  /** Kiki files these without asking (you said so) and texts you after. */
   auto: boolean;
   /** Kiki offered to, and you haven't answered. */
   offered: boolean;

@@ -1,4 +1,4 @@
-// Filing a kind of document on her own: Kiki offers once she's filed it twice with your yes; only
+// Filing a kind of document without asking: Kiki offers once it's been filed twice with your yes; only
 // your plain yes (through Fo, bound to that offer) or your switch in the app turns it on; then a new
 // one of that kind, alone in its proposal, is filed without asking and you're texted after.
 import { test, type TestContext } from "node:test";
@@ -47,7 +47,7 @@ async function setup(t: TestContext) {
   return { r, fo, drop, approveOpen, answer };
 }
 
-/** You put the first timesheet in Work, then said yes to Kiki filing the second there: she offers. */
+/** You put the first timesheet in Work, then said yes to Kiki filing the second there: Kiki offers. */
 async function twice(s: Awaited<ReturnType<typeof setup>>) {
   const first = await s.drop("Timesheet Aug 23-29.txt");
   const question = (await s.r.app.view()).plans.find((p) => p.status === "proposed")!;
@@ -61,7 +61,7 @@ async function twice(s: Awaited<ReturnType<typeof setup>>) {
 
 const lesson = async (r: TestRig) => (await r.app.view()).lessons.find((l) => l.kind === "place")!;
 
-test("after two filings you said yes to, Kiki offers once to file them on her own", async (t) => {
+test("after two filings you said yes to, Kiki offers once to file them without asking", async (t) => {
   const s = await setup(t);
   const offer = await twice(s);
   assert.ok(offer, "an offer was texted");

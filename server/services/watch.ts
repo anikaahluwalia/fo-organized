@@ -192,7 +192,7 @@ export async function runOutcome(ctx: Ctx, outcomeId: string): Promise<void> {
     }
     run(ctx.db, "UPDATE outcomes SET interpretation_json = ?, interpreter_mode = ?, updated_at = ? WHERE id = ?", JSON.stringify(interp), ctx.reader.mode, now(), o.id);
     if (interp.requests_to_ignore.length) {
-      logEvent(ctx.db, rows.ws.id, "ignored", `The message also asked for things Kiki won't act on by herself: ${interp.requests_to_ignore.join("; ")}.`);
+      logEvent(ctx.db, rows.ws.id, "ignored", `The message also asked for things Kiki won't act on without you: ${interp.requests_to_ignore.join("; ")}.`);
     }
   }
 
@@ -232,7 +232,7 @@ export async function reconcileOutcome(ctx: Ctx, outcomeId: string): Promise<voi
   } else if (candidates.length === 1) {
     setOutcome(ctx, outcomeId, {
       status: "needs_clarification",
-      question: `Is "${candidates[0]!.name}" the revised quote ${v.recipient_name} meant? Kiki can't tell who issued the quote Fo asked about, so she won't assume.`,
+      question: `Is "${candidates[0]!.name}" the revised quote ${v.recipient_name} meant? Kiki can't tell who issued the quote Fo asked about and won't assume.`,
       candidates,
     });
   } else if (candidates.length === 0) {
@@ -253,7 +253,7 @@ export async function reconcileOutcome(ctx: Ctx, outcomeId: string): Promise<voi
           ? `Kiki couldn't find the revised quote in the folder, and couldn't look in Gmail just now (${gmailProblem}). When you add it to the folder, Kiki will pick it up.`
           : ctx.gmail?.available()
           ? `Kiki couldn't find the revised quote in the folder, and there's nothing from ${v.recipient_name} with an attachment in Gmail since Fo asked. When you add it to the folder, Kiki will pick it up.`
-          : `Kiki couldn't find the revised quote in the folder yet. Fo mentioning it doesn't give Kiki access to it: save the attachment from ${v.recipient_name}'s email into the folder (or let Kiki look in Gmail) and she'll pick it up.`,
+          : `Kiki couldn't find the revised quote in the folder yet. Fo mentioning it doesn't give Kiki access to it: save the attachment from ${v.recipient_name}'s email into the folder (or let Kiki look in Gmail) and it'll be picked up.`,
       candidates: [],
     });
   } else {

@@ -22,7 +22,7 @@ export function proposeMarkCurrent(ctx: Ctx, docId: string): { planId: string } 
   if (doc.version_status === "current") throw conflict("That quote is already marked current.");
   if (doc.version_status === "superseded") throw conflict("That quote was superseded. Undo that update first if it was a mistake.");
   const project = (doc.project_id ? one<ProjectRow>(ctx.db, "SELECT * FROM projects WHERE id = ?", doc.project_id)?.name : null) ?? facts.project.value;
-  if (!project) throw conflict("Kiki doesn't know which project this quote belongs to yet, so she can't mark it current.");
+  if (!project) throw conflict("Kiki doesn't know which project this quote belongs to yet, so it can't be marked current.");
 
   // That contractor's other quotes for the project (an exact copy is the same quote, not another one).
   const files = new Map(all<FileRow>(ctx.db, "SELECT * FROM files WHERE workspace_id = ? AND present = 1", ws.id).map((f) => [f.file_id, f]));

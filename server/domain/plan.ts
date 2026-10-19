@@ -13,7 +13,7 @@ export interface PlanFile {
   parentId: string | null;
   path: string; // folder path the file lives in, relative to the workspace root ("" = root)
   version: string | null;
-  /** Kiki created it (a folder of her own layout). */
+  /** Kiki created it (a folder of Kiki's own layout). */
   byKiki?: boolean;
   size?: number | null;
   createdTime: string | null;
@@ -284,8 +284,8 @@ export function buildOrganizePlan(input: {
   const readable = docs.filter(
     (d) => d.readStatus === "read" && d.facts && fileById.get(d.fileId) && !fileById.get(d.fileId)!.isShortcut && !copyOf.has(d.docId) && !input.undone?.has(d.fileId),
   );
-  // "Renovations" is Kiki's earlier layout only where she made it (a folder she created, or a
-  // collection whose index she keeps); otherwise it's the user's own folder.
+  // "Renovations" is Kiki's earlier layout only where Kiki made it (a folder Kiki created, or a
+  // collection whose index Kiki keeps); otherwise it's the user's own folder.
   const legacy = input.files.some((f) => f.isFolder && !f.isShortcut && (f.path === "Renovations" || (f.path === "" && f.name === "Renovations")) && (f.byKiki || (f.path === "Renovations" && input.indexFiles[f.name] !== undefined)));
   const roots = legacy ? KIKI_ROOTS : KIKI_ROOTS.filter((r) => r !== "Renovations");
   // Folders as the naming rules see them: a user's own "Renovations" isn't Kiki's to reuse.
@@ -312,7 +312,7 @@ export function buildOrganizePlan(input: {
       continue;
     }
     if (doc.readStatus !== "read" || !doc.facts) {
-      notes.push({ ...at, status: "needs_review", reason: doc.readError ?? "Kiki couldn't read this file, so she won't guess where it goes." });
+      notes.push({ ...at, status: "needs_review", reason: doc.readError ?? "Kiki couldn't read this file and won't guess where it goes." });
       continue;
     }
     const chosen = input.places?.get(file.fileId);
@@ -334,7 +334,7 @@ export function buildOrganizePlan(input: {
     // Nothing in the document says where it goes, but you filed one like it before: same place.
     const learned = !chosen && !destinations.get(doc.docId) && doc.facts.docType !== "unknown" ? matchLesson(input.lessons ?? [], file.name, doc.facts) : null;
     const before = learned ? choosePlace(learned.place, input.files, roots) : null;
-    // Nothing says where it goes and you haven't shown her: where a file like it naturally goes, as
+    // Nothing says where it goes and you haven't shown Kiki: where a file like it naturally goes, as
     // Kiki's suggestion (you approve it like any other step).
     const usual = !chosen && !destinations.get(doc.docId) && !before && doc.facts.docType !== "unknown" && doc.facts.suggested ? choosePlace(doc.facts.suggested, input.files, roots) : null;
     const dest = chosen

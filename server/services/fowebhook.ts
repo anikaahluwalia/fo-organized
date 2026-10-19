@@ -2,7 +2,7 @@
  * Fo's webhook. Fo's MCP connection is pull-only; a webhook registered in Wajo (Settings, Fo MCP,
  * Webhooks) gets a signed POST the moment a Fo conversation turn closes. Kiki uses one event: Fo
  * answered a text of yours (`conversation.reply` with trigger `inbound_text`), in whatever text
- * conversation it landed. That's the link Kiki couldn't make before: she then has Fo read that text
+ * conversation it landed. That's the link Kiki couldn't make before: Kiki then has Fo read that text
  * for the proposal waiting on you (see textreply.ts). A delivery Kiki can't verify does nothing.
  *
  * Deliveries follow Standard Webhooks: `webhook-id`, `webhook-timestamp` and `webhook-signature`

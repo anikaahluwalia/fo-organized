@@ -1,7 +1,7 @@
 import type { DocFacts } from "./documents.ts";
 import { issuerKey } from "./safety.ts";
 
-/** Where Kiki sets aside exact copies, next to the copy she keeps. Nothing is ever deleted. */
+/** Where Kiki sets aside exact copies, next to the copy that's kept. Nothing is ever deleted. */
 export const DUPLICATES_FOLDER = "Duplicates";
 
 const MD5 = /^[0-9a-f]{32}$/i;

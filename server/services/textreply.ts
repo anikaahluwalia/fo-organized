@@ -1,15 +1,15 @@
 /**
  * Answering Fo by text. A text reply lands in a separate Fo conversation (a different surface), so
- * Kiki links it herself, as Wajo advises: while a proposal waits for your decision, a text you send
- * Fo after Kiki's question is a candidate answer. Kiki can't read texts directly, but Fo can: she
- * asks Fo, in her own conversation for that request, to read it and report your decision there,
+ * Kiki makes the link, as Wajo advises: while a proposal waits for your decision, a text you send
+ * Fo after Kiki's question is a candidate answer. Kiki can't read texts directly, but Fo can: Kiki
+ * asks Fo, in Kiki's own conversation for that request, to read it and report your decision there,
  * bound to that exact proposal and quoting your words. From there it's the same as an answer in
  * Kiki: only a plain yes approves, changes make a new version, and anything unclear approves nothing.
  *
- * Kiki learns about your text one of two ways. With a Fo webhook, Wajo tells her the moment Fo
+ * Kiki learns about your text one of two ways. With a Fo webhook, Wajo sends word the moment Fo
  * answers a text, in any conversation (an iMessage thread you've had with Fo for months included).
- * Without one, she looks every 20 s for a text conversation that started after her question; those
- * texts carry an answer link and say text replies aren't processed, so for them she doesn't look.
+ * Without one, Kiki looks every 20 s for a text conversation that started after the question; those
+ * texts carry an answer link and say text replies aren't processed, so for them Kiki doesn't look.
  */
 import { approvalInstructions } from "../domain/approval.ts";
 import { inert } from "../domain/inert.ts";

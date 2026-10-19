@@ -1,4 +1,4 @@
-// Step 1: reading documents of every kind. Kiki may miss a fact, but she must never state one the
+// Step 1: reading documents of every kind. Kiki may miss a fact, but must never state one the
 // document doesn't support. (The live Claude run is scripts/eval-reading.ts --live.)
 import { test } from "node:test";
 import assert from "node:assert/strict";

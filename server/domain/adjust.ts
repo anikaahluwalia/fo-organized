@@ -13,7 +13,7 @@ import { sanitizeName } from "./naming.ts";
 export interface ProposalItem {
   n: number;
   fileId: string;
-  /** "move": a file Kiki would move or rename. "copy": an exact copy she'd set aside. "unplaced": a file she couldn't place. */
+  /** "move": a file Kiki would move or rename. "copy": an exact copy Kiki would set aside. "unplaced": a file Kiki couldn't place. */
   kind: "move" | "copy" | "unplaced";
   name: string;
   /** Where it would go, as "folder/name", for moves and copies. */
@@ -94,7 +94,7 @@ export function validateChanges(items: ProposalItem[], request: ChangeRequest): 
         continue;
       }
       if (item.kind === "copy") {
-        problems.push(`"${item.name}" is an exact copy: Kiki keeps it next to the copy she files.`);
+        problems.push(`"${item.name}" is an exact copy: Kiki keeps it next to the copy that gets filed.`);
         continue;
       }
       change.place = place;

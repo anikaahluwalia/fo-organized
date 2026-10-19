@@ -81,7 +81,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
   async function readTab() {
     try {
       let query = { active: true, currentWindow: true };
-      // In Kiki's own window, the tab you're looking at is in your browser window, not in hers.
+      // In Kiki's own window, the tab you're looking at is in your browser window, not in Kiki's.
       if (openedAs === "window" && typeof chromeApi.windows?.getLastFocused === "function") {
         const w = await chromeApi.windows.getLastFocused({ windowTypes: ["normal"] });
         if (typeof w?.id === "number") query = { active: true, windowId: w.id };
@@ -100,7 +100,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
     if (node && node.textContent !== (text ?? "")) node.textContent = text ?? "";
   };
 
-  /** The header: Kiki's face and her status line, the panel's one live region (with what an action just did). */
+  /** The header: Kiki's face and status line, the panel's one live region (with what an action just did). */
   function setHero(hero) {
     setText(el.status, hero.label);
     setText(el.said, ui.flash ? ` ${ui.flash}` : "");
@@ -405,7 +405,7 @@ export function start({ doc, chromeApi, fetchFn, base = KIKI_ORIGIN, refreshMs =
         () => api.selectFolder(o.url),
         () => {
           ui.confirmSwitch = null;
-          return "Kiki is looking through the folder. She'll propose a plan before anything moves.";
+          return "Kiki is looking through the folder and will propose a plan before anything moves.";
         },
       );
     },

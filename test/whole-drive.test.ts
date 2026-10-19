@@ -1,5 +1,5 @@
-// Kiki watching your whole Drive: she organizes loose files (at the top of My Drive, or in catch-all
-// folders like Downloads) into Projects or your own folders, and leaves what's in your folders alone.
+// Kiki watching your whole Drive: loose files (at the top of My Drive, or in catch-all folders like
+// Downloads) are organized into Projects or your own folders; what's in your folders stays put.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { all } from "../server/db.ts";

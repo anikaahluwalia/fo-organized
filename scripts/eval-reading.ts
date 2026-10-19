@@ -1,5 +1,5 @@
 /**
- * Step 1 evaluation: how well Kiki reads documents of every kind, and whether she ever states
+ * Step 1 evaluation: how well Kiki reads documents of every kind, and whether a reading ever states
  * something a document doesn't say. Nothing touches Drive.
  *
  *   node --disable-warning=ExperimentalWarning scripts/eval-reading.ts            # mock reader

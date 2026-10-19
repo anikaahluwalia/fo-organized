@@ -330,7 +330,7 @@ function saveOrganize(db: Db, ws: WorkspaceRow, kikiDraft: PlanDraft, requested?
     }
     if (e.exclude) excluded.add(op.seq);
   }
-  // You keep files' own names (Kiki learned it): she doesn't propose renames, unless you named one.
+  // You keep files' own names (Kiki learned it): Kiki doesn't propose renames, unless you named one.
   if (keepsNames(db, ws.id)) {
     for (const op of draft.ops) {
       if (op.kind !== "move_rename" || !op.pre || op.newName === op.pre.name || (op.fileId && edits[op.fileId]?.newName)) continue;
@@ -392,7 +392,7 @@ export function proposeOrganize(ctx: Ctx): { planId: string | null; created: boo
   if (draft.ops.length === 0 && !openQuestions(ctx.db, ws, draft).length) {
     const open = one<PlanRow>(ctx.db, "SELECT * FROM plans WHERE series_id = ? AND status = 'proposed'", seriesId);
     if (open) run(ctx.db, "UPDATE plans SET status = 'superseded', finished_at = ? WHERE id = ?", now(), open.id);
-    logEvent(ctx.db, ws.id, "plan", "Kiki checked the workspace: everything she can place is already organized.");
+    logEvent(ctx.db, ws.id, "plan", "Kiki checked the workspace: everything that can be placed is already organized.");
     return { planId: null, created: false, message: "Everything Kiki can place is already organized. Nothing to change." };
   }
   const { plan, created } = saveOrganize(ctx.db, ws, draft);
@@ -400,8 +400,8 @@ export function proposeOrganize(ctx: Ctx): { planId: string | null; created: boo
 }
 
 /**
- * Called after Kiki reads new documents: if something now needs filing, she prepares the
- * proposal herself. It still changes nothing until approved, and a proposal the user set aside
+ * Called after Kiki reads new documents: if something now needs filing, Kiki prepares the
+ * proposal unasked. It still changes nothing until approved, and a proposal the user set aside
  * isn't re-proposed unless something changes.
  */
 export function autoPropose(ctx: Ctx): { plan: PlanRow; created: boolean } | null {
@@ -467,7 +467,7 @@ export function revisePlan(ctx: Ctx, planId: string, edits: { seq: number; newNa
     }
   }
   const prior = plan.details_json ? JSON.parse(plan.details_json) : null;
-  // Remember which of Kiki's drafts this edit started from, so her next look doesn't undo it, and
+  // Remember which of Kiki's drafts this edit started from, so Kiki's next look doesn't undo it, and
   // the edits themselves by file, so a fresh draft after a real change keeps them.
   const byFile: Edits = { ...(prior?.edits ?? {}) };
   for (const edit of edits) {
@@ -608,7 +608,7 @@ export function proposeUndo(ctx: Ctx, planId: string): string {
     kind: "undo",
     seriesId: `undo:${planId}`,
     title: `Undo "${plan.title}"`,
-    summary: `Kiki would put back ${changes.filter((c) => c.kind === "move_rename").length} file(s) and restore index statuses where nothing changed since. Folders she created stay; nothing is deleted.`,
+    summary: `Kiki would put back ${changes.filter((c) => c.kind === "move_rename").length} file(s) and restore index statuses where nothing changed since. Folders Kiki created stay; nothing is deleted.`,
     draft,
     details: { notes: [], undoOf: planId },
     source: { undoOf: planId },

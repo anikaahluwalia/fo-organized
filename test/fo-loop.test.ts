@@ -416,7 +416,7 @@ describe("contractor outreach through Fo", () => {
     [d] = await dispatches(rig.app);
     assert.equal(d?.state, "reported_sent");
     assert.ok(d.reconciledAt);
-    assert.ok(d.watch, "Kiki now follows the conversation she found");
+    assert.ok(d.watch, "Kiki now follows the conversation found");
     rig.fo.transcripts.set("conv-found", [...rig.fo.transcripts.get("conv-found")!, fromFo(DANA_NO)]);
     assert.deepEqual(await checkWatch(rig.app.ctx, d.watch.id), { newTurns: 1 });
   });
@@ -662,7 +662,7 @@ describe("from Fo's answer to an organized workspace", () => {
     assert.match(update.question ?? "", /save the attachment from Dana's email into the folder/);
     assert.equal((await rig.app.view()).plans.some((p) => p.kind === "version_update"), false);
 
-    // She notices it arriving by herself; no "Check again" needed.
+    // Kiki notices it arriving, unprompted; no "Check again" needed.
     await rig.app.stageRevision("single");
     await rig.app.settle();
     update = await latestUpdate(rig.app);
@@ -980,7 +980,7 @@ describe("texts to the account holder through Fo", () => {
     async (t) => {
       const ack = `Texted you Kiki's message. You said you may text back "go ahead"; if you do, I'll leave the filing to Kiki.\nKIKI-STATUS: SENT`;
       const rig = await textedAboutInvoice(t, ack);
-      // Kiki's own conversation with Fo holds her request and Fo's acknowledgement. You haven't replied.
+      // Kiki's own conversation with Fo holds the request and Fo's acknowledgement. You haven't replied.
       rig.fo.transcripts.set("kiki-1", [fromUser(rig.fo.asks[0]!.message), fromFo(ack)]);
       await checkTextReply(rig.app.ctx, rig.note.taskId);
       assert.equal((await replyTo(rig))?.status, "waiting");

@@ -6,7 +6,7 @@
 
 <p><b>#stay fo-organized</b></p>
 
-Kiki is a Google Drive agent that keeps your files organized, and Fo (Wajo's assistant) is how you talk to her. She reads every file you drop into Drive, figures out where it belongs and gives it a name you'll actually be able to find later. Then Fo texts you her plan. You answer the way you'd answer a friend, and Kiki only changes what you said yes to.
+Kiki is a Google Drive agent that keeps your files organized, and Fo (Wajo's assistant) is how you talk to Kiki. Kiki reads every file you drop into Drive, figures out where it belongs and gives it a name you'll actually be able to find later. Then Fo texts you the plan. You answer the way you'd answer a friend, and Kiki only changes what you said yes to.
 
 Everyone's Drive ends up full of `scan_0012.pdf`, `document (3).pdf` and `IMG_2041.pdf`. I built Kiki in three days so that nobody has to sort that by hand again.
 
@@ -14,42 +14,42 @@ Everyone's Drive ends up full of `scan_0012.pdf`, `document (3).pdf` and `IMG_20
 
 ## What Kiki does
 
-Kiki watches your whole Drive (or one folder, if you'd rather). When new files show up, she:
+Kiki watches your whole Drive (or one folder, if you'd rather). When new files show up, Kiki:
 
 1. **Reads them.** Claude reads what's actually inside: a quote, an invoice, a receipt, a bank statement, a résumé, a screenshot. Who it's from, the date, the reference number.
 2. **Makes a plan.** Folders, clear names like `2026-10-12 Receipt - The Home Depot #7032 - 0457-2219.pdf`, and a reason for every move. Exact copies get set aside, never deleted.
 3. **Asks you through Fo.** Fo texts you a short summary with a link to the full plan.
-4. **Listens.** Say yes, say no, or just tell her what's wrong ("That receipt is for the flooring job.") and she makes a new version with only that change.
-5. **Does it and checks it.** She applies only the version you approved, reads every change back from Drive, and Fo texts you once it's really done.
+4. **Listens.** Say yes, say no, or just say what's wrong ("That receipt is for the flooring job.") and Kiki makes a new version with only that change.
+5. **Does it and checks it.** Kiki applies only the version you approved, reads every change back from Drive, and Fo texts you once it's really done.
 
 What makes Kiki different:
-- She learns from your corrections, so she asks less over time.
+- Kiki learns from your corrections and asks less over time.
 - Your answer is tied to the exact version of the plan you saw, so a yes can never approve something else.
-- She never says "done" until Drive confirms it.
-- She never deletes anything.
+- Kiki never says "done" until Drive confirms it.
+- Kiki never deletes anything.
 
 Kiki and Fo each have one job:
 
 | Who | What they do |
 |---|---|
-| Kiki | Reads, plans, applies and checks. She never messages anyone herself. |
+| Kiki | Reads, plans, applies and checks. Never messages anyone directly. |
 | Fo | Texts you and brings your answer back to Kiki. Fo never touches your files. |
 | You | Decide. Nothing changes in Drive without your yes. |
 
 ## What it looks like
 
-**On your phone:** Fo texts you, you tap through, and you can correct her in plain words.
+**On your phone:** Fo texts you, you tap through, and you can correct Kiki in plain words.
 
 <table>
   <tr>
     <td align="center"><img src="assets/screens/phone-text.png" width="190"><br><sub>Fo texts you the plan</sub></td>
-    <td align="center"><img src="assets/screens/phone-review.png" width="190"><br><sub>She gets one wrong</sub></td>
-    <td align="center"><img src="assets/screens/phone-answer.png" width="190"><br><sub>You tell her</sub></td>
-    <td align="center"><img src="assets/screens/phone-fixed.png" width="190"><br><sub>She fixes just that</sub></td>
+    <td align="center"><img src="assets/screens/phone-review.png" width="190"><br><sub>Kiki gets one wrong</sub></td>
+    <td align="center"><img src="assets/screens/phone-answer.png" width="190"><br><sub>You tell Kiki</sub></td>
+    <td align="center"><img src="assets/screens/phone-fixed.png" width="190"><br><sub>Kiki fixes just that</sub></td>
   </tr>
 </table>
 
-**Kiki's app:** what needs you, what she's working on, and everything she did.
+**Kiki's app:** what needs you, what Kiki is working on, and everything done so far.
 ![Kiki's Activity page](assets/screens/activity.png)
 
 **Drive, before and after.** Seven files dropped at the top of My Drive...
@@ -58,23 +58,23 @@ Kiki and Fo each have one job:
 ...filed into `Projects/Flooring/Quotes`, `Invoices` and `Receipts`, `Finances` and `Personal documents`, renamed and read back.
 ![Flooring › Receipts after](assets/screens/drive-after.png)
 
-## How she learns
+## How Kiki learns
 
-When you correct Kiki, she remembers. In my demo she guessed that a Home Depot receipt belonged in Home. I told her "That receipt is for a flooring job." She moved it to Flooring › Receipts and saved a lesson: Home Depot receipts go in Flooring › Receipts. When the next Home Depot receipt showed up, she proposed Flooring on her own ("The Home Depot #7032's other document is in Flooring").
+When you correct Kiki, Kiki remembers. In my demo Kiki guessed that a Home Depot receipt belonged in Home. I said "That receipt is for a flooring job." Kiki moved it to Flooring › Receipts and saved a lesson: Home Depot receipts go in Flooring › Receipts. When the next Home Depot receipt showed up, Kiki proposed Flooring without being told ("The Home Depot #7032's other document is in Flooring").
 
 <p align="center"><img src="assets/screens/phone-next.png" width="220"><br><sub>The next receipt, filed right the first time</sub></p>
 
-Once she's filed the same kind of file the same way twice with your yes, she offers to do it on her own from now on. Only a plain yes turns that on, she still texts you every time, and you can switch it off or make her forget a lesson in **Settings → What Kiki learned**.
+Once Kiki has filed the same kind of file the same way twice with your yes, Kiki offers to file those without asking from now on. Only a plain yes turns that on, you still get a text every time, and you can switch it off or make Kiki forget a lesson in **Settings → What Kiki learned**.
 
 ## How Kiki works
 
 ![How Kiki works](docs/diagrams/architecture.png)
 
-- **Kiki** is a Node 24 server written in TypeScript (no build step). Everything she keeps lives in SQLite: plans, approvals, a change log and lessons. A durable job queue runs the work, so a restart picks up where she left off.
-- **Google Drive:** Kiki lists new files every 10 seconds and reads them. After you approve, she creates folders, moves and renames files, and reads each change back with `files.get` before she counts it.
+- **Kiki** is a Node 24 server written in TypeScript (no build step). Everything Kiki keeps lives in SQLite: plans, approvals, a change log and lessons. A durable job queue runs the work, so a restart picks up where Kiki left off.
+- **Google Drive:** Kiki lists new files every 10 seconds and reads them. After you approve, Kiki creates folders, moves and renames files, and reads each change back with `files.get` before counting it.
 - **Claude** (claude-opus-5-5, structured outputs checked with zod) reads each document, turns your corrections into plan changes, writes the texts and learns filing rules. Code checks what the model writes before it's used.
 - **Fo:** Kiki calls Fo's MCP server (`ask_fo`, `get_fo_reply`) with the exact plan and a binding (`planId` + `contentHash`). Fo texts you, and your answer comes back as one `KIKI-DECISION` line with that binding. When you reply by text, Wajo's signed webhook (`POST /hooks/fo`) tells Kiki right away.
-- **The web app** (React 19 + Vite) and the **Chrome side panel** show the same things: what needs you, what she's doing and what she did.
+- **The web app** (React 19 + Vite) and the **Chrome side panel** show the same things: what needs you, what Kiki is doing and what's done.
 
 The diagram's source is [docs/diagrams/architecture.excalidraw](docs/diagrams/architecture.excalidraw).
 
@@ -84,7 +84,7 @@ I wanted to make sure Kiki reads things right and never changes anything you did
 - **Reading:** 190/190 fields right and 0 invented on the reading set ([step 1](docs/evals/step-1-reading.md)).
 - **Organizing:** 33/33 files in the right place, 9/9 groups, 0 unnecessary changes ([step 2](docs/evals/step-2-organize.md)).
 - **Answers:** 19/19 requested changes found in people's replies, 0 invented ([step 3](docs/evals/step-3-decisions.md)).
-- **Real runs:** I ran the whole thing 24 times on real Drive, Fo and Claude, and 21 succeeded. All 3 failures were on the first day: Google wouldn't let Kiki move files she hadn't created under the narrow Drive permission. She reported "0 of 2 steps verified" instead of pretending it worked. Switching to the full Drive scope fixed it.
+- **Real runs:** I ran the whole thing 24 times on real Drive, Fo and Claude, and 21 succeeded. All 3 failures were on the first day: Google wouldn't let Kiki move files Kiki hadn't created under the narrow Drive permission. Kiki reported "0 of 2 steps verified" instead of pretending it worked. Switching to the full Drive scope fixed it.
 - **485 automated tests** (`npm test`), including replays, restarts and double taps that must never make duplicates.
 
 ## Try it
@@ -100,9 +100,9 @@ npm start            # the real thing, on http://localhost:8787
 Open http://localhost:8787, connect Google Drive and Fo, then choose **Watch my whole Drive** (Kiki files loose files and leaves your own folders alone) or paste a folder link. **Set up the demo folder** adds a few messy files to play with.
 
 In the app:
-- **Activity**: what needs you, what needs a look, what she's working on, and everything she did (with Undo on finished plans).
+- **Activity**: what needs you, what needs a look, what Kiki is working on, and everything done so far (with Undo on finished plans).
 - **Browse**: your folders and every file Kiki knows about.
-- **Settings**: Google and Fo, texts, email, the folder she watches, light or dark, and **What Kiki learned**.
+- **Settings**: Google and Fo, texts, email, the folder Kiki watches, light or dark, and **What Kiki learned**.
 
 ## Connect Google Drive
 
@@ -118,7 +118,7 @@ Kiki asks for the full `drive` scope. The narrower scopes can't move files you u
 
 Press **Connect Fo** and sign in with your Wajo account, or put a Wajo API key (`wak_…`, from wajo.ai/user/api-keys) in `.env` as `FO_API_KEY`.
 
-**Answering from your phone.** Each text ends with a link to a small page for that one plan: Yes, No, or a change in your own words. Your phone has to reach Kiki for that, so either run her online (below) or give her a public address with a tunnel:
+**Answering from your phone.** Each text ends with a link to a small page for that one plan: Yes, No, or a change in your own words. Your phone has to reach Kiki for that, so either run Kiki online (below) or give Kiki a public address with a tunnel:
 
 ```bash
 brew install cloudflared
@@ -132,21 +132,21 @@ Only the answer pages and Fo's webhook are public. Each link is an unguessable o
 
 ## Putting Kiki online (Railway)
 
-On a laptop Kiki stops when it sleeps, and a tunnel's address changes every restart. Online, she keeps one address so links and the webhook keep working.
+On a laptop Kiki stops when it sleeps, and a tunnel's address changes every restart. Online, Kiki keeps one address so links and the webhook keep working.
 
 1. On Railway: **New project → Deploy from GitHub repo**, this repository. It builds from the `Dockerfile`.
 2. Add a volume mounted at `/data` (Kiki's database lives there), or every deploy starts from scratch.
 3. **Settings → Networking → Generate domain** gives you `https://<name>.up.railway.app`.
-4. Under **Variables**, set `APP_ORIGIN` (that address), `KIKI_PASSWORD` (12+ characters, what you sign in with), `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FO_API_KEY`, and later `FO_WEBHOOK_SECRET`. She won't start online without a password.
+4. Under **Variables**, set `APP_ORIGIN` (that address), `KIKI_PASSWORD` (12+ characters, what you sign in with), `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FO_API_KEY`, and later `FO_WEBHOOK_SECRET`. Kiki won't start online without a password.
 5. Add `https://<name>.up.railway.app/api/google/oauth/callback` to your Google OAuth client's redirect URIs.
 6. Point Fo's webhook at `https://<name>.up.railway.app/hooks/fo` and put its secret in `FO_WEBHOOK_SECRET`.
-7. Open the address, sign in, connect Google Drive and choose what she watches.
+7. Open the address, sign in, connect Google Drive and choose what Kiki watches.
 
 Run one Kiki at a time against the same Drive.
 
 ## Files from your email (optional)
 
-Kiki is for your files, not your email, but Fo can read your Gmail. Turn on **Settings → Email** and Fo checks twice a day for emails with a document attached and texts you first. When you say yes, Fo shares the attachment with Kiki's Google account and she files it like any new file. Kiki asks Fo never to forward, reply to, delete or change an email. This part is built and tested with the mock, but not live yet.
+Kiki is for your files, not your email, but Fo can read your Gmail. Turn on **Settings → Email** and Fo checks twice a day for emails with a document attached and texts you first. When you say yes, Fo shares the attachment with Kiki's Google account and Kiki files it like any new file. Kiki asks Fo never to forward, reply to, delete or change an email. This part is built and tested with the mock, but not live yet.
 
 ## The Chrome side panel
 
@@ -170,7 +170,7 @@ Everything goes in `.env`, which git ignores.
 | `KIKI_PUBLIC_URL` | A public https address (a tunnel) so the links in Fo's texts open on your phone. |
 | `APP_ORIGIN`, `KIKI_PASSWORD`, `HOST`, `DATA_DIR` | For running online: the address, the sign-in password, where to listen, where the database lives. |
 | `KIKI_MODE`, `DRIVE_MODE`, `CLAUDE_MODE`, `FO_MODE` | `live` (default) or `mock`. Mock is always labelled and never stands in for a live call that failed. |
-| `WORKSPACE_POLL_SECONDS`, `WATCH_INTERVAL_SECONDS` | How often Kiki looks at Drive (default 10 s) and at a Fo conversation she's following (default 30 s). |
+| `WORKSPACE_POLL_SECONDS`, `WATCH_INTERVAL_SECONDS` | How often Kiki looks at Drive (default 10 s) and at a Fo conversation Kiki is following (default 30 s). |
 
 Google and Fo tokens stay on the server, in `.data/` locally or `/data` online. They never go to the browser.
 
@@ -202,7 +202,7 @@ The other evaluation sets are next to it in `scripts/` (`eval-organize`, `eval-a
 ## Known limits
 
 - One person and one Google account. Kiki files loose files (at the top of Drive, or in catch-all folders like "Old scans"). Anything in a folder you made stays where it is.
-- Files she can't read (unsupported formats) stay unread and unfiled.
+- Files Kiki can't read (unsupported formats) stay unread and unfiled.
 - Asking a contractor if a quote is final, and matching a revised quote to the old one, only work for quotes so far.
 - Email hand-over through Fo hasn't been tested live yet.
 - If Fo can't pass along a text reply, the link in the text always works.

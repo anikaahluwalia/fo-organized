@@ -4,7 +4,7 @@ An organizing agent named Kiki that keeps a digital workspace organized as real 
 
 ## Product
 
-Kiki organizes files and keeps their organization current. She creates folders, moves and renames files, preserves document versions, maintains a project index, and identifies missing or ambiguous documents.
+Kiki organizes files and keeps their organization current: creating folders, moving and renaming files, preserving document versions, maintaining a project index, and identifying missing or ambiguous documents.
 
 Fo is Wajo's action agent. Fo handles approved communication and supported real-world tasks. Our app adds file-management operations and persistent organization through the Google Drive API.
 
@@ -38,7 +38,7 @@ Software only. Prioritize one reliable end-to-end demonstration.
 8. Kiki finds the candidate revised document and links it to the flooring project.
 9. Kiki proposes filing the new quote, marking the old version as superseded, and updating the current-document pointer in the index.
 10. Kiki highlights any changed price or scope with supporting evidence.
-11. After approval, she applies the changes.
+11. After approval, Kiki applies the changes.
 12. Open Drive and show the actual result.
 
 Recovery scenario: if two documents could be the revised quote, Kiki asks which one is correct and never silently guesses. Replaying the same input must not create duplicate files, folders, or operations.

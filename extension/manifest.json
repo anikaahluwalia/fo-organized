@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Kiki",
   "version": "0.2.0",
-  "description": "Kiki's side panel. It talks only to the Kiki app running on this computer, so you can follow her work and approve her plans.",
+  "description": "Kiki's side panel. It talks only to the Kiki app running on this computer, so you can follow Kiki's work and approve plans.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "storage"],
   "host_permissions": ["http://localhost:8787/*", "https://drive.google.com/*"],

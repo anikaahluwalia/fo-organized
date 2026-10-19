@@ -172,7 +172,7 @@ test("a plan that only writes a missing index again is titled for that, not as s
   const index = [...rig.drive.files.values()].find((f) => f.name.endsWith("(kept by Kiki).csv"))!;
   rig.drive.touch(index.id, { parent: "root" }); // you moved it out of the workspace
   await look(rig);
-  // Kiki doesn't propose index upkeep on her own; you ask her to organize.
+  // Kiki doesn't propose index upkeep unprompted; you ask for organizing.
   rig.app.proposeOrganize();
   const plan = await proposed(rig);
   assert.deepEqual(plan?.ops.map((o) => o.kind), ["write_index"], "Kiki proposes writing the index again");

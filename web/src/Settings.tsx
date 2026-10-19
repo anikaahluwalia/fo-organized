@@ -63,12 +63,12 @@ export function Settings({ view, act, theme, setTheme }: { view: AppView; act: A
             {view.lessons.map((l) => (
               <li key={l.id} className="learned">
                 <span>
-                  {l.text} {l.auto && <Badge kind="plain">Files on her own</Badge>}
+                  {l.text} {l.auto && <Badge kind="plain">Files without asking</Badge>}
                 </span>
                 <span className="row">
                   {l.kind === "place" && (
                     <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`alone-${l.id}`, () => post(`/api/lessons/${l.id}/alone`, { on: !l.auto }))}>
-                      {l.auto ? "Ask me first" : l.offered ? "Yes, on her own" : "File on her own"}
+                      {l.auto ? "Ask me first" : l.offered ? "Yes, without asking" : "File without asking"}
                     </button>
                   )}
                   <button className="btn btn--small btn--quiet" disabled={act.busy !== null} onClick={() => act.run(`forget-${l.id}`, () => post(`/api/lessons/${l.id}/forget`))}>
@@ -79,7 +79,7 @@ export function Settings({ view, act, theme, setTheme }: { view: AppView; act: A
             ))}
           </ul>
         ) : (
-          <p className="muted">Nothing yet. When you tell Kiki where something goes, she remembers it here.</p>
+          <p className="muted">Nothing yet. When you tell Kiki where something goes, it's remembered here.</p>
         )}
       </section>
 
@@ -111,7 +111,7 @@ export function Settings({ view, act, theme, setTheme }: { view: AppView; act: A
             {drive.gmail === "connected" ? (
               <Badge kind="live">Gmail: read-only</Badge>
             ) : (
-              <button className="btn btn--small" title="Kiki only searches for attachments from a contractor she asked. She never sends, changes or deletes mail." disabled={act.busy !== null} onClick={() => connectGoogle(act, true)}>
+              <button className="btn btn--small" title="Kiki only searches for attachments from a contractor Kiki asked, and never sends, changes or deletes mail." disabled={act.busy !== null} onClick={() => connectGoogle(act, true)}>
                 Let Kiki look in Gmail (read-only)
               </button>
             )}

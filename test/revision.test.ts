@@ -37,7 +37,7 @@ test("the revised quote was emailed: Kiki finds it in Gmail, saves it after appr
   const rig = makeRig({ gmail, watchIntervalSeconds: 3600 });
   const update = await askedOakline(rig);
 
-  // Nothing matching in Drive, so she looked in Gmail (read-only) for mail from that contractor since Fo asked.
+  // Nothing matching in Drive, so Kiki looked in Gmail (read-only) for mail from that contractor since Fo asked.
   assert.equal(update.status, "needs_clarification");
   assert.deepEqual(
     gmail.searches.map((s) => s.from),
@@ -77,18 +77,18 @@ test("the revised quote was emailed: Kiki finds it in Gmail, saves it after appr
   rig.app.close();
 });
 
-test("the revised quote lands in Drive while Kiki waits: she links it without Check again", async () => {
+test("the revised quote lands in Drive while Kiki waits: linked without Check again", async () => {
   const rig = makeRig({ watchIntervalSeconds: 3600 });
   const update = await askedOakline(rig);
   assert.equal(update.status, "needs_clarification");
   assert.equal(update.emailAttachments.length, 0);
-  assert.match(update.question ?? "", /pick it up/);
+  assert.match(update.question ?? "", /picked up/);
 
   await rig.app.stageRevision("single");
   await rig.app.settle();
   const view = await rig.app.view();
   const after = view.updates.find((u) => u.id === update.id)!;
-  assert.equal(after.status, "proposed", "picked up on her own");
+  assert.equal(after.status, "proposed", "picked up unprompted");
   assert.ok(
     !view.plans.some((p) => p.kind === "organize" && p.status === "proposed" && p.ops.some((o) => o.before?.name === "Oakline Flooring - revised quote.pdf")),
     "held for the update, not filed as new",

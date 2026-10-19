@@ -1,5 +1,5 @@
 // The texts Fo sends you: Claude writes them for the moment, Kiki checks each against the facts
-// and sends her own when one doesn't hold up. A "yes" to a text approves real changes.
+// and sends Kiki's own when one doesn't hold up. A "yes" to a text approves real changes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkComposed, chooseText, plainText, shortName, type ComposeFacts } from "../server/domain/compose.ts";
@@ -20,7 +20,7 @@ test("a text that names the file, its folder and how to answer goes out as writt
 test("a short name may use only words from the file's name or what Kiki read", () => {
   const invented = { ...good, text: good.text.replace("DOM weekly timesheet", "Dominion payroll sheet"), names: [{ n: 3, shortName: "Dominion payroll sheet" }] };
   assert.match(checkComposed(timesheet, invented).join(" "), /adds words: dominion, payroll, sheet/);
-  assert.equal(chooseText(timesheet, invented).by, "kiki", "then Kiki sends her own");
+  assert.equal(chooseText(timesheet, invented).by, "kiki", "then Kiki's own goes out");
 });
 
 test("every file and folder is in the text, and a rename shows the new name", () => {
@@ -46,7 +46,7 @@ test("a link-only answer never invites a text reply; with no link, never points 
   assert.match(checkComposed({ ...timesheet, answer: "reply_or_app" }, good).join(" "), /link there isn't/);
 });
 
-test("Kiki's own texts are short and pass her own checks", () => {
+test("Kiki's own texts are short and pass Kiki's checks", () => {
   const cases: ComposeFacts[] = [
     timesheet,
     { ...timesheet, situation: "question", items: [{ n: 1, kind: "unplaced", name: "thoughts.txt", about: [], options: ["Garden"] }] },

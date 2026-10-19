@@ -382,7 +382,7 @@ function PlanDetail({ plan, view, act, onBack, onCorrect, onOpen }: { plan: Plan
     executing: "Kiki is applying these changes and checking each one in Drive.",
     applied: "Kiki made these changes and checked each one in Drive.",
     partial: "Some of these changes didn't finish. The rest are checked in Drive.",
-    stale: "Files changed since Kiki made this plan, so she stopped.",
+    stale: "Files changed since this plan was made, so Kiki stopped.",
     failed: "These changes didn't finish.",
     superseded: "A newer version of this plan replaced it.",
     discarded: "You set this plan aside. Nothing changed.",
@@ -693,7 +693,7 @@ function FoTextStatus({ n, mock, act }: { n: NotificationView; mock: boolean; ac
   );
 }
 
-/** Kiki offered to file a kind of document on her own, and you haven't answered. */
+/** Kiki offered to file a kind of document without asking, and you haven't answered. */
 function LessonOffer({ lesson, act }: { lesson: LessonView; act: Act }) {
   const [hidden, setHidden] = useState(false);
   if (hidden) return null;
@@ -702,7 +702,7 @@ function LessonOffer({ lesson, act }: { lesson: LessonView; act: Act }) {
       <p>{lesson.text}</p>
       <div className="row">
         <button className="btn btn--small" disabled={act.busy !== null} onClick={() => act.run(`alone-${lesson.id}`, () => post(`/api/lessons/${lesson.id}/alone`, { on: true }))}>
-          Yes, on her own
+          Yes, without asking
         </button>
         <button className="btn btn--quiet btn--small" onClick={() => setHidden(true)}>
           Not now
@@ -1169,7 +1169,7 @@ function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; on
     inProgress.push(
       <Card key="reading" icon="file" type="Reading">
         <h3 className="card__title">{view.inventory.reading > 0 ? `Kiki is reading ${view.inventory.reading} file${view.inventory.reading === 1 ? "" : "s"}.` : "Kiki is reading your files."}</h3>
-        <p className="card__text">She proposes a plan once she knows what each one is.</p>
+        <p className="card__text">A plan follows once Kiki knows what each one is.</p>
       </Card>,
     );
   }
@@ -1181,7 +1181,7 @@ function Activity({ view, act, onOpen, onBrowse }: { view: AppView; act: Act; on
       <Crumbs home="Workspace" onHome={() => window.scrollTo({ top: 0 })} items={["Activity"]} />
       <header className="hero">
         <h1 className="display">Your Drive, organized.</h1>
-        <p className="lede">{ws ? "Kiki proposes, you approve, and she checks every change in Drive." : "Choose a folder and Kiki will propose how to organize it."}</p>
+        <p className="lede">{ws ? "Kiki proposes, you approve, and Kiki checks every change in Drive." : "Choose a folder and Kiki will propose how to organize it."}</p>
         {view.kiki.state === "error" && view.kiki.detail && <p className="error-text">{view.kiki.detail}</p>}
       </header>
       {!ws ? (

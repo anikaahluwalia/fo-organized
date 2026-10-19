@@ -72,8 +72,8 @@ export function askThroughFo(ctx: Ctx, planId: string): { taskId: string; create
 
 /**
  * You asked for changes (Fo's bound decision said so): Kiki reads what you asked for, makes the new
- * version and sends it to the same Fo conversation for its own decision. When she can't tell what
- * to change, she says so there instead of guessing. Safe to run again: it acts only while the
+ * version and sends it to the same Fo conversation for its own decision. When what to change
+ * isn't clear, Kiki says so there instead of guessing. Safe to run again: it acts only while the
  * request is still "adjusting", and records the new version before anything is sent.
  */
 export async function handleChangeRequest(ctx: Ctx, taskId: string, opts: { quiet?: boolean } = {}): Promise<void> {

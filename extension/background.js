@@ -1,10 +1,10 @@
 // Kiki's toolbar button.
 //
 // Where the browser has Chrome's side panel (Chrome, Edge, Brave), the button opens Kiki there,
-// and closes her if she's already open. Some Chromium browsers run extensions but never show
+// and closes Kiki if already open. Some Chromium browsers run extensions but never show
 // extension side panels (Arc has its own sidebar instead). So the click comes here rather than
 // straight to the panel: if no visible panel reports in shortly after opening it, Kiki opens in a
-// small window of her own. A browser without the side panel API at all gets Kiki as the button's
+// small separate window. A browser without the side panel API at all gets Kiki as the button's
 // popup.
 
 const WINDOW_URL = "panel.html?view=window";
@@ -53,7 +53,7 @@ function panelShows(windowId) {
   });
 }
 
-/** Kiki in a small window of her own (or a tab, where windows can't be made). One at a time. */
+/** Kiki in a small separate window (or a tab, where windows can't be made). One at a time. */
 async function openKikiWindow() {
   if (kikiWindowId !== null) {
     try {

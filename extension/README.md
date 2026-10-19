@@ -7,11 +7,11 @@ A small client of the Kiki app running on your computer, with the same look as t
 1. Start Kiki: run `npm start` in the project folder. It serves the app at http://localhost:8787.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and choose this `extension` folder.
-4. Pin Kiki from the extensions menu (the puzzle icon), then click her toolbar button to open the side panel.
+4. Pin Kiki from the extensions menu (the puzzle icon), then click the Kiki toolbar button to open the side panel.
 
 After changing files here, click the reload icon on Kiki's card in `chrome://extensions`, then reopen the panel.
 
-**Arc and other browsers without extension side panels:** the button still works. Kiki opens in a small window of her own (or as the button's popup where the browser has no side panel API at all). The window looks at the tab in your browser window, so "Organize this folder" still works for the Drive folder you have open.
+**Arc and other browsers without extension side panels:** the button still works. Kiki opens in a small separate window (or as the button's popup where the browser has no side panel API at all). The window looks at the tab in your browser window, so "Organize this folder" still works for the Drive folder you have open.
 
 ## Pair it with Kiki
 
@@ -30,7 +30,7 @@ curl -s -X POST -H 'content-type: application/json' -d '{}' http://localhost:878
 
 Top to bottom, with no tabs:
 
-- **Kiki**: her face and her status line, the same as in the app. The panel refreshes every 2 seconds while it's open.
+- **Kiki**: Kiki's face and status line, the same as in the app. The panel refreshes every 2 seconds while it's open.
 - **This Drive tab**, when your tab is a Google Drive folder outside the workspace: **Organize this folder**. If Kiki already has a workspace, the panel asks before switching. Kiki looks through the folder (read-only) and proposes a plan. Nothing moves until you approve.
 - **Needs you**, only when something waits on you; otherwise "Nothing needs you right now." and **Check for anything new**:
   - a proposed plan: one row per change (old name → new name, and the folder), **Approve N changes**, and **Request a change** (when Fo asked you about the plan, your correction goes back through Fo) or **Open in Kiki**. **Approve** applies exactly the version on screen; clicking twice still approves once. **Not now** sets it aside, and nothing in Drive changes.
@@ -39,10 +39,10 @@ Top to bottom, with no tabs:
   - a text that went wrong, or Drive or Fo not connected.
 - **Working on it**: one line while Kiki applies a plan, reads files, or Fo is texting you.
 - **Needs a look**: what Kiki noticed in the folder (a document others refer to that's missing, dates running out, unclear quotes), the same list as in the app, which has the details and actions.
-- **Recent**: the last few plans, labelled **Applied and verified**, **Partly applied** (with how many steps were verified in Drive), **Failed**, **Stopped** or **You said no**, with the time. What Fo reports stays labelled as Fo's report. **Everything Kiki did** opens her log.
+- **Recent**: the last few plans, labelled **Applied and verified**, **Partly applied** (with how many steps were verified in Drive), **Failed**, **Stopped** or **You said no**, with the time. What Fo reports stays labelled as Fo's report. **Everything Kiki did** opens the full log.
 - The footer: when the panel last heard from Kiki, **Open Kiki**, **Settings** (the pairing, **Text me when Kiki finds something new**), Live or Mock for Drive and Fo, and the workspace folder.
 
-Errors come straight from Kiki and are shown as she sent them. In mock mode (`npm run start:mock`), Drive and Fo are labelled Mock.
+Errors come straight from Kiki and are shown word for word. In mock mode (`npm run start:mock`), Drive and Fo are labelled Mock.
 
 ## Permissions and privacy
 
@@ -64,4 +64,4 @@ There's no remote code, inline script or `eval`. Text from the server is always 
 - `manifest.json`, `background.js` (opens the panel from the toolbar button), `panel.html`, `panel.css`.
 - `panel.js`: storage, tabs, the refresh loop and actions. `start()` takes its dependencies as arguments, so the panel can run outside Chrome.
 - `api.js`: requests to the Kiki app. `lib.js`: pure helpers (Drive folder addresses, safe links, wording, the view model). `ui.js`: builds the page with DOM nodes, never HTML strings.
-- Kiki herself is drawn in `ui.js` from the same shapes as the app's `web/src/Kiki.tsx`. `icons/`: square versions of the approved mascot, on its own white background.
+- The Kiki character is drawn in `ui.js` from the same shapes as the app's `web/src/Kiki.tsx`. `icons/`: square versions of the approved mascot image, on a white background.

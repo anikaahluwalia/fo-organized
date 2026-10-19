@@ -58,10 +58,10 @@ const files: Record<string, Buffer> = {
   ]),
   // An exact copy of the quote, saved twice like it always is.
   "scan_0012 (1).pdf": quote,
-  // Something Kiki can't place on her own: she asks where it goes.
+  // Something Kiki can't place: the plan asks where it goes.
   "notes.pdf": makePdf("Notes", ["Call back Tuesday.", "Bring the blue folder.", "Ask about the side gate."]),
   // The mistake: a receipt that doesn't say what it's for. Kiki's guess is reasonable, and wrong;
-  // you tell her it's for the flooring job, and she files it there.
+  // you say it's for the flooring job, and Kiki files it there.
   "receipt_0457.pdf": makePdf("RECEIPT", [
     "The Home Depot #7032",
     "Receipt No: 0457-2219",
@@ -73,7 +73,7 @@ const files: Record<string, Buffer> = {
     "Total (CAD): $89.90",
   ]),
 
-  // Round 3: she learned. The next receipt from the same store goes to Flooring on its own.
+  // Round 3: Kiki learned. The next receipt from the same store goes straight to Flooring.
   "receipt_0461.pdf": makePdf("RECEIPT", [
     "The Home Depot #7032",
     "Receipt No: 0461-0038",

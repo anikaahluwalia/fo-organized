@@ -4,10 +4,10 @@
 
 ## What changed
 
-- **The index file.** Kiki writes an index only where she wrote it before:
+- **The index file.** An index is written only where Kiki wrote it before:
   - never to an index file that left its folder, for example one you moved out of the workspace;
-  - only over her own last write, recognized by the version she recorded or by a checksum of the bytes she sent, saved before sending;
-  - if another plan created the project's index meanwhile, she updates that one instead of making a second.
+  - only over Kiki's own last write, recognized by the version recorded then or by a checksum of the bytes sent, saved before sending;
+  - if another plan created the project's index meanwhile, Kiki updates that one instead of making a second.
 - **Undo.** Undo puts back every file that didn't change, and leaves alone the one you changed. Undoing a plan that filed into two projects rewrites both indexes. Earlier changes stay listed with their own Undo after later filings.
 - **Partial runs.**
   - Moves a partly applied plan didn't finish belong to its Try again: they aren't proposed again, or texted as if they'd just landed.

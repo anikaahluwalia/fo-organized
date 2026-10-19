@@ -91,9 +91,9 @@ const FACES = {
 };
 
 /**
- * Kiki's face for her state, small enough for the panel's header (so the paperclip keeps its
- * loops with a simpler line). Decorative: the status line beside her says it in words. `motion`
- * ("bob" or "tilt") plays once, only when her state changed while the panel was open.
+ * Kiki's face for the current state, small enough for the panel's header (so the paperclip keeps its
+ * loops with a simpler line). Decorative: the status line beside the face says it in words. `motion`
+ * ("bob" or "tilt") plays once, only when the state changed while the panel was open.
  */
 export function kikiFace(doc, state, motion = null) {
   const key = Object.hasOwn(FACES, state) ? state : "idle";
@@ -166,13 +166,13 @@ function offerCard(h, o, ui, act) {
   const busy = Boolean(ui.busy);
   const parts = [meta(h, "folder", "This Drive tab"), h("h3", { class: "card-title", text: o.title ?? "This folder" })];
   if (o.state === "mock") {
-    parts.push(h("p", { class: "muted", text: "Kiki is using a mock Drive right now, so she can't organize folders from your Google Drive." }));
+    parts.push(h("p", { class: "muted", text: "Kiki is using a mock Drive right now and can't organize folders from your Google Drive." }));
   } else if (o.state === "needs_drive") {
     parts.push(h("p", { class: "muted", text: "Connect Google Drive in the Kiki app first." }));
   } else if (o.state === "busy") {
     parts.push(
       h("div", { class: "actions" }, h("button", { type: "button", class: "btn", disabled: true }, "Organize this folder")),
-      h("p", { class: "muted", text: "Kiki is still applying changes. You can switch when she's done." }),
+      h("p", { class: "muted", text: "Kiki is still applying changes. You can switch when that's finished." }),
     );
   } else if (o.state === "switch" && ui.confirmSwitch === o.folderId) {
     parts.push(
@@ -435,7 +435,7 @@ export function renderMain(doc, m, ui, act, ctx) {
   const h = makeH(doc);
   return [
     ui.error ? notice(h, "bad", null, ui.error, { role: "alert", dismiss: act.dismissError }) : null,
-    ui.loadError ? notice(h, "warn", "Kiki couldn't send the latest.", `${ui.loadError} Showing what she said last.`) : null,
+    ui.loadError ? notice(h, "warn", "Kiki couldn't send the latest.", `${ui.loadError} Showing what Kiki said last.`) : null,
     ui.flash ? notice(h, "ok", null, ui.flash) : null,
     m.offer ? offerCard(h, m.offer, ui, act) : null,
     needsYou(h, m, ui, act),

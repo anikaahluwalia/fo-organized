@@ -4,7 +4,7 @@
  * document attached and to text you about them first. When you tell Fo yes, Fo saves the
  * attachment in its Drive, shares it with your Kiki account and ends its reply with a hand-over
  * line; Fo's webhook brings that reply to Kiki, who copies the file into your folder. From there
- * it's an ordinary new file: she proposes where it goes (or files it on your standing OK).
+ * it's an ordinary new file: Kiki proposes where it goes (or files it on your standing OK).
  *
  * A hand-over can only bring one shared file into the folder. It can't move, rename or delete
  * anything, and Kiki never touches your email.
@@ -42,7 +42,7 @@ function routine(account: string): string {
 3. Never forward, reply to, delete, label or change any email, and don't contact anyone but me.
 4. When I say yes to one or more of them, for each: save that attachment as a file in your Drive, share it with ${account} (viewer is enough), and end your reply to me with one line per file, exactly in this form and nothing else on the line:
 KIKI-HANDOFF: <the shared file's Google Drive link>
-Kiki, my file-organizing app, picks those lines up, copies the files into my folder and files them; she'll ask me where they go if she isn't sure.`;
+Kiki, my file-organizing app, picks those lines up, copies the files into my folder and files them; if a place isn't clear, Kiki asks me where they go.`;
 }
 
 function askFo(ctx: Ctx, purpose: string, message: string): string {
@@ -112,7 +112,7 @@ export async function acceptHandoff(ctx: Ctx, fileId: string): Promise<void> {
   if (prior?.state === "saved" || prior?.state === "refused") return;
   const day = `handoff.day.${new Date().toISOString().slice(0, 10)}`;
   if (!prior && Number(kvGet(ctx.db, day) ?? 0) >= DAILY_LIMIT) {
-    logEvent(ctx.db, ws.id, "email_scout", `Fo handed over more files than Kiki takes in a day (${DAILY_LIMIT}). She'll take the rest tomorrow.`);
+    logEvent(ctx.db, ws.id, "email_scout", `Fo handed over more files than Kiki takes in a day (${DAILY_LIMIT}). The rest wait until tomorrow.`);
     return;
   }
   const refuse = (why: string) => {

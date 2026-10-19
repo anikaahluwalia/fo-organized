@@ -1,6 +1,6 @@
 ---
 name: kiki-review
-description: Review Kiki changes against her trust and reliability rules before committing (approvals, workspace bounds, untrusted text, replays, races, honest reporting). Use after implementing or fixing anything in server/, extension/ or the approval and Fo flows, and when asked to review or audit Kiki code.
+description: Review changes against Kiki's trust and reliability rules before committing (approvals, workspace bounds, untrusted text, replays, races, honest reporting). Use after implementing or fixing anything in server/, extension/ or the approval and Fo flows, and when asked to review or audit Kiki code.
 ---
 
 # Reviewing Kiki changes

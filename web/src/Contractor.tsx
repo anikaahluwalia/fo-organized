@@ -344,7 +344,7 @@ export function OutreachCard({ o, view, act }: { o: OutreachView; view: AppView;
   );
 }
 
-/** What Kiki picked up from Fo's conversation, and what she needs from you. */
+/** What Kiki picked up from Fo's conversation, and what Kiki needs from you. */
 export function UpdateCard({ u, view, act }: { u: UpdateView; view: AppView; act: Act }) {
   const [picked, setChoice] = useState<string | null>(null);
   // A single candidate to confirm is preselected: the question is just yes or no.

@@ -4,7 +4,7 @@ Use `kiki-approved.png` as the visual source of truth. It is an AI-generated con
 
 ## Identity
 
-Kiki is the face of Fo-rganized, a Google Drive organizing agent built with Fo. She is a tiny pink agent: curious, capable, friendly, and careful with private information. Her signature is a real looped paperclip on the upper-right edge of her head.
+Kiki is the face of Fo-rganized, a Google Drive organizing agent built with Fo: a tiny pink agent, curious, capable, friendly, and careful with private information. Kiki's signature is a real looped paperclip on the upper-right edge of the head.
 
 Preserve the approved design:
 - A wide, softly rounded pink blob, subtly asymmetric.
@@ -50,10 +50,10 @@ Respect prefers-reduced-motion. Never wiggle approval controls. Keep a readable 
 
 ## Page design
 
-A calm, near-monochrome app in dark or light, following the system unless you choose in Settings. Dark: near-black background, dark grey cards with a subtle border, white and grey text. Light: off-white and white surfaces, dark chocolate text (#33211C). Kiki's pink is the only accent (her name, the status badges); status colours (verified, needs review, failed) appear only as text or a thin line, never a coloured slab. One sans-serif family (the system font). No floating sparkles, confetti loops, gradient glass, or fabricated metrics.
+A calm, near-monochrome app in dark or light, following the system unless you choose in Settings. Dark: near-black background, dark grey cards with a subtle border, white and grey text. Light: off-white and white surfaces, dark chocolate text (#33211C). Kiki's pink is the only accent (the name, the status badges); status colours (verified, needs review, failed) appear only as text or a thin line, never a coloured slab. One sans-serif family (the system font). No floating sparkles, confetti loops, gradient glass, or fabricated metrics.
 
 Layout:
-1. Sidebar: Kiki in a circle, "kiki" and her status line; Activity, Browse, Settings; at the bottom the Fo and Drive connection (Live or Mock) and the folder's name. On a phone it becomes a top bar with the nav as tabs.
+1. Sidebar: Kiki in a circle, "kiki" and Kiki's status line; Activity, Browse, Settings; at the bottom the Fo and Drive connection (Live or Mock) and the folder's name. On a phone it becomes a top bar with the nav as tabs.
 2. Activity: breadcrumb, "Your Drive, organized.", one muted line, "Managing N folders" (opens the folder list and Change folder), then tabs: With Fo (what waits on you: a proposed plan, a question, an offer, a message draft), In progress (applying, Fo texting, waiting on a reply, reading), Completed (applied plans and everything Kiki did). Each item is a card: icon, type and time, a one-sentence headline, one muted sentence, a footer with who it's with and View details. Then Needs a look, Recently completed, and "Last checked" with Find a file.
 3. A plan, opened from its card: breadcrumb, the status badge ("Awaiting your approval"), the plan's title, "Review exactly what Kiki will change.", one row per change (icon, a plain title like "Move and rename the invoice", the old and new name, the folder, the amount; a new folder is folded into the move), "Needs a folder" rows with Choose a folder, then Approve N changes (white pill in dark, chocolate in light), Request a change, and "Nothing changes until you approve."
 4. A correction: "A small correction?", a labelled textarea, Send correction, and "Sending a correction doesn't approve any file changes."

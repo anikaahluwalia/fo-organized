@@ -1,6 +1,6 @@
 /**
  * Learning from your answers (see domain/lessons.ts). Kiki learns only from a filing you approved
- * and she verified in Drive: where you put a file yourself ("put it in Work") becomes "documents
+ * and Kiki verified in Drive: where you put a file yourself ("put it in Work") becomes "documents
  * like this go in Work"; a later filing that followed a lesson and that you approved backs it up;
  * keeping files' own names on two separate proposals means you'd rather keep them.
  */
@@ -19,7 +19,7 @@ import { answerLink } from "./answerlink.ts";
 import { autoTextEnabled, message, saveReply, type ReplyState } from "./notify.ts";
 import { approvePlan } from "./plans.ts";
 
-/** Kiki lets you keep names on her own after you've asked on this many proposals. */
+/** Kiki stops proposing renames once you've kept names on this many proposals. */
 const KEEP_NAMES_AFTER = 2;
 
 export function placeLessons(db: Ctx["db"], workspaceId: string): PlaceLesson[] {
@@ -87,7 +87,7 @@ export async function learnFromPlan(ctx: Ctx, planId: string): Promise<void> {
       const l = matchLesson(lessons, name, facts);
       if (l && l.place === op.new_path) {
         run(ctx.db, "UPDATE lessons SET examples = examples + 1, updated_at = ? WHERE id = ?", now(), l.id);
-        // Twice now, and you said yes to Kiki's suggestion: she offers to do these on her own.
+        // Twice now, and you said yes to Kiki's suggestion: Kiki offers to do these without asking.
         if (!l.auto) offerToFileAlone(ctx, l.id);
       }
     }
@@ -100,7 +100,7 @@ export async function learnFromPlan(ctx: Ctx, planId: string): Promise<void> {
     if (plans.size >= KEEP_NAMES_AFTER) {
       const at = now();
       run(ctx.db, "INSERT INTO lessons (id, workspace_id, kind, description, examples, from_plan_id, created_at, updated_at) VALUES (?, ?, 'keep_names', ?, ?, ?, ?, ?)", randomUUID(), plan.workspace_id, "keeping files' own names", plans.size, planId, at, at);
-      logEvent(ctx.db, plan.workspace_id, "lesson", "Kiki learned you keep files' own names, so she won't propose renames. You can change that in the app.");
+      logEvent(ctx.db, plan.workspace_id, "lesson", "Kiki learned you keep files' own names and won't propose renames. You can change that in the app.");
     }
   }
 }
@@ -138,10 +138,10 @@ function remember(ctx: Ctx, plan: PlanRow, pattern: Pattern, place: string): voi
       at,
     );
   }
-  logEvent(ctx.db, plan.workspace_id, "lesson", `Kiki learned: ${pattern.description} go in ${shown(place)}. She'll suggest it next time. You can change that in the app.`);
+  logEvent(ctx.db, plan.workspace_id, "lesson", `Kiki learned: ${pattern.description} go in ${shown(place)}. Kiki will suggest it next time. You can change that in the app.`);
 }
 
-// Filing a kind of document on her own (standing permission) -----------------------------------
+// Filing a kind of document without asking (standing permission) -------------------------------
 
 /** What an offer is bound to: the lesson as it stood when offered. A changed lesson isn't what you agreed to. */
 export function offerHash(l: LessonRow): string {
@@ -149,14 +149,14 @@ export function offerHash(l: LessonRow): string {
 }
 
 /**
- * Kiki offers, once, to file this kind of document on her own from now on. With texts on, Fo
+ * Kiki offers, once, to file this kind of document without asking from now on. With texts on, Fo
  * brings you the offer (bound to this lesson, like a proposal); either way it's in the app.
  */
 export function offerToFileAlone(ctx: Ctx, lessonId: string): void {
   const l = one<LessonRow>(ctx.db, "SELECT * FROM lessons WHERE id = ?", lessonId);
   if (!l || l.kind !== "place" || l.auto || l.offer || l.examples < 2) return;
   run(ctx.db, "UPDATE lessons SET offer = 'offered' WHERE id = ?", l.id);
-  logEvent(ctx.db, l.workspace_id, "lesson", `Kiki offered to file ${l.description} in ${shown(l.place)} on her own from now on.`);
+  logEvent(ctx.db, l.workspace_id, "lesson", `Kiki offered to file ${l.description} in ${shown(l.place)} without asking from now on.`);
   if (!autoTextEnabled(ctx)) return;
   const taskId = insertTask(ctx.db, "notify", ctx.engine.mode);
   const link = answerLink(ctx, taskId);
@@ -190,19 +190,19 @@ export function settleOffer(ctx: Ctx, taskId: string, state: ReplyState, answer:
   logEvent(ctx.db, l.workspace_id, "lesson", `You'd rather Kiki keep asking about ${l.description}.`);
 }
 
-/** You turn filing a kind of document on her own on or off (in the app, or by your yes to the offer). */
+/** You turn filing a kind of document without asking on or off (in the app, or by your yes to the offer). */
 export function setFilesAlone(ctx: Ctx, lessonId: string, on: boolean): void {
   const l = one<LessonRow>(ctx.db, "SELECT * FROM lessons WHERE id = ?", lessonId);
   if (!l || l.kind !== "place") throw notFound("Kiki doesn't have that lesson.");
   run(ctx.db, "UPDATE lessons SET auto = ?, offer = CASE WHEN ? = 1 THEN offer ELSE 'declined' END, updated_at = ? WHERE id = ?", on ? 1 : 0, on ? 1 : 0, now(), l.id);
-  logEvent(ctx.db, l.workspace_id, "lesson", on ? `Kiki will file ${l.description} in ${shown(l.place)} on her own and text you after.` : `Kiki will ask again before filing ${l.description}.`);
+  logEvent(ctx.db, l.workspace_id, "lesson", on ? `Kiki will file ${l.description} in ${shown(l.place)} without asking and text you after.` : `Kiki will ask again before filing ${l.description}.`);
 }
 
 /**
  * A new proposal Kiki may carry out on your standing OK: every file in it is a new one of a kind
- * you said she may file on her own, going exactly where those go, and nothing else is in it (no
- * copies, renames of filed documents, or questions). Then she approves it in your name and texts
- * you after. Anything else waits for you as usual. Returns whether she did.
+ * you said Kiki may file without asking, going exactly where those go, and nothing else is in it (no
+ * copies, renames of filed documents, or questions). Then Kiki approves it in your name and texts
+ * you after. Anything else waits for you as usual. Returns whether it was approved.
  */
 export function fileAlone(ctx: Ctx, plan: PlanRow): boolean {
   if (plan.kind !== "organize" || plan.status !== "proposed") return false;
@@ -224,6 +224,6 @@ export function fileAlone(ctx: Ctx, plan: PlanRow): boolean {
   }
   approvePlan(ctx, plan.id, { contentHash: plan.content_hash, clientRequestId: `standing-${plan.id}` });
   kvSet(ctx.db, `standing.plan.${plan.id}`, [...used].join(","));
-  logEvent(ctx.db, plan.workspace_id, "approved", `Kiki is filing "${plan.title}" on her own, as you allowed.`);
+  logEvent(ctx.db, plan.workspace_id, "approved", `Kiki is filing "${plan.title}" without asking, as you allowed.`);
   return true;
 }

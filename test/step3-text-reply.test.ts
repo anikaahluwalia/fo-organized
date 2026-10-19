@@ -1,5 +1,5 @@
 // Answering Fo by text: the reply lands in a separate Fo conversation, Kiki notices it, has Fo read
-// it in her own conversation, and the decision is bound to the exact proposal as usual.
+// it in Kiki's own conversation, and the decision is bound to the exact proposal as usual.
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { one, run } from "../server/db.ts";
@@ -43,7 +43,7 @@ const status = (s: Awaited<ReturnType<typeof texted>>, id: string) => one<{ stat
 test("a plain yes you text Fo approves exactly the proposal Fo texted you", async (t) => {
   const s = await texted(t);
   await youText(s, "go ahead");
-  assert.ok(s.fo.asks.some((a) => a.conversationId === "kiki-1" && a.message.includes("answered this by text")), "Kiki asked Fo, in her conversation, to read your text");
+  assert.ok(s.fo.asks.some((a) => a.conversationId === "kiki-1" && a.message.includes("answered this by text")), "Kiki asked Fo, in Kiki's conversation, to read your text");
   assert.equal(replyState(s.rig.app.ctx, s.note.taskId)?.status, "approved");
   assert.equal(status(s, s.plan.id), "applied");
 });

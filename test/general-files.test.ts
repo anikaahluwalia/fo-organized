@@ -12,7 +12,7 @@ test("a name that says nothing is junk; a name you gave a file isn't", () => {
   for (const n of ["ANIKA_AHLUWALIA_RESUME_SWE.pdf", "Screenshot 2026-10-18 at 2.02.22 PM.png", "invoice final FINAL.pdf", "kiki.png", "Tax return 2025.pdf"]) assert.equal(isJunkName(n), false, n);
 });
 
-test("a résumé with no project goes where Kiki suggests, keeps its name, and says it's her suggestion", async (t) => {
+test("a résumé with no project goes where Kiki suggests, keeps its name, and says it's Kiki's suggestion", async (t) => {
   const r = makeRig();
   r.app.ctx.watchIntervalSeconds = 3600;
   t.after(() => r.app.close());

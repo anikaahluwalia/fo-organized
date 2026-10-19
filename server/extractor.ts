@@ -16,7 +16,7 @@ export interface Reader {
   interpret(ctx: OutcomeContext): Promise<Outcome>;
   /** What the account holder's answer asks to change in a proposal (never whether to approve it). */
   interpretChange(items: ProposalItem[], reply: string): Promise<ChangeRequest>;
-  /** A text for Fo to send you, written for the moment; null when Kiki should use her own (mock mode). Kiki checks it. */
+  /** A text for Fo to send you, written for the moment; null when Kiki's own is used (mock mode). Kiki checks it. */
   composeText(facts: ComposeFacts): Promise<Composed | null>;
   /** What kind of document you just filed somewhere, to recognize the next one; null in mock mode. Kiki checks it. */
   describeKind(name: string, facts: DocFacts | null, place: string): Promise<Pattern | null>;

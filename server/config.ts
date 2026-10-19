@@ -9,7 +9,7 @@ export type IntegrationMode = "live" | "mock";
  * move or rename it (403 "The user has not granted the app write access to the file"), because
  * drive.file only covers files the app created or the user opened with it. Restricting Kiki to one
  * folder is enforced by the app, not by the scope. GOOGLE_DRIVE_SCOPES=narrow keeps the narrower
- * set, which only works for files Kiki uploaded herself.
+ * set, which only works for files Kiki uploaded.
  */
 export const NARROW_DRIVE_SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
@@ -45,12 +45,12 @@ export interface Config {
   /** Seconds between read-only looks at the workspace folder, so Kiki notices new files. */
   workspacePollSeconds: number;
   /**
-   * Kiki is online: her address (APP_ORIGIN) is https and not this machine. Then she listens on
+   * Kiki is online: the app's address (APP_ORIGIN) is https and not this machine. Then the server listens on
    * every interface, serves the app and the answer links from that one address, and won't start
    * without a password.
    */
   hosted: boolean;
-  /** Where the server listens: this machine only, unless she's online (or HOST says otherwise). */
+  /** Where the server listens: this machine only, unless Kiki is online (or HOST says otherwise). */
   listenHost: string;
   /** The password to sign in to the app (KIKI_PASSWORD). Server-side only; never logged. */
   password: string | null;
@@ -58,7 +58,7 @@ export interface Config {
 
 const MIN_PASSWORD = 12;
 
-/** Why Kiki can't start with this configuration (empty when she can). */
+/** Why Kiki can't start with this configuration (empty when all is well). */
 export function configProblems(c: Config, env: NodeJS.ProcessEnv = process.env): string[] {
   const problems: string[] = [];
   if (c.hosted && !c.password) problems.push(`Kiki is online (APP_ORIGIN is ${c.appOrigin}), so set KIKI_PASSWORD (${MIN_PASSWORD} characters or more) first.`);

@@ -73,7 +73,7 @@ export async function saveEmailedAttachment(ctx: Ctx, outcomeId: string, index: 
   const a = Number.isInteger(index) ? list[index] : undefined;
   if (!a) throw badRequest("Choose one of the attachments Kiki found.");
   if (a.size !== null && a.size > MAX_SAVE_BYTES) {
-    throw badRequest(`"${a.filename}" is larger than 5 MB, which Kiki can't save yet. Save it to the folder yourself and she'll pick it up.`);
+    throw badRequest(`"${a.filename}" is larger than 5 MB, which Kiki can't save yet. Save it to the folder yourself and Kiki will pick it up.`);
   }
   const key = savedKey(ws.id, a);
   const notFoundAsNull = (err: unknown) => {
@@ -98,7 +98,7 @@ export async function saveEmailedAttachment(ctx: Ctx, outcomeId: string, index: 
   let file = await ctx.drive.getFile(fileId).catch(notFoundAsNull);
   if (!file) {
     const data = await ctx.gmail.download(a.messageId, a.attachmentId);
-    if (data.length > MAX_SAVE_BYTES) throw badRequest(`"${a.filename}" is larger than 5 MB, which Kiki can't save yet. Save it to the folder yourself and she'll pick it up.`);
+    if (data.length > MAX_SAVE_BYTES) throw badRequest(`"${a.filename}" is larger than 5 MB, which Kiki can't save yet. Save it to the folder yourself and Kiki will pick it up.`);
     const name = sanitizeName(a.filename) || "attachment.pdf";
     try {
       file = await ctx.drive.createFile({ id: fileId, name, parentId: ws.root_file_id, mimeType: a.mimeType, content: data });

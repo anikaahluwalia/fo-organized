@@ -1,6 +1,6 @@
 // Secrets never reach what Kiki shows, saves or logs: an API key in a library's error is blacked
-// out, a malformed secret variable stops her from starting (named, not shown), and error text saved
-// before is cleaned when she starts.
+// out, a malformed secret variable stops Kiki from starting (named, not shown), and error text saved
+// before is cleaned at startup.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { configProblems, loadConfig } from "../server/config.ts";

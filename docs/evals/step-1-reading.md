@@ -1,6 +1,6 @@
 # Step 1: understand a folder
 
-**Accepted when** Kiki reads documents of every kind and reports type, issuer, project, date and title with the line that supports each, flags what she can't tell, changes nothing, and invents nothing.
+**Accepted when** Kiki reads documents of every kind and reports type, issuer, project, date and title with the line that supports each, flags anything unclear, changes nothing, and invents nothing.
 
 ## The evaluation set
 

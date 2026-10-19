@@ -1,5 +1,5 @@
 // A file Kiki couldn't read (say the Claude key was wrong) gets another try once that's fixed:
-// when she starts, and when you ask her to look again. Then she proposes as usual.
+// when Kiki starts, and when you ask for another look. Then Kiki proposes as usual.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { one, run } from "../server/db.ts";
@@ -21,7 +21,7 @@ test("files that failed to read are read again on Look again and on start, then 
   r.app.refreshInventory();
   await r.app.settle();
   assert.equal(one<{ read_status: string }>(r.db, "SELECT read_status FROM documents WHERE file_id = ?", id)?.read_status, "failed");
-  assert.equal((await r.app.view()).plans.some((p) => p.status === "proposed"), false, "nothing to propose from a file she couldn't read");
+  assert.equal((await r.app.view()).plans.some((p) => p.status === "proposed"), false, "nothing to propose from a file that couldn't be read");
 
   reader.read = read; // the key is fixed
   r.app.refreshInventory();

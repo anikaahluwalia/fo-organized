@@ -295,7 +295,7 @@ class Execution {
   private recordProject(op: PlanOpRow): void {
     if (!op.doc_id) return;
     const [category, project] = (op.new_path ?? "").split("/");
-    // Under "Renovations" only for Kiki's earlier layout: a project whose index she keeps there.
+    // Under "Renovations" only for Kiki's earlier layout: a project whose index Kiki keeps there.
     const legacy = category === "Renovations" && project && one(this.ctx.db, "SELECT id FROM projects WHERE workspace_id = ? AND name = ? AND index_file_id IS NOT NULL", this.ws.id, project);
     if (this.plan.kind !== "undo" && (category === CATEGORY || legacy) && project) {
       run(this.ctx.db, "UPDATE documents SET project_id = ?, updated_at = ? WHERE id = ?", ensureProject(this.ctx.db, this.ws.id, project).id, now(), op.doc_id);
@@ -344,11 +344,11 @@ class Execution {
     if (file) {
       // Never write to an index that left its folder: moved elsewhere, or out of the workspace.
       if (file.parents[0] !== parentId) return this.set(op, "failed", { error: `The index file isn't in ${op.folder_path} any more, so Kiki didn't write to it.` });
-      // Only overwrite what Kiki wrote last: a version she recorded, or the exact bytes she sent.
+      // Only overwrite what Kiki wrote last: a version Kiki recorded, or the exact bytes sent.
       const token = changeToken(file);
       const sent = kvGet(this.ctx.db, sentKey);
       if (token !== op.pre_version && token !== project.index_file_version && !(sent && file.contentKey === sent)) {
-        return this.set(op, "failed", { error: "Someone edited the index file since Kiki last wrote it, so she didn't overwrite it." });
+        return this.set(op, "failed", { error: "Someone edited the index file since Kiki last wrote it, so it wasn't overwritten." });
       }
     }
     // Recorded before sending, so a retry after an interrupted write recognizes Kiki's own bytes.

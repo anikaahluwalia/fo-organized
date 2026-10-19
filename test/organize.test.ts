@@ -45,7 +45,7 @@ function newRig(t: TestContext, opts: Parameters<typeof makeRig>[0] = {}): TestR
   return rig;
 }
 
-/** Starts Kiki again on the same database file and the same Drive, and lets her recover. */
+/** Starts Kiki again on the same database file and the same Drive, and waits for recovery. */
 async function restarted(t: TestContext, dbPath: string, drive: FakeDrive): Promise<TestRig> {
   const rig = newRig(t, { drive, db: dbPath });
   rig.app.recover();
@@ -282,7 +282,7 @@ describe("duplicate input does not duplicate operations", () => {
     assert.equal(only(rig.drive, "Flooring").parent, theirs);
     assert.equal(rig.drive.pathOf(only(rig.drive, "Invoices").id), inWorkspace(INVOICES));
     const view = await rig.app.view();
-    assert.equal(view.inventory.files.find((f) => f.fileId === theirs)?.origin, "found", "Kiki doesn't claim a folder she didn't make");
+    assert.equal(view.inventory.files.find((f) => f.fileId === theirs)?.origin, "found", "Kiki doesn't claim a folder made by someone else");
   });
 });
 
@@ -603,7 +603,7 @@ describe("concurrent file changes stop stale operations", () => {
     assert.equal(step(after, "Northside invoice Oct 17.pdf").state, "verified");
     const write = after.ops.find((o) => o.kind === "write_index");
     assert.equal(write?.state, "failed");
-    assert.match(write?.error ?? "", /didn't overwrite/);
+    assert.match(write?.error ?? "", /wasn't overwritten/);
     assert.equal(rig.drive.files.get(index)?.content?.toString("utf8"), "Dad's notes,keep these\r\n");
   });
 });

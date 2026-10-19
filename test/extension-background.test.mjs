@@ -78,7 +78,7 @@ test("Chrome: the button opens the side panel, and closes it when it's open", as
   assert.equal(b.calls.some((c) => c[0] === "windows.create"), false, "no extra window");
 });
 
-test("a browser that opens the side panel but never shows it (Arc) gets Kiki in her own window, once", async () => {
+test("a browser that opens the side panel but never shows it (Arc) gets Kiki in a separate window, once", async () => {
   const b = browser({ sidePanel: "never-shows" });
   b.click(1);
   await settle();
