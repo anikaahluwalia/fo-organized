@@ -4,7 +4,7 @@ Use `kiki-approved.png` as the visual source of truth. It is an AI-generated con
 
 ## Identity
 
-Kiki is the face of Paper Chase, a rental-document assistant built with Fo. She is a tiny pink agent: curious, capable, friendly, and careful with private information. Her signature is a real looped paperclip on the upper-right edge of her head.
+Kiki is the face of Fo-rganized, a Google Drive organizing agent built with Fo. She is a tiny pink agent: curious, capable, friendly, and careful with private information. Her signature is a real looped paperclip on the upper-right edge of her head.
 
 Preserve the approved design:
 - A wide, softly rounded pink blob, subtly asymmetric.
@@ -63,6 +63,6 @@ The answer page Fo's texts link to uses the same look, in the phone's own light 
 
 ## Voice and naming
 
-Product: Paper Chase. Character: Kiki. Brand family: Fo-rganized. Optional tagline: Kiki's on the case. Hashtag: #StayFoRganized.
+Product: Kiki, from the Fo-rganized family. Character: Kiki. Optional tagline: Kiki's on the case. Hashtag: #stay fo-organized.
 
 Keep ownership honest: Kiki is the interface, our app manages the workflow, and Fo executes approved communication. Use warm concrete language. Do not say a requester is safe or a scammer based on heuristics. Say which signals need review.

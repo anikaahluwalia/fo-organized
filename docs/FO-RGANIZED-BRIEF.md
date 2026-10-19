@@ -1,6 +1,6 @@
 # Build "Fo-rganized"
 
-An organizing agent named Kiki that keeps a digital workspace organized as real work happens. (Condensed from the product brief the author supplied on 2026-10-17; nothing was dropped on purpose. It supersedes the Paper Chase brief, now in `docs/archive/`.)
+An organizing agent named Kiki that keeps a digital workspace organized as real work happens. (Condensed from the product brief the author supplied on 2026-10-17; nothing was dropped on purpose. It supersedes the earlier rental-documents brief, now in `docs/archive/`.)
 
 ## Product
 

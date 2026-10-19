@@ -97,7 +97,7 @@ export class LiveFoClient implements FoClient {
         new URL(this.serverUrl),
         this.apiKey ? { requestInit: { headers: { Authorization: `Bearer ${this.apiKey}` } } } : { authProvider: this.provider },
       );
-      const client = new Client({ name: "paper-chase", version: "0.1.0" });
+      const client = new Client({ name: "kiki", version: "0.1.0" });
       client.onclose = () => {
         if (this.client === client) this.client = null;
       };

@@ -1,4 +1,4 @@
-# Build Paper Chase with Kiki
+# Build the rental-documents prototype with Kiki
 
 You are helping me implement a solo software-only Wajo AI GSD hackathon project. Read this entire brief, inspect the existing repository and its instructions, then implement Phase 1. Preserve existing work. Make reasonable reversible implementation decisions without repeatedly asking for permission. Do not send real messages or share documents during development without my explicit authorization for the specific recipient and action.
 
@@ -11,7 +11,7 @@ Use both. The approved character is a simple pink face with two dark eyes, a tin
 
 ## Product and real need
 
-Paper Chase helps students assemble rental application documents scattered across their files and messages. A missing item often depends on another person, such as a parent's guarantor letter. The app turns an incoming request into a checklist, finds candidate documents, lets the student approve outreach for missing pieces, and uses Fo to send that outreach. It also surfaces suspicious request signals before sensitive information is shared.
+The prototype helps students assemble rental application documents scattered across their files and messages. A missing item often depends on another person, such as a parent's guarantor letter. The app turns an incoming request into a checklist, finds candidate documents, lets the student approve outreach for missing pieces, and uses Fo to send that outreach. It also surfaces suspicious request signals before sensitive information is shared.
 
 The student receiving the paperwork request is our user. Kiki is the face; our app manages records, decisions and permissions; Fo handles approved real-world communication. The final vision includes chasing missing items, maintaining versions, and controlled sharing. Do not claim the MVP already does those things.
 
