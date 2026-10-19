@@ -2,7 +2,7 @@
   <img src="assets/kiki.svg" alt="Kiki" width="170">&nbsp;&nbsp;&nbsp;<img src="assets/fo.svg" alt="Fo" width="95">
 </p>
 
-# Kiki - your Drive, organized
+# Kiki - your drive, fo-rganized
 
 <p><b>#stay fo-organized</b></p>
 
