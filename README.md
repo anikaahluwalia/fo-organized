@@ -73,10 +73,24 @@ Once Kiki has filed the same kind of file the same way twice with your yes, Kiki
 - **Kiki** is a Node 24 server written in TypeScript (no build step). Everything Kiki keeps lives in SQLite: plans, approvals, a change log and lessons. A durable job queue runs the work, so a restart picks up where Kiki left off.
 - **Google Drive:** Kiki lists new files every 10 seconds and reads them. After you approve, Kiki creates folders, moves and renames files, and reads each change back with `files.get` before counting it.
 - **Claude** (claude-opus-5-5, structured outputs checked with zod) reads each document, turns your corrections into plan changes, writes the texts and learns filing rules. Code checks what the model writes before it's used.
-- **Fo:** Kiki calls Fo's MCP server (`ask_fo`, `get_fo_reply`) with the exact plan and a binding (`planId` + `contentHash`). Fo texts you, and your answer comes back as one `KIKI-DECISION` line with that binding. When you reply by text, Wajo's signed webhook (`POST /hooks/fo`) tells Kiki right away.
+- **Fo:** Kiki calls Fo's MCP server (`ask_fo`, `get_fo_reply`, more [below](#what-kiki-takes-from-fo)) with the exact plan and a binding (`planId` + `contentHash`). Fo texts you, and your answer comes back as one `KIKI-DECISION` line with that binding. When you reply by text, Wajo's signed webhook (`POST /hooks/fo`) tells Kiki right away.
 - **The web app** (React 19 + Vite) and the **Chrome side panel** show the same things: what needs you, what Kiki is doing and what's done.
 
 The diagram's source is [docs/diagrams/architecture.excalidraw](docs/diagrams/architecture.excalidraw).
+
+## What Kiki takes from Fo
+
+Kiki talks to Fo through Wajo's Fo MCP server (`https://mcp.api.wajo.ai/fo`), signed in with your Wajo account (OAuth with PKCE) or a Wajo API key. Kiki never texts or emails anyone directly. Everything that reaches a person goes through Fo. These are the pieces Kiki uses:
+
+| From Fo | What Kiki uses it for |
+|---|---|
+| `ask_fo` | Every request to Fo: text you a plan, a result or an offer, and pass your answer back in the same conversation. Fo ends each reply with a `KIKI-STATUS` or `KIKI-DECISION` line, and Kiki checks it against the plan's id and hash. |
+| `get_fo_reply` | Waiting on Fo while a turn is still working (up to 40 seconds a call). |
+| `get_fo_conversation` | Reading a conversation back: Fo's decision when a reply got cut off, the text you sent, or a contractor's reply Kiki is following. |
+| `list_fo_conversations` | A read-only check that Fo is connected, and finding the conversation your text reply landed in. |
+| Wajo webhooks | A signed `conversation.reply` event (`POST /hooks/fo`) the moment Fo answers a text of yours, so a plain text reply reaches Kiki right away. |
+| Fo's own skills | Texting you, checking your Gmail on a schedule, saving an attachment and sharing it with Kiki, and emailing a contractor once you've approved the exact message. Kiki asks, and Fo does it from your Wajo account. |
+| `start_fo_call` | Tried for approving by voice and dropped. The call link takes no conversation, works once and expires in 10 minutes, so a spoken yes can't be tied to the exact plan Kiki is waiting on. |
 
 ## What I tested
 
