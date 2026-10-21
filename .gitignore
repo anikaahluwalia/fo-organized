@@ -12,3 +12,6 @@ eval-results/
 
 # Third-party skill without a license: installed locally, not redistributed.
 .claude/skills/excalidraw-diagram/
+
+# Local video drafts, never committed.
+demo-video/

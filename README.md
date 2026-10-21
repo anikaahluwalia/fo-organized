@@ -210,8 +210,8 @@ The other evaluation sets are next to it in `scripts/` (`eval-organize`, `eval-a
 | `server/http.ts`, `server/jobs.ts` | The API (with sign-in when online) and the SQLite job queue |
 | `web/` | The web app (React 19 + Vite) |
 | `extension/` | The Chrome side panel |
-| `scripts/` | Evaluation runners, demo files, UI screenshot tools |
-| `docs/` | Design, roadmap, evaluations, the demo script and the architecture diagram |
+| `scripts/` | Evaluation runners and UI screenshot tools |
+| `docs/` | Design, roadmap, evaluations and the architecture diagram |
 
 ## Known limits
 
