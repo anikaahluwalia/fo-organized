@@ -7,11 +7,12 @@ dist/
 .DS_Store
 .data/
 !.env.example
-.claude/worktrees/
 eval-results/
 
-# Third-party skill without a license: installed locally, not redistributed.
-.claude/skills/excalidraw-diagram/
+# Instructions and skills for coding agents: kept locally, not published.
+CLAUDE.md
+AGENTS.md
+.claude/
 
 # Local video drafts, never committed.
 demo-video/
